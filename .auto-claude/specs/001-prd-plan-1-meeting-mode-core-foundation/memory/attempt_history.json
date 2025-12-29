@@ -78,11 +78,47 @@
         }
       ],
       "status": "completed"
+    },
+    "2.2": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2025-12-29T22:02:36.238192",
+          "approach": "Implemented: Configure AudioRecorder to write audio incrementally to {session-id}/audio.wav file. Ensure crash-re",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "2.3": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2025-12-29T22:05:35.935402",
+          "approach": "Implemented: Add stop_recording() method that stops AudioRecorder, finalizes WAV file, calculates duration, updat",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "2.4": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2025-12-29T22:10:45.978826",
+          "approach": "Implemented: Implement state machine guard logic: cannot start new recording while Recording, cannot stop when Id",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-29T21:22:48.927168",
-    "last_updated": "2025-12-29T21:49:54.587487"
+    "last_updated": "2025-12-29T22:10:45.978844"
   }
 }

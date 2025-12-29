@@ -165,7 +165,7 @@
           "id": "2.4",
           "title": "Add state transition validation",
           "description": "Implement state machine guard logic: cannot start new recording while Recording, cannot stop when Idle, track state transitions with proper locking.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/managers/meeting.rs"
@@ -174,7 +174,9 @@
             "src-tauri/src/managers/audio.rs"
           ],
           "verification": "Invalid state transitions return appropriate errors, no race conditions",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Implemented comprehensive state machine guard logic: Added validate_state_transition() helper method with allowed transitions (Idle->Recording, Recording->Processing, Processing->Completed/Failed, Failed->Processing). Enhanced start_recording() with guards preventing start when already Recording or Processing. Enhanced stop_recording() with comprehensive status validation (cannot stop when Idle, Processing, Completed, or Failed). Added get_current_status() helper for atomic status reads. Added 7 new unit tests: test_state_transition_validation, test_cannot_start_recording_while_recording, test_cannot_start_recording_while_processing, test_cannot_stop_when_idle, test_cannot_stop_when_completed, test_cannot_stop_when_failed, test_race_condition_protection_with_locking. All guards use proper Mutex locking for thread-safe access.",
+          "updated_at": "2025-12-29T16:30:00.000000+00:00"
         }
       ]
     },

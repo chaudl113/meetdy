@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use hound::{WavSpec, WavWriter};
+use hound::{WavReader, WavSpec, WavWriter};
 use log::{debug, error, info};
 use rusqlite::{params, Connection, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
@@ -218,6 +218,8 @@ pub struct MeetingSessionManager {
     /// Path to the SQLite database for meeting sessions
     /// e.g., `{app_data}/meetings.db`
     db_path: PathBuf,
+    /// Transcription manager for STT processing
+    transcription_manager: Arc<crate::managers::transcription::TranscriptionManager>,
 }
 
 impl MeetingSessionManager {
@@ -230,6 +232,7 @@ impl MeetingSessionManager {
     ///
     /// # Arguments
     /// * `app_handle` - Reference to the Tauri AppHandle
+    /// * `transcription_manager` - Reference to the TranscriptionManager
     ///
     /// # Returns
     /// * `Ok(Self)` - Successfully initialized manager
@@ -237,9 +240,12 @@ impl MeetingSessionManager {
     ///
     /// # Example
     /// ```ignore
-    /// let manager = MeetingSessionManager::new(&app_handle)?;
+    /// let manager = MeetingSessionManager::new(&app_handle, &transcription_manager)?;
     /// ```
-    pub fn new(app_handle: &AppHandle) -> Result<Self> {
+    pub fn new(
+        app_handle: &AppHandle,
+        transcription_manager: Arc<crate::managers::transcription::TranscriptionManager>,
+    ) -> Result<Self> {
         // Get the app data directory from the Tauri path resolver
         let app_data_dir = app_handle.path().app_data_dir()?;
 
@@ -261,6 +267,7 @@ impl MeetingSessionManager {
             app_handle: app_handle.clone(),
             meetings_dir,
             db_path,
+            transcription_manager,
         };
 
         info!("MeetingSessionManager initialized successfully");
@@ -765,6 +772,79 @@ impl MeetingSessionManager {
         );
 
         Ok(audio_path_opt)
+    }
+
+    /// Processes transcription for a meeting session.
+    ///
+    /// This method:
+    /// 1. Reads the audio file at the given path
+    /// 2. Converts WAV i16 samples to f32 format
+    /// 3. Calls TranscriptionManager to perform STT
+    /// 4. Returns the raw transcription text
+    ///
+    /// # Arguments
+    /// * `audio_path` - Relative path to the audio file (e.g., "{session-id}/audio.wav")
+    ///
+    /// # Returns
+    /// * `Ok(String)` - The transcribed text
+    /// * `Err` - If file not found, reading fails, or transcription fails (including model not loaded)
+    pub fn process_transcription(&self, audio_path: &str) -> Result<String> {
+        debug!("Processing transcription for audio: {}", audio_path);
+
+        // Build full path to audio file
+        let full_audio_path = self.meetings_dir.join(audio_path);
+
+        // Check if audio file exists
+        if !full_audio_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Audio file not found: {:?}",
+                full_audio_path
+            ));
+        }
+
+        // Read WAV file and convert to f32 samples
+        let reader = WavReader::open(&full_audio_path).map_err(|e| {
+            anyhow::anyhow!("Failed to open audio file {:?}: {}", full_audio_path, e)
+        })?;
+
+        // Verify audio format matches expectations (16-bit, 16000 Hz)
+        let spec = reader.spec();
+        if spec.bits_per_sample != 16 || spec.sample_rate != 16000 {
+            return Err(anyhow::anyhow!(
+                "Audio format mismatch: expected 16-bit/16000Hz, got {}/{}Hz",
+                spec.bits_per_sample,
+                spec.sample_rate
+            ));
+        }
+
+        // Read samples and convert from i16 to f32
+        let samples: Vec<f32> = reader
+            .into_samples::<i16>()
+            .filter_map(Result::ok)
+            .map(|sample| sample as f32 / i16::MAX as f32)
+            .collect();
+
+        debug!(
+            "Read {} audio samples from {:?}",
+            samples.len(),
+            full_audio_path
+        );
+
+        if samples.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Audio file contains no samples: {:?}",
+                full_audio_path
+            ));
+        }
+
+        // Call TranscriptionManager to process audio
+        let transcription_text = self.transcription_manager.transcribe(samples).map_err(|e| {
+            anyhow::anyhow!("Transcription failed for {:?}: {}", full_audio_path, e)
+        })?;
+
+        debug!("Transcription completed: {} characters", transcription_text.len());
+
+        Ok(transcription_text)
     }
 }
 
