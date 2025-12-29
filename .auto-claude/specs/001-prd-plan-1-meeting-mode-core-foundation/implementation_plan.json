@@ -194,7 +194,7 @@
           "id": "3.1",
           "title": "Implement transcription trigger",
           "description": "Add process_transcription() method that reads audio file and calls TranscriptionManager. Handle case where STT model is not loaded.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/managers/meeting.rs"
@@ -203,13 +203,15 @@
             "src-tauri/src/managers/transcription.rs"
           ],
           "verification": "Transcription runs on audio file, raw text returned",
-          "estimated_effort": "medium"
+          "estimated_effort": "medium",
+          "notes": "Added process_transcription() method that:\n- Reads WAV file from meetings directory using WavReader from hound crate\n- Converts i16 samples to f32 format (dividing by i16::MAX)\n- Validates audio format matches expectations (16-bit, 16000 Hz)\n- Calls TranscriptionManager.transcribe() for STT processing\n- Returns raw transcription text\n- Handles case where STT model is not loaded (returns error from transcribe())\n- Added TranscriptionManager field to MeetingSessionManager struct\n- Updated constructor to accept TranscriptionManager parameter\n- Added WavReader import",
+          "updated_at": "2025-12-29T15:15:15.752811+00:00"
         },
         {
           "id": "3.2",
           "title": "Implement background processing thread",
-          "description": "Run transcription in background thread to avoid blocking UI. Update session status to Completed on success, Failed on error. Use tokio::spawn for async processing.",
-          "status": "pending",
+          "description": "Run transcription in background thread to avoid blocking UI. Update session status to Completed on success, Failed on error. Use std::thread::spawn for background processing.",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/managers/meeting.rs"
@@ -218,33 +220,39 @@
             "src-tauri/src/managers/transcription.rs"
           ],
           "verification": "Transcription runs in background, UI remains responsive, status updates correctly",
-          "estimated_effort": "medium"
+          "estimated_effort": "medium",
+          "notes": "Added save_transcript_and_update_status() method to save transcript file and update session status to Completed. Modified stop_recording() to spawn background thread using std::thread::spawn (following existing codebase pattern from TranscriptionManager). Background task: calls process_transcription(), on success saves transcript and updates status to Completed, on failure updates status to Failed. Audio file is preserved on error. UI remains responsive during transcription processing.",
+          "updated_at": "2025-12-29T16:45:00.000000+00:00"
         },
         {
           "id": "3.3",
           "title": "Save transcript to file",
           "description": "Write raw transcript text to {session-id}/transcript.txt file. Update session record with transcript_path.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/managers/meeting.rs"
           ],
           "files_to_reference": [],
           "verification": "Transcript file created with correct content",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Already implemented as part of subtask 3.2's save_transcript_and_update_status() method (lines 843-897). The method: 1) Creates transcript file path {session-id}/transcript.txt, 2) Writes transcript text to file using fs::write(), 3) Updates database with transcript_path and Completed status, 4) Updates in-memory state with transcript_path. No additional code changes required.",
+          "updated_at": "2025-12-29T17:00:00.000000+00:00"
         },
         {
           "id": "3.4",
           "title": "Handle transcription failures gracefully",
           "description": "On transcription failure: keep audio file, set status to Failed with error_message, allow retry. Audio must never be deleted on failure.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/managers/meeting.rs"
           ],
           "files_to_reference": [],
           "verification": "Audio preserved on failure, error message stored, retry mechanism works",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Added update_session_status_with_error() method to update both status and error_message field (lines 424-462). Modified background transcription error handling in stop_recording() to: 1) Format error message with context, 2) Call update_session_status_with_error() instead of just update_session_status(), 3) Update in-memory state with both status and error_message. Audio file is never deleted on failure (already preserved by stop_recording logic). Failed -> Processing state transition allows retry.",
+          "updated_at": "2025-12-29T17:15:00.000000+00:00"
         }
       ]
     },
@@ -639,5 +647,5 @@
   "estimated_effort": "medium",
   "risk_level": "medium",
   "planStatus": "review",
-  "last_updated": "2025-12-29T14:46:56.483478+00:00"
+  "last_updated": "2025-12-29T15:15:15.752823+00:00"
 }

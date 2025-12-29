@@ -421,6 +421,46 @@ impl MeetingSessionManager {
         Ok(())
     }
 
+    /// Updates the status of a meeting session with an error message.
+    ///
+    /// This method updates both the status and the error_message field.
+    /// Used primarily when setting status to Failed to record what went wrong.
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session to update
+    /// * `status` - The new status to set
+    /// * `error_message` - The error message to store
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the update succeeded
+    /// * `Err` - If the session doesn't exist or database update fails
+    pub fn update_session_status_with_error(
+        &self,
+        session_id: &str,
+        status: MeetingStatus,
+        error_message: &str,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+        let rows_affected = conn.execute(
+            "UPDATE meeting_sessions SET status = ?1, error_message = ?2 WHERE id = ?3",
+            params![
+                self.status_to_string(&status),
+                error_message,
+                session_id
+            ],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+
+        debug!(
+            "Updated session {} status to {:?} with error: {}",
+            session_id, status, error_message
+        );
+        Ok(())
+    }
+
     /// Lists all meeting sessions, ordered by creation time (newest first).
     ///
     /// # Returns
@@ -797,13 +837,30 @@ impl MeetingSessionManager {
                         &session_id_clone,
                         &transcription_text,
                     ) {
+                        let error_msg = format!("Failed to save transcript: {}", e);
                         error!(
                             "Failed to save transcript for session {}: {}",
-                            session_id_clone, e
+                            session_id_clone, error_msg
                         );
-                        // Update status to Failed on save error
-                        let _ = manager_clone
-                            .update_session_status(&session_id_clone, MeetingStatus::Failed);
+                        // Update status to Failed on save error with error message
+                        if let Err(update_err) = manager_clone
+                            .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg)
+                        {
+                            error!(
+                                "Failed to update session {} status to Failed: {}",
+                                session_id_clone, update_err
+                            );
+                        } else {
+                            // Update in-memory state with error message
+                            let mut state = manager_clone.state.lock().unwrap();
+                            if let Some(mut session) = state.current_session.take() {
+                                if session.id == session_id_clone {
+                                    session.status = MeetingStatus::Failed;
+                                    session.error_message = Some(error_msg.clone());
+                                    state.current_session = Some(session);
+                                }
+                            }
+                        }
                     } else {
                         info!(
                             "Session {} transcription completed successfully",
@@ -812,13 +869,30 @@ impl MeetingSessionManager {
                     }
                 }
                 Err(e) => {
+                    let error_msg = format!("Transcription failed: {}", e);
                     error!(
                         "Background transcription failed for session {}: {}",
-                        session_id_clone, e
+                        session_id_clone, error_msg
                     );
-                    // Update status to Failed on transcription error
-                    let _ = manager_clone
-                        .update_session_status(&session_id_clone, MeetingStatus::Failed);
+                    // Update status to Failed on transcription error with error message
+                    if let Err(update_err) = manager_clone
+                        .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg)
+                    {
+                        error!(
+                            "Failed to update session {} status to Failed: {}",
+                            session_id_clone, update_err
+                        );
+                    } else {
+                        // Update in-memory state with error message
+                        let mut state = manager_clone.state.lock().unwrap();
+                        if let Some(mut session) = state.current_session.take() {
+                            if session.id == session_id_clone {
+                                session.status = MeetingStatus::Failed;
+                                session.error_message = Some(error_msg.clone());
+                                state.current_session = Some(session);
+                            }
+                        }
+                    }
                 }
             }
         });

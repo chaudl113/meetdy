@@ -114,11 +114,35 @@
         }
       ],
       "status": "completed"
+    },
+    "3.1": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2025-12-29T22:15:26.491917",
+          "approach": "Implemented: Add process_transcription() method that reads audio file and calls TranscriptionManager. Handle case",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.2": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2025-12-29T22:21:45.266618",
+          "approach": "Implemented: Run transcription in background thread to avoid blocking UI. Update session status to Completed on s",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-29T21:22:48.927168",
-    "last_updated": "2025-12-29T22:10:45.978844"
+    "last_updated": "2025-12-29T22:21:45.266628"
   }
 }
