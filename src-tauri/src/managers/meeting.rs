@@ -1,6 +1,6 @@
 //! Meeting session management for Meeting Mode.
 //!
-//! This module provides the core data structures for meeting sessions,
+//! This module provides the core data structures and manager for meeting sessions,
 //! which are completely separate from the existing Quick Dictation functionality.
 
 use anyhow::Result;
@@ -9,7 +9,10 @@ use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Manager};
 
 /// Database migrations for meeting sessions.
 /// Each migration is applied in order. The library tracks which migrations
@@ -55,7 +58,10 @@ pub fn init_meeting_database(db_path: &PathBuf) -> Result<()> {
 
     // Get current version before migration
     let version_before: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    debug!("Meeting database version before migration: {}", version_before);
+    debug!(
+        "Meeting database version before migration: {}",
+        version_before
+    );
 
     // Apply any pending migrations
     migrations.to_latest(&mut conn)?;
@@ -69,7 +75,10 @@ pub fn init_meeting_database(db_path: &PathBuf) -> Result<()> {
             version_before, version_after
         );
     } else {
-        debug!("Meeting database already at latest version {}", version_after);
+        debug!(
+            "Meeting database already at latest version {}",
+            version_after
+        );
     }
 
     Ok(())
@@ -153,6 +162,117 @@ impl MeetingSession {
             transcript_path: None,
             error_message: None,
         }
+    }
+}
+
+/// Internal state for the MeetingSessionManager.
+///
+/// This is wrapped in Arc<Mutex<>> for thread-safe access.
+#[derive(Debug)]
+struct MeetingManagerState {
+    /// The currently active meeting session, if any
+    current_session: Option<MeetingSession>,
+}
+
+impl Default for MeetingManagerState {
+    fn default() -> Self {
+        Self {
+            current_session: None,
+        }
+    }
+}
+
+/// Manager for meeting sessions.
+///
+/// Handles the lifecycle of meeting sessions including:
+/// - Session creation and persistence
+/// - Audio recording coordination (future phases)
+/// - Transcription triggering (future phases)
+/// - File storage management
+///
+/// This manager follows the same patterns as `AudioRecordingManager` and `HistoryManager`:
+/// - Uses `Arc<Mutex<>>` for thread-safe state management
+/// - Implements `Clone` for sharing across Tauri state
+/// - Stores `AppHandle` for accessing app resources
+#[derive(Clone)]
+pub struct MeetingSessionManager {
+    /// Thread-safe internal state
+    state: Arc<Mutex<MeetingManagerState>>,
+    /// Tauri app handle for accessing paths and emitting events
+    app_handle: AppHandle,
+    /// Directory for storing meeting session folders
+    /// e.g., `{app_data}/meetings/`
+    meetings_dir: PathBuf,
+    /// Path to the SQLite database for meeting sessions
+    /// e.g., `{app_data}/meetings.db`
+    db_path: PathBuf,
+}
+
+impl MeetingSessionManager {
+    /// Creates a new MeetingSessionManager.
+    ///
+    /// This constructor:
+    /// 1. Resolves the app data directory from the AppHandle
+    /// 2. Creates the meetings directory if it doesn't exist
+    /// 3. Initializes the SQLite database and runs migrations
+    ///
+    /// # Arguments
+    /// * `app_handle` - Reference to the Tauri AppHandle
+    ///
+    /// # Returns
+    /// * `Ok(Self)` - Successfully initialized manager
+    /// * `Err` - Failed to create directories or initialize database
+    ///
+    /// # Example
+    /// ```ignore
+    /// let manager = MeetingSessionManager::new(&app_handle)?;
+    /// ```
+    pub fn new(app_handle: &AppHandle) -> Result<Self> {
+        // Get the app data directory from the Tauri path resolver
+        let app_data_dir = app_handle.path().app_data_dir()?;
+
+        // Set up the meetings directory under app data
+        let meetings_dir = app_data_dir.join("meetings");
+        let db_path = app_data_dir.join("meetings.db");
+
+        // Ensure the meetings directory exists
+        if !meetings_dir.exists() {
+            fs::create_dir_all(&meetings_dir)?;
+            info!("Created meetings directory: {:?}", meetings_dir);
+        }
+
+        // Initialize the database and run migrations
+        init_meeting_database(&db_path)?;
+
+        let manager = Self {
+            state: Arc::new(Mutex::new(MeetingManagerState::default())),
+            app_handle: app_handle.clone(),
+            meetings_dir,
+            db_path,
+        };
+
+        info!("MeetingSessionManager initialized successfully");
+        debug!(
+            "Meetings directory: {:?}, Database: {:?}",
+            manager.meetings_dir, manager.db_path
+        );
+
+        Ok(manager)
+    }
+
+    /// Returns the path to the meetings directory.
+    pub fn get_meetings_dir(&self) -> &PathBuf {
+        &self.meetings_dir
+    }
+
+    /// Returns the path to the database file.
+    pub fn get_db_path(&self) -> &PathBuf {
+        &self.db_path
+    }
+
+    /// Gets a connection to the meetings database.
+    fn get_connection(&self) -> Result<Connection> {
+        Ok(Connection::open(&self.db_path)?)
     }
 }
 
@@ -275,6 +395,9 @@ mod tests {
             )
             .expect("Failed to query for table");
 
-        assert!(table_exists, "meeting_sessions table should exist after multiple inits");
+        assert!(
+            table_exists,
+            "meeting_sessions table should exist after multiple inits"
+        );
     }
 }
