@@ -329,8 +329,8 @@
           "files_to_reference": [],
           "verification": "npm run dev generates bindings, types available in TypeScript",
           "estimated_effort": "small",
-          "notes": "All meeting commands and types are properly configured for specta TypeScript binding generation:\n- MeetingSession and MeetingStatus have #[derive(Type)] for specta\n- All 5 meeting commands have #[specta::specta] attributes\n- Commands are registered in collect_commands![] macro in lib.rs (lines 317-321)\n- specta_builder.export() is configured in lib.rs (lines 326-331) to export bindings in debug builds\n\nTypeScript bindings will be automatically generated to src/bindings.ts when 'npm run dev' triggers Tauri's debug build compilation. The bindings generation code path is correctly set up and will execute on next dev server start.",
-          "updated_at": "2025-12-29T22:55:00.000000+00:00"
+          "notes": "All meeting commands and types are properly configured for specta TypeScript binding generation:\n- MeetingSession and MeetingStatus have #[derive(Type)] for specta\n- All 5 meeting commands have #[specta::specta] attributes  \n- Commands are registered in collect_commands![] macro in lib.rs (lines 317-321)\n- specta_builder.export() is configured in lib.rs (lines 326-331) to export bindings in debug builds\n\nTypeScript bindings will be automatically generated to src/bindings.ts when 'npm run dev' triggers Tauri's debug build compilation. The bindings generation code path is correctly set up and will execute on next dev server start.",
+          "updated_at": "2025-12-29T16:26:27.969199+00:00"
         }
       ]
     },
@@ -348,7 +348,7 @@
           "id": "5.1",
           "title": "Create meetingStore with Zustand",
           "description": "Create src/stores/meetingStore.ts with useMeetingStore. Include state: sessionStatus, currentSession, recordingDuration, isLoading, error.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [
             "src/stores/meetingStore.ts"
           ],
@@ -357,13 +357,15 @@
             "src/stores/settingsStore.ts"
           ],
           "verification": "Store exports correctly, TypeScript compiles",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Created src/stores/meetingStore.ts with useMeetingStore Zustand store. Includes state (sessionStatus, currentSession, recordingDuration, isLoading, error), actions (startMeeting, stopMeeting, refreshStatus, clearError), and internal duration timer. TypeScript compiles successfully. Added meeting commands and types to bindings.ts for TypeScript compilation.",
+          "updated_at": "2025-12-29T16:33:18.773648+00:00"
         },
         {
           "id": "5.2",
           "title": "Implement store actions",
           "description": "Add actions: startMeeting(), stopMeeting(), retryTranscription(), updateTitle(). Each calls corresponding Tauri command and updates local state.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src/stores/meetingStore.ts"
@@ -372,33 +374,39 @@
             "src/stores/settingsStore.ts"
           ],
           "verification": "Actions call backend correctly, state updates on success",
-          "estimated_effort": "medium"
+          "estimated_effort": "medium",
+          "notes": "Added retryTranscription() and updateTitle() actions to meetingStore.ts. Created retry_transcription Tauri command in backend (commands/meeting.rs) that validates session is in Failed status, updates to Processing, and spawns background transcription task with event emission. Updated TypeScript bindings with retryTranscription command. All actions call backend correctly and update local state on success. TypeScript compilation and ESLint pass.",
+          "updated_at": "2025-12-29T16:40:07.994831+00:00"
         },
         {
           "id": "5.3",
           "title": "Subscribe to backend events",
           "description": "Use @tauri-apps/api/event to listen for meeting_* events. Update store state when events received. Handle reconnection on app focus.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src/stores/meetingStore.ts"
           ],
           "files_to_reference": [],
           "verification": "Store updates when backend emits events",
-          "estimated_effort": "medium"
+          "estimated_effort": "medium",
+          "notes": "Implemented event listeners for meeting_* events using @tauri-apps/api/event. Added initializeEventListeners() that listens for meeting_started, meeting_stopped, meeting_processing, meeting_completed, and meeting_failed events. Each event handler updates the store state appropriately. Added cleanupEventListeners() for proper cleanup. Added visibility change handler to refresh status on app focus for reconnection handling.",
+          "updated_at": "2025-12-29T16:43:30.499292+00:00"
         },
         {
           "id": "5.4",
           "title": "Add recording timer logic",
           "description": "Implement recordingDuration with setInterval during recording. Start timer on meeting_started, stop on meeting_stopped. Display formatted time (HH:MM:SS).",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src/stores/meetingStore.ts"
           ],
           "files_to_reference": [],
           "verification": "Timer increments during recording, stops when meeting stops",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Implemented recordingDuration with setInterval timer. Added formatDuration utility function to format seconds as HH:MM:SS. Timer starts on meeting_started event and stops on meeting_stopped/meeting_processing/meeting_completed/meeting_failed events. Commit: e62c46f",
+          "updated_at": "2025-12-29T16:45:34.508144+00:00"
         }
       ]
     },
@@ -416,7 +424,7 @@
           "id": "6.1",
           "title": "Create MeetingMode container component",
           "description": "Create src/components/meeting/MeetingMode.tsx as main container. Import and compose child components. Connect to meetingStore.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [
             "src/components/meeting/MeetingMode.tsx",
             "src/components/meeting/index.ts"
@@ -426,59 +434,69 @@
             "src/components/settings/general/GeneralSettings.tsx"
           ],
           "verification": "Component renders without errors",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Created src/components/meeting/MeetingMode.tsx as main container component that:\\n- Connects to meetingStore for state management (sessionStatus, currentSession, recordingDuration, isLoading, error)\\n- Initializes event listeners on mount and cleans up on unmount\\n- Displays session status with visual indicators (pulsing red dot for recording, spinner for processing, green for completed, red for failed, gray for idle)\\n- Shows recording duration timer formatted as HH:MM:SS when recording\\n- Displays current session title\\n- Shows error messages with dismiss button\\n- Shows loading indicator during async operations\\n- Follows patterns from GeneralSettings.tsx and uses SettingsGroup UI component\\n\\nAlso created src/components/meeting/index.ts barrel export file for meeting components. TypeScript and ESLint checks pass. Commit: 5f5f3da",
+          "updated_at": "2025-12-29T16:49:09.840545+00:00"
         },
         {
           "id": "6.2",
           "title": "Create MeetingControls component",
           "description": "Create src/components/meeting/MeetingControls.tsx with Start/Stop button, recording timer display. Button changes based on session status.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [
             "src/components/meeting/MeetingControls.tsx"
           ],
           "files_to_modify": [],
           "files_to_reference": [],
           "verification": "Buttons render, timer displays during recording",
-          "estimated_effort": "medium"
+          "estimated_effort": "medium",
+          "notes": "Created src/components/meeting/MeetingControls.tsx with:\n- Start/Stop recording button that changes based on session status (idle/recording/processing/completed/failed)\n- Recording timer display with HH:MM:SS format during active recording using formatDuration from meetingStore\n- Retry transcription button for failed sessions\n- New Recording button after failed sessions\n- Processing indicator during transcription\n- Uses lucide-react icons (Play, Square, RotateCcw)\n- Follows Button component patterns from ui/Button.tsx\n- Integrated into MeetingMode.tsx container component\n- Added export to meeting/index.ts barrel file\n- TypeScript and ESLint pass successfully. Committed: 0f618b0",
+          "updated_at": "2025-12-29T16:52:54.162731+00:00"
         },
         {
           "id": "6.3",
           "title": "Create MeetingStatusIndicator component",
           "description": "Create src/components/meeting/MeetingStatusIndicator.tsx showing current state: Recording (red dot + pulse), Processing (spinner), Completed (checkmark), Failed (error icon).",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [
             "src/components/meeting/MeetingStatusIndicator.tsx"
           ],
           "files_to_modify": [],
           "files_to_reference": [],
           "verification": "Correct indicator shown for each status",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Created src/components/meeting/MeetingStatusIndicator.tsx with:\n- Recording: Red pulsing dot (using CSS animation)\n- Processing: Spinning loader (using Loader2 icon from lucide-react)\n- Completed: Green checkmark (using Check icon on green background)\n- Failed: Red error icon (using AlertCircle icon)\n- Idle: Gray dot\n\nComponent features:\n- TypeScript props interface with MeetingStatus type from bindings\n- Size variants (sm, md, lg) for different contexts\n- Optional showLabel prop to display status text\n- Color-coded labels matching indicator colors\n- Internationalization support via react-i18next\n\nUpdated MeetingMode.tsx to use the new component instead of inline indicators.\nUpdated barrel export in meeting/index.ts.\nESLint and TypeScript checks pass. Commit: bedc426",
+          "updated_at": "2025-12-29T16:55:43.172826+00:00"
         },
         {
           "id": "6.4",
           "title": "Create MeetingTitleEditor component",
           "description": "Create inline title editor that shows default title (timestamp format) and allows editing after recording stops. Calls updateTitle() on change.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [
             "src/components/meeting/MeetingTitleEditor.tsx"
           ],
           "files_to_modify": [],
           "files_to_reference": [],
           "verification": "Title editable, persists on blur/enter",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Created MeetingTitleEditor component (src/components/meeting/MeetingTitleEditor.tsx) with:\n- Click-to-edit functionality for meeting titles after recording stops\n- Default title display (timestamp format generated by backend)\n- Save on blur or Enter key press, cancel with Escape key\n- Disabled during recording/processing states\n- Visual feedback with pencil (edit), check (save), and X (cancel) icons from lucide-react\n- Integration into MeetingMode.tsx container component\n- Barrel export added to meeting/index.ts\n- TypeScript and ESLint checks pass\n- Committed: 917a7db",
+          "updated_at": "2025-12-29T16:59:10.181242+00:00"
         },
         {
           "id": "6.5",
           "title": "Add error display component",
           "description": "Add error message display in MeetingMode for: no microphone, model not loaded, transcription failed. Include retry button where applicable.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src/components/meeting/MeetingMode.tsx"
           ],
           "files_to_reference": [],
           "verification": "Error messages display correctly, retry works",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Enhanced error display in MeetingMode component with: (1) Specific error types for microphone, model not loaded, and transcription failures, (2) AlertCircle icon from lucide-react for visual indication, (3) Retry button for transcription errors when session is in failed state, (4) Original error message display for debugging, (5) Dismiss button with X icon. Uses useMemo for efficient error type detection based on error message patterns from backend.",
+          "updated_at": "2025-12-29T17:03:09.404523+00:00"
         }
       ]
     },
@@ -496,7 +514,7 @@
           "id": "7.1",
           "title": "Add Meeting Mode section to Sidebar",
           "description": "Add 'meeting' section to SECTIONS_CONFIG in Sidebar.tsx. Include appropriate icon (lucide-react). Configure navigation.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src/components/Sidebar.tsx"
@@ -505,20 +523,24 @@
             "src/components/Sidebar.tsx"
           ],
           "verification": "Meeting section appears in sidebar, navigable",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Added 'meeting' section to SECTIONS_CONFIG in Sidebar.tsx. Imported Video icon from lucide-react and MeetingMode component. Section is placed after 'general' for visibility, uses labelKey \"sidebar.meeting\" for i18n, and is always enabled. TypeScript compiles without errors.",
+          "updated_at": "2025-12-29T17:05:15.882256+00:00"
         },
         {
           "id": "7.2",
           "title": "Wire up routing in App.tsx",
           "description": "Update renderSettingsContent() to include meeting section. Ensure MeetingMode component renders when selected.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src/App.tsx"
           ],
           "files_to_reference": [],
           "verification": "Clicking Meeting in sidebar shows MeetingMode component",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Verified routing is already correctly wired up in App.tsx. The renderSettingsContent() function uses dynamic component lookup via SECTIONS_CONFIG[section]?.component which automatically renders MeetingMode when 'meeting' is selected. No code changes required - subtask 7.1 properly added the meeting entry to SECTIONS_CONFIG which is all that's needed for the routing to work. TypeScript and ESLint checks pass. Verification: clicking Meeting in sidebar will show MeetingMode component.",
+          "updated_at": "2025-12-29T17:06:53.612943+00:00"
         },
         {
           "id": "7.3",
@@ -655,5 +677,5 @@
   "estimated_effort": "medium",
   "risk_level": "medium",
   "planStatus": "review",
-  "last_updated": "2025-12-29T15:31:46.571843+00:00"
+  "last_updated": "2025-12-29T17:06:53.612968+00:00"
 }
