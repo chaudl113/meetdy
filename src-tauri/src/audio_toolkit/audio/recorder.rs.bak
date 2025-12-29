@@ -84,8 +84,6 @@ impl AudioRecorder {
         let vad = self.vad.clone();
         // Move the optional level callback into the worker thread
         let level_cb = self.level_cb.clone();
-        // Move the optional sample callback into the worker thread
-        let sample_cb = self.sample_cb.clone();
 
         let worker = std::thread::spawn(move || {
             let config = AudioRecorder::get_preferred_config(&thread_device)
@@ -129,7 +127,7 @@ impl AudioRecorder {
             stream.play().expect("failed to start stream");
 
             // keep the stream alive while we process samples
-            run_consumer(sample_rate, vad, sample_rx, cmd_rx, level_cb, sample_cb);
+            run_consumer(sample_rate, vad, sample_rx, cmd_rx, level_cb);
             // stream is dropped here, after run_consumer returns
         });
 
@@ -257,7 +255,6 @@ fn run_consumer(
     sample_rx: mpsc::Receiver<Vec<f32>>,
     cmd_rx: mpsc::Receiver<Cmd>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
-    sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
 ) {
     let mut frame_resampler = FrameResampler::new(
         in_sample_rate as usize,
@@ -284,7 +281,6 @@ fn run_consumer(
         recording: bool,
         vad: &Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
         out_buf: &mut Vec<f32>,
-        sample_cb: &Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     ) {
         if !recording {
             return;
@@ -293,21 +289,11 @@ fn run_consumer(
         if let Some(vad_arc) = vad {
             let mut det = vad_arc.lock().unwrap();
             match det.push_frame(samples).unwrap_or(VadFrame::Speech(samples)) {
-                VadFrame::Speech(buf) => {
-                    out_buf.extend_from_slice(buf);
-                    // Call sample callback for incremental delivery
-                    if let Some(cb) = sample_cb {
-                        cb(buf.to_vec());
-                    }
-                }
+                VadFrame::Speech(buf) => out_buf.extend_from_slice(buf),
                 VadFrame::Noise => {}
             }
         } else {
             out_buf.extend_from_slice(samples);
-            // Call sample callback for incremental delivery
-            if let Some(cb) = sample_cb {
-                cb(samples.to_vec());
-            }
         }
     }
 
@@ -326,7 +312,7 @@ fn run_consumer(
 
         // ---------- existing pipeline ------------------------------------ //
         frame_resampler.push(&raw, &mut |frame: &[f32]| {
-            handle_frame(frame, recording, &vad, &mut processed_samples, &sample_cb)
+            handle_frame(frame, recording, &vad, &mut processed_samples)
         });
 
         // non-blocking check for a command
@@ -345,7 +331,7 @@ fn run_consumer(
 
                     frame_resampler.finish(&mut |frame: &[f32]| {
                         // we still want to process the last few frames
-                        handle_frame(frame, true, &vad, &mut processed_samples, &sample_cb)
+                        handle_frame(frame, true, &vad, &mut processed_samples)
                     });
 
                     let _ = reply_tx.send(std::mem::take(&mut processed_samples));

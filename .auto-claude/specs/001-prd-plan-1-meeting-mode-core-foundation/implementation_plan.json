@@ -113,7 +113,7 @@
           "id": "2.1",
           "title": "Add audio recording state to MeetingSessionManager",
           "description": "Add Arc<Mutex<Option<AudioRecorder>>> field and recording state tracking. Implement start_recording() method that creates session, initializes recorder, and begins audio capture.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/managers/meeting.rs"
@@ -123,7 +123,9 @@
             "src-tauri/src/audio_toolkit/audio/recorder.rs"
           ],
           "verification": "Audio recording starts without errors, audio samples captured",
-          "estimated_effort": "medium"
+          "estimated_effort": "medium",
+          "notes": "Added AudioRecorder field to MeetingManagerState (Option<AudioRecorder>) and implemented start_recording() method. The method includes state machine guard logic (prevents starting if already recording), creates new session with UUID and folder, initializes AudioRecorder, opens with default microphone device, starts audio capture, updates session status to Recording in database, and stores recorder/session in thread-safe state. Follows pattern from AudioRecordingManager.",
+          "updated_at": "2025-12-29T15:30:00.000000+00:00"
         },
         {
           "id": "2.2",

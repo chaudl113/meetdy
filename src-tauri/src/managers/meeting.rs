@@ -5,12 +5,13 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Local};
+use hound::{WavSpec, WavWriter};
 use log::{debug, error, info};
 use rusqlite::{params, Connection, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::fs;
+use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
@@ -179,6 +180,8 @@ struct MeetingManagerState {
     current_session: Option<MeetingSession>,
     /// Audio recorder for capturing meeting audio
     recorder: Option<AudioRecorder>,
+    /// WAV file writer for incremental audio writing
+    wav_writer: Option<WavWriter<File>>,
 }
 
 impl Default for MeetingManagerState {
@@ -186,6 +189,7 @@ impl Default for MeetingManagerState {
         Self {
             current_session: None,
             recorder: None,
+            wav_writer: None,
         }
     }
 }
@@ -465,8 +469,9 @@ impl MeetingSessionManager {
     /// This method:
     /// 1. Creates a new meeting session with UUID and folder
     /// 2. Initializes the AudioRecorder
-    /// 3. Starts audio capture from the microphone
-    /// 4. Updates the session status to Recording
+    /// 3. Creates and opens a WAV file for incremental writing
+    /// 4. Starts audio capture from the microphone
+    /// 5. Updates the session status to Recording
     ///
     /// # Returns
     /// * `Ok(MeetingSession)` - The newly created and active session
@@ -488,9 +493,46 @@ impl MeetingSessionManager {
         // Create a new session
         let session = self.create_session()?;
 
+        // Create audio file path: {session-id}/audio.wav
+        let audio_filename = format!("{}/audio.wav", session.id);
+        let audio_path = self.meetings_dir.join(&audio_filename);
+
+        // Initialize WAV writer for incremental writing
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let audio_file = File::create(&audio_path)
+            .map_err(|e| anyhow::anyhow!("Failed to create audio file: {}", e))?;
+
+        let wav_writer = WavWriter::new(audio_file, spec)
+            .map_err(|e| anyhow::anyhow!("Failed to create WAV writer: {}", e))?;
+
         // Initialize audio recorder
-        let recorder = AudioRecorder::new()
+        let mut recorder = AudioRecorder::new()
             .map_err(|e| anyhow::anyhow!("Failed to create audio recorder: {}", e))?;
+
+        // Add sample callback for incremental WAV writing
+        let wav_writer_clone = wav_writer.clone();
+        let sample_callback = move |samples: Vec<f32>| {
+            let mut writer = wav_writer_clone;
+            // Convert f32 samples to i16 and write incrementally
+            for sample in &samples {
+                let sample_i16 = (sample * i16::MAX as f32) as i16;
+                if let Err(e) = writer.write_sample(sample_i16) {
+                    error!("Failed to write audio sample: {}", e);
+                }
+            }
+            // Flush periodically for crash resilience
+            if let Err(e) = writer.flush() {
+                error!("Failed to flush WAV file: {}", e);
+            }
+        };
+
+        recorder = recorder.with_sample_callback(sample_callback);
 
         // Open recorder with default device
         recorder
@@ -502,10 +544,23 @@ impl MeetingSessionManager {
             .start()
             .map_err(|e| anyhow::anyhow!("Failed to start audio capture: {}", e))?;
 
-        // Update state with recorder and session
+        // Update session with audio path
+        let mut session_with_audio = session.clone();
+        session_with_audio.audio_path = Some(audio_filename.clone());
+
+        // Update database with audio path
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE meeting_sessions SET audio_path = ?1 WHERE id = ?2",
+            params![audio_filename, session.id],
+        )?;
+
+        // Update state with recorder, wav_writer, and session
         {
             let mut state = self.state.lock().unwrap();
             state.recorder = Some(recorder);
+            state.wav_writer = Some(wav_writer);
+            state.current_session = Some(session_with_audio.clone());
         }
 
         // Update session status to Recording in database
@@ -514,17 +569,17 @@ impl MeetingSessionManager {
         // Update current session in state with Recording status
         {
             let mut state = self.state.lock().unwrap();
-            let mut recording_session = session.clone();
+            let mut recording_session = session_with_audio.clone();
             recording_session.status = MeetingStatus::Recording;
             state.current_session = Some(recording_session);
         }
 
         info!(
-            "Started recording for meeting session: {} - {}",
-            session.id, session.title
+            "Started recording for meeting session: {} - {} (audio: {:?})",
+            session.id, session.title, audio_path
         );
 
-        Ok(session)
+        Ok(session_with_audio)
     }
 }
 
