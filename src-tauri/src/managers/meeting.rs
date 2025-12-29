@@ -96,9 +96,11 @@ pub fn init_meeting_database(db_path: &PathBuf) -> Result<()> {
 /// The state machine follows this flow:
 /// - Idle -> Recording (start meeting)
 /// - Recording -> Processing (stop meeting, begin transcription)
+/// - Recording -> Interrupted (app closed during recording)
 /// - Processing -> Completed (transcription success)
 /// - Processing -> Failed (transcription failure)
 /// - Failed -> Processing (retry transcription)
+/// - Interrupted -> Processing (resume transcription on next launch)
 #[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingStatus {
@@ -112,6 +114,8 @@ pub enum MeetingStatus {
     Completed,
     /// Meeting failed (e.g., transcription error), audio preserved
     Failed,
+    /// Meeting was interrupted (app closed during recording), audio preserved
+    Interrupted,
 }
 
 impl Default for MeetingStatus {
@@ -492,6 +496,7 @@ impl MeetingSessionManager {
             MeetingStatus::Processing => "processing".to_string(),
             MeetingStatus::Completed => "completed".to_string(),
             MeetingStatus::Failed => "failed".to_string(),
+            MeetingStatus::Interrupted => "interrupted".to_string(),
         }
     }
 
@@ -503,6 +508,7 @@ impl MeetingSessionManager {
             "processing" => MeetingStatus::Processing,
             "completed" => MeetingStatus::Completed,
             "failed" => MeetingStatus::Failed,
+            "interrupted" => MeetingStatus::Interrupted,
             _ => MeetingStatus::Idle, // Default fallback
         }
     }
@@ -513,9 +519,11 @@ impl MeetingSessionManager {
     /// - Idle -> Recording (start recording)
     /// - Recording -> Processing (stop recording)
     /// - Recording -> Failed (mic disconnect or critical error)
+    /// - Recording -> Interrupted (app closed during recording)
     /// - Processing -> Completed (transcription success)
     /// - Processing -> Failed (transcription failure)
     /// - Failed -> Processing (retry transcription)
+    /// - Interrupted -> Processing (resume transcription on next launch)
     ///
     /// # Arguments
     /// * `from` - The current state
@@ -530,9 +538,11 @@ impl MeetingSessionManager {
             (MeetingStatus::Idle, MeetingStatus::Recording) => Ok(()),
             (MeetingStatus::Recording, MeetingStatus::Processing) => Ok(()),
             (MeetingStatus::Recording, MeetingStatus::Failed) => Ok(()), // Mic disconnect
+            (MeetingStatus::Recording, MeetingStatus::Interrupted) => Ok(()), // App shutdown
             (MeetingStatus::Processing, MeetingStatus::Completed) => Ok(()),
             (MeetingStatus::Processing, MeetingStatus::Failed) => Ok(()),
             (MeetingStatus::Failed, MeetingStatus::Processing) => Ok(()),
+            (MeetingStatus::Interrupted, MeetingStatus::Processing) => Ok(()), // Resume
 
             // Disallowed transitions
             _ => Err(anyhow::anyhow!(
@@ -1328,6 +1338,222 @@ impl MeetingSessionManager {
 
         Ok(transcription_text)
     }
+
+    /// Handles app shutdown cleanup for meeting sessions.
+    ///
+    /// This method is called when the app is about to close. If a recording is
+    /// in progress, it:
+    /// 1. Stops the audio recorder gracefully
+    /// 2. Finalizes the WAV file to preserve any recorded audio
+    /// 3. Updates the session status to Interrupted
+    /// 4. Calculates and saves the partial duration
+    ///
+    /// This ensures that audio is not lost on unexpected termination and the
+    /// session can be recovered on next launch.
+    ///
+    /// # Returns
+    /// * `true` if there was an active recording that was interrupted
+    /// * `false` if no recording was in progress
+    pub fn handle_app_shutdown(&self) -> bool {
+        info!("Handling app shutdown for meeting sessions");
+
+        // Get current session info
+        let session_info = {
+            let state = self.state.lock().unwrap();
+            state.current_session.as_ref().map(|s| (s.id.clone(), s.status.clone()))
+        };
+
+        let (session_id, status) = match session_info {
+            Some((id, status)) => (id, status),
+            None => {
+                debug!("No active session during app shutdown");
+                return false;
+            }
+        };
+
+        // Only handle if we're currently recording
+        if status != MeetingStatus::Recording {
+            debug!(
+                "Session {} is not recording (status: {:?}) - no cleanup needed",
+                session_id, status
+            );
+            return false;
+        }
+
+        info!(
+            "Interrupting active recording session {} due to app shutdown",
+            session_id
+        );
+
+        // Stop the recorder if it exists
+        let recorder_opt = {
+            let mut state = self.state.lock().unwrap();
+            state.recorder.take()
+        };
+
+        if let Some(mut recorder) = recorder_opt {
+            if let Err(e) = recorder.stop() {
+                error!("Failed to stop recorder during app shutdown: {}", e);
+                // Continue anyway - we want to save partial audio
+            } else {
+                info!("Stopped audio recorder for session {}", session_id);
+            }
+        }
+
+        // Finalize the WAV file to ensure partial audio is saved
+        let wav_writer_opt = {
+            let mut state = self.state.lock().unwrap();
+            state.wav_writer.take()
+        };
+
+        if let Some(wav_writer) = wav_writer_opt {
+            match wav_writer.finalize() {
+                Ok(()) => {
+                    info!(
+                        "Successfully finalized partial audio for session {} during shutdown",
+                        session_id
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to finalize WAV file during shutdown for session {}: {}",
+                        session_id, e
+                    );
+                    // Continue anyway - we still want to update status
+                }
+            }
+        }
+
+        // Calculate partial duration
+        let duration = {
+            if let Ok(Some(session)) = self.get_session(&session_id) {
+                let now = chrono::Utc::now().timestamp();
+                let partial_duration = now - session.created_at;
+                if partial_duration > 0 {
+                    Some(partial_duration)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Update database with Interrupted status and partial duration
+        if let Ok(conn) = self.get_connection() {
+            let update_result = if let Some(dur) = duration {
+                conn.execute(
+                    "UPDATE meeting_sessions SET status = ?1, duration = ?2, error_message = ?3 WHERE id = ?4",
+                    params![
+                        self.status_to_string(&MeetingStatus::Interrupted),
+                        dur,
+                        "Session interrupted due to app shutdown",
+                        &session_id
+                    ],
+                )
+            } else {
+                conn.execute(
+                    "UPDATE meeting_sessions SET status = ?1, error_message = ?2 WHERE id = ?3",
+                    params![
+                        self.status_to_string(&MeetingStatus::Interrupted),
+                        "Session interrupted due to app shutdown",
+                        &session_id
+                    ],
+                )
+            };
+
+            if let Err(e) = update_result {
+                error!(
+                    "Failed to update session {} to Interrupted status: {}",
+                    session_id, e
+                );
+            } else {
+                info!(
+                    "Updated session {} to Interrupted status (duration: {:?}s)",
+                    session_id, duration
+                );
+            }
+        }
+
+        // Clear the in-memory state
+        {
+            let mut state = self.state.lock().unwrap();
+            state.current_session = None;
+            state.recorder = None;
+            state.wav_writer = None;
+        }
+
+        true
+    }
+
+    /// Checks for interrupted sessions from previous app runs.
+    ///
+    /// This method queries the database for any sessions in Recording or
+    /// Interrupted status (which indicate the app was closed during an
+    /// active recording) and returns them for potential recovery.
+    ///
+    /// On startup, sessions found in Recording status are transitioned to
+    /// Interrupted status since they were not properly closed.
+    ///
+    /// # Returns
+    /// * `Ok(Vec<MeetingSession>)` - Sessions that were interrupted
+    /// * `Err` - If database query fails
+    pub fn check_interrupted_sessions(&self) -> Result<Vec<MeetingSession>> {
+        info!("Checking for interrupted sessions from previous runs");
+
+        let conn = self.get_connection()?;
+
+        // First, transition any sessions in Recording status to Interrupted
+        // (they were interrupted by an unclean shutdown)
+        let rows_updated = conn.execute(
+            "UPDATE meeting_sessions SET status = ?1, error_message = ?2 WHERE status = ?3",
+            params![
+                self.status_to_string(&MeetingStatus::Interrupted),
+                "Session interrupted due to app shutdown (recovered on next launch)",
+                self.status_to_string(&MeetingStatus::Recording),
+            ],
+        )?;
+
+        if rows_updated > 0 {
+            info!(
+                "Transitioned {} sessions from Recording to Interrupted status",
+                rows_updated
+            );
+        }
+
+        // Query for all interrupted sessions
+        let mut stmt = conn.prepare(
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message
+             FROM meeting_sessions WHERE status = ?1 ORDER BY created_at DESC",
+        )?;
+
+        let rows = stmt.query_map(
+            params![self.status_to_string(&MeetingStatus::Interrupted)],
+            |row| self.row_to_session(row),
+        )?;
+
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+
+        if !sessions.is_empty() {
+            info!(
+                "Found {} interrupted session(s) that may need recovery",
+                sessions.len()
+            );
+            for session in &sessions {
+                debug!(
+                    "Interrupted session: {} - {} (audio: {:?})",
+                    session.id, session.title, session.audio_path
+                );
+            }
+        } else {
+            debug!("No interrupted sessions found");
+        }
+
+        Ok(sessions)
+    }
 }
 
 #[cfg(test)]
@@ -1487,6 +1713,7 @@ mod tests {
                 MeetingStatus::Processing => "processing".to_string(),
                 MeetingStatus::Completed => "completed".to_string(),
                 MeetingStatus::Failed => "failed".to_string(),
+                MeetingStatus::Interrupted => "interrupted".to_string(),
             }
         }
 
@@ -1497,6 +1724,7 @@ mod tests {
                 "processing" => MeetingStatus::Processing,
                 "completed" => MeetingStatus::Completed,
                 "failed" => MeetingStatus::Failed,
+                "interrupted" => MeetingStatus::Interrupted,
                 _ => MeetingStatus::Idle,
             }
         }
@@ -1590,9 +1818,11 @@ mod tests {
                 (MeetingStatus::Idle, MeetingStatus::Recording) => Ok(()),
                 (MeetingStatus::Recording, MeetingStatus::Processing) => Ok(()),
                 (MeetingStatus::Recording, MeetingStatus::Failed) => Ok(()), // Mic disconnect
+                (MeetingStatus::Recording, MeetingStatus::Interrupted) => Ok(()), // App shutdown
                 (MeetingStatus::Processing, MeetingStatus::Completed) => Ok(()),
                 (MeetingStatus::Processing, MeetingStatus::Failed) => Ok(()),
                 (MeetingStatus::Failed, MeetingStatus::Processing) => Ok(()),
+                (MeetingStatus::Interrupted, MeetingStatus::Processing) => Ok(()), // Resume
 
                 // Disallowed transitions
                 _ => Err(anyhow::anyhow!(

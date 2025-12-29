@@ -36,7 +36,7 @@ use tauri::image::Image;
 
 use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy, Target, TargetKind};
 
@@ -138,6 +138,11 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
     app_handle.manage(meeting_manager.clone());
+
+    // Check for interrupted meeting sessions from previous runs
+    if let Err(e) = meeting_manager.check_interrupted_sessions() {
+        log::error!("Failed to check for interrupted meeting sessions: {}", e);
+    }
 
     // Initialize the shortcuts
     shortcut::init_shortcuts(app_handle);
@@ -420,6 +425,18 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(specta_builder.invoke_handler())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let RunEvent::Exit = event {
+                // Handle graceful shutdown for meeting sessions
+                log::info!("Application exit requested, cleaning up meeting sessions");
+                if let Some(meeting_manager) = app_handle.try_state::<Arc<MeetingSessionManager>>() {
+                    let had_active_recording = meeting_manager.handle_app_shutdown();
+                    if had_active_recording {
+                        log::info!("Active recording was interrupted and saved during shutdown");
+                    }
+                }
+            }
+        });
 }
