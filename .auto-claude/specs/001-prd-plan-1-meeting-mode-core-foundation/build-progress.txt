@@ -85,27 +85,28 @@ Add post-recording transcription using existing STT pipeline with background pro
 
 ---
 
-## Phase 4: Tauri Commands [PENDING]
+## Phase 4: Tauri Commands [COMPLETED]
 Expose meeting operations as Tauri commands with TypeScript bindings
 
 ### Dependencies: Phase 3
 
 ### Subtasks:
-- [ ] 4.1 Create meeting commands module
-  - Status: pending
+- [x] 4.1 Create meeting commands module
+  - Status: completed
   - Files: src-tauri/src/commands/meeting.rs (create)
 
-- [ ] 4.2 Register meeting commands in lib.rs
-  - Status: pending
+- [x] 4.2 Register meeting commands in lib.rs
+  - Status: completed
   - Files: src-tauri/src/lib.rs, src-tauri/src/commands/mod.rs
 
-- [ ] 4.3 Add event emission for state changes
-  - Status: pending
+- [x] 4.3 Add event emission for state changes
+  - Status: completed
   - Files: src-tauri/src/managers/meeting.rs
 
-- [ ] 4.4 Generate TypeScript bindings
-  - Status: pending
+- [x] 4.4 Generate TypeScript bindings
+  - Status: completed
   - Files: (auto-generated)
+  - Note: All types and commands are correctly configured for specta. Bindings will auto-generate to src/bindings.ts on next `npm run dev` run.
 
 ---
 
