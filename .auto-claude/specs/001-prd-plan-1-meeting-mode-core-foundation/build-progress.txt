@@ -1,0 +1,231 @@
+# Meeting Mode Core Foundation - Build Progress
+
+## Feature Overview
+Implement Meeting Mode for Meetdy - a session-based meeting recorder that operates
+completely separate from Quick Dictation. Enables recording entire meetings with
+automatic post-recording transcription.
+
+## Status: PENDING
+Started: Not started
+Last Updated: 2025-12-29
+
+---
+
+## Phase 1: Backend Foundation [PENDING]
+Create MeetingSessionManager struct with state machine, database schema, and session folder management
+
+### Subtasks:
+- [ ] 1.1 Create MeetingSession data structures
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs (create)
+
+- [ ] 1.2 Implement SQLite migration for meeting_sessions table
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 1.3 Create MeetingSessionManager struct
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 1.4 Implement session CRUD operations
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 1.5 Export MeetingSessionManager from managers module
+  - Status: pending
+  - Files: src-tauri/src/managers/mod.rs
+
+---
+
+## Phase 2: Recording Pipeline [PENDING]
+Integrate with existing AudioRecorder for continuous meeting recording with incremental file writing
+
+### Dependencies: Phase 1
+
+### Subtasks:
+- [ ] 2.1 Add audio recording state to MeetingSessionManager
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 2.2 Implement incremental WAV file writing
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 2.3 Implement stop_recording() method
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 2.4 Add state transition validation
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+---
+
+## Phase 3: Transcription Integration [PENDING]
+Add post-recording transcription using existing STT pipeline with background processing
+
+### Dependencies: Phase 2
+
+### Subtasks:
+- [ ] 3.1 Implement transcription trigger
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 3.2 Implement background processing thread
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 3.3 Save transcript to file
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 3.4 Handle transcription failures gracefully
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+---
+
+## Phase 4: Tauri Commands [PENDING]
+Expose meeting operations as Tauri commands with TypeScript bindings
+
+### Dependencies: Phase 3
+
+### Subtasks:
+- [ ] 4.1 Create meeting commands module
+  - Status: pending
+  - Files: src-tauri/src/commands/meeting.rs (create)
+
+- [ ] 4.2 Register meeting commands in lib.rs
+  - Status: pending
+  - Files: src-tauri/src/lib.rs, src-tauri/src/commands/mod.rs
+
+- [ ] 4.3 Add event emission for state changes
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 4.4 Generate TypeScript bindings
+  - Status: pending
+  - Files: (auto-generated)
+
+---
+
+## Phase 5: Frontend Store [PENDING]
+Create Zustand store for meeting state management with backend synchronization
+
+### Dependencies: Phase 4
+
+### Subtasks:
+- [ ] 5.1 Create meetingStore with Zustand
+  - Status: pending
+  - Files: src/stores/meetingStore.ts (create)
+
+- [ ] 5.2 Implement store actions
+  - Status: pending
+  - Files: src/stores/meetingStore.ts
+
+- [ ] 5.3 Subscribe to backend events
+  - Status: pending
+  - Files: src/stores/meetingStore.ts
+
+- [ ] 5.4 Add recording timer logic
+  - Status: pending
+  - Files: src/stores/meetingStore.ts
+
+---
+
+## Phase 6: UI Components [PENDING]
+Build React components for Meeting Mode UI with controls and state indicators
+
+### Dependencies: Phase 5
+
+### Subtasks:
+- [ ] 6.1 Create MeetingMode container component
+  - Status: pending
+  - Files: src/components/meeting/MeetingMode.tsx, src/components/meeting/index.ts (create)
+
+- [ ] 6.2 Create MeetingControls component
+  - Status: pending
+  - Files: src/components/meeting/MeetingControls.tsx (create)
+
+- [ ] 6.3 Create MeetingStatusIndicator component
+  - Status: pending
+  - Files: src/components/meeting/MeetingStatusIndicator.tsx (create)
+
+- [ ] 6.4 Create MeetingTitleEditor component
+  - Status: pending
+  - Files: src/components/meeting/MeetingTitleEditor.tsx (create)
+
+- [ ] 6.5 Add error display component
+  - Status: pending
+  - Files: src/components/meeting/MeetingMode.tsx
+
+---
+
+## Phase 7: Integration & Polish [PENDING]
+Wire up mode toggle, routing, and handle edge cases for production readiness
+
+### Dependencies: Phase 6
+
+### Subtasks:
+- [ ] 7.1 Add Meeting Mode section to Sidebar
+  - Status: pending
+  - Files: src/components/Sidebar.tsx
+
+- [ ] 7.2 Wire up routing in App.tsx
+  - Status: pending
+  - Files: src/App.tsx
+
+- [ ] 7.3 Implement mode mutual exclusivity
+  - Status: pending
+  - Files: src/stores/settingsStore.ts, src/App.tsx
+
+- [ ] 7.4 Handle microphone disconnect edge case
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs
+
+- [ ] 7.5 Handle app termination during recording
+  - Status: pending
+  - Files: src-tauri/src/managers/meeting.rs, src-tauri/src/lib.rs
+
+- [ ] 7.6 Verify dictation mode unaffected
+  - Status: pending
+  - Files: (verification only)
+
+---
+
+## QA Acceptance Checklist
+
+- [ ] All unit tests pass
+- [ ] All integration tests pass
+- [ ] All E2E tests pass
+- [ ] Browser verification complete
+- [ ] Database state verified
+- [ ] File storage verified
+- [ ] Mode toggle works correctly
+- [ ] Existing dictation functionality unaffected
+- [ ] No regressions in existing functionality
+- [ ] Code follows established patterns
+- [ ] Error handling covers all edge cases
+- [ ] Performance acceptable (no recording lag)
+
+---
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Total Phases | 7 |
+| Total Subtasks | 26 |
+| Completed | 0 |
+| In Progress | 0 |
+| Pending | 26 |
+| Progress | 0% |
+
+---
+
+## Notes
+
+- This is PLAN 1: Core Foundation only (no AI summary, no search)
+- Meeting Mode must be completely separate from Quick Dictation
+- Audio must be saved incrementally for crash resilience
+- All existing functionality must remain intact

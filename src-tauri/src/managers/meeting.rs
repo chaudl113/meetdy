@@ -4,8 +4,9 @@
 //! which are completely separate from the existing Quick Dictation functionality.
 
 use anyhow::Result;
-use log::{debug, info};
-use rusqlite::Connection;
+use chrono::{DateTime, Local};
+use log::{debug, error, info};
+use rusqlite::{params, Connection, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -13,6 +14,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
+use uuid::Uuid;
+
+// Import AudioRecorder from audio_toolkit for recording functionality
+use crate::audio_toolkit::AudioRecorder;
 
 /// Database migrations for meeting sessions.
 /// Each migration is applied in order. The library tracks which migrations
@@ -172,12 +177,15 @@ impl MeetingSession {
 struct MeetingManagerState {
     /// The currently active meeting session, if any
     current_session: Option<MeetingSession>,
+    /// Audio recorder for capturing meeting audio
+    recorder: Option<AudioRecorder>,
 }
 
 impl Default for MeetingManagerState {
     fn default() -> Self {
         Self {
             current_session: None,
+            recorder: None,
         }
     }
 }
@@ -273,6 +281,250 @@ impl MeetingSessionManager {
     /// Gets a connection to the meetings database.
     fn get_connection(&self) -> Result<Connection> {
         Ok(Connection::open(&self.db_path)?)
+    }
+
+    /// Formats a Unix timestamp into a human-readable meeting title.
+    ///
+    /// # Arguments
+    /// * `timestamp` - Unix timestamp in seconds
+    ///
+    /// # Returns
+    /// A formatted string like "Meeting - January 15, 2025 3:30 PM"
+    fn format_meeting_title(&self, timestamp: i64) -> String {
+        if let Some(utc_datetime) = DateTime::from_timestamp(timestamp, 0) {
+            let local_datetime = utc_datetime.with_timezone(&Local);
+            format!(
+                "Meeting - {}",
+                local_datetime
+                    .format("%B %e, %Y %l:%M %p")
+                    .to_string()
+                    .trim()
+            )
+        } else {
+            format!("Meeting {}", timestamp)
+        }
+    }
+
+    /// Creates a new meeting session with a unique UUID and dedicated folder.
+    ///
+    /// This method:
+    /// 1. Generates a unique UUID for the session
+    /// 2. Creates a dedicated folder under `meetings/{session-id}/`
+    /// 3. Inserts the session into the database
+    /// 4. Returns the created session
+    ///
+    /// # Returns
+    /// * `Ok(MeetingSession)` - The newly created session
+    /// * `Err` - If folder creation or database insertion fails
+    pub fn create_session(&self) -> Result<MeetingSession> {
+        let id = Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().timestamp();
+        let title = self.format_meeting_title(created_at);
+
+        // Create the session folder
+        let session_dir = self.meetings_dir.join(&id);
+        fs::create_dir_all(&session_dir)?;
+        debug!("Created session folder: {:?}", session_dir);
+
+        // Create the session object
+        let session = MeetingSession::new(id.clone(), title.clone(), created_at);
+
+        // Insert into database
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT INTO meeting_sessions (id, title, created_at, status) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                session.id,
+                session.title,
+                session.created_at,
+                self.status_to_string(&session.status)
+            ],
+        )?;
+
+        info!(
+            "Created new meeting session: {} - {}",
+            session.id, session.title
+        );
+
+        Ok(session)
+    }
+
+    /// Retrieves a meeting session by its ID.
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session to retrieve
+    ///
+    /// # Returns
+    /// * `Ok(Some(MeetingSession))` - The session if found
+    /// * `Ok(None)` - If no session with the given ID exists
+    /// * `Err` - If database query fails
+    pub fn get_session(&self, session_id: &str) -> Result<Option<MeetingSession>> {
+        let conn = self.get_connection()?;
+        let session = conn
+            .query_row(
+                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message
+                 FROM meeting_sessions WHERE id = ?1",
+                params![session_id],
+                |row| self.row_to_session(row),
+            )
+            .optional()?;
+
+        Ok(session)
+    }
+
+    /// Updates the status of a meeting session.
+    ///
+    /// This method updates the status and optionally the error message if the
+    /// new status is `Failed`.
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session to update
+    /// * `status` - The new status to set
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the update succeeded
+    /// * `Err` - If the session doesn't exist or database update fails
+    pub fn update_session_status(&self, session_id: &str, status: MeetingStatus) -> Result<()> {
+        let conn = self.get_connection()?;
+        let rows_affected = conn.execute(
+            "UPDATE meeting_sessions SET status = ?1 WHERE id = ?2",
+            params![self.status_to_string(&status), session_id],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+
+        debug!("Updated session {} status to {:?}", session_id, status);
+        Ok(())
+    }
+
+    /// Lists all meeting sessions, ordered by creation time (newest first).
+    ///
+    /// # Returns
+    /// * `Ok(Vec<MeetingSession>)` - All sessions in the database
+    /// * `Err` - If database query fails
+    pub fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message
+             FROM meeting_sessions ORDER BY created_at DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| self.row_to_session(row))?;
+
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+
+        debug!("Listed {} meeting sessions", sessions.len());
+        Ok(sessions)
+    }
+
+    /// Converts a MeetingStatus enum to its string representation for database storage.
+    fn status_to_string(&self, status: &MeetingStatus) -> String {
+        match status {
+            MeetingStatus::Idle => "idle".to_string(),
+            MeetingStatus::Recording => "recording".to_string(),
+            MeetingStatus::Processing => "processing".to_string(),
+            MeetingStatus::Completed => "completed".to_string(),
+            MeetingStatus::Failed => "failed".to_string(),
+        }
+    }
+
+    /// Converts a string from the database to a MeetingStatus enum.
+    fn string_to_status(&self, s: &str) -> MeetingStatus {
+        match s {
+            "idle" => MeetingStatus::Idle,
+            "recording" => MeetingStatus::Recording,
+            "processing" => MeetingStatus::Processing,
+            "completed" => MeetingStatus::Completed,
+            "failed" => MeetingStatus::Failed,
+            _ => MeetingStatus::Idle, // Default fallback
+        }
+    }
+
+    /// Converts a database row to a MeetingSession struct.
+    fn row_to_session(&self, row: &rusqlite::Row) -> rusqlite::Result<MeetingSession> {
+        let status_str: String = row.get("status")?;
+        Ok(MeetingSession {
+            id: row.get("id")?,
+            title: row.get("title")?,
+            created_at: row.get("created_at")?,
+            duration: row.get("duration")?,
+            status: self.string_to_status(&status_str),
+            audio_path: row.get("audio_path")?,
+            transcript_path: row.get("transcript_path")?,
+            error_message: row.get("error_message")?,
+        })
+    }
+
+    /// Starts recording for a new meeting session.
+    ///
+    /// This method:
+    /// 1. Creates a new meeting session with UUID and folder
+    /// 2. Initializes the AudioRecorder
+    /// 3. Starts audio capture from the microphone
+    /// 4. Updates the session status to Recording
+    ///
+    /// # Returns
+    /// * `Ok(MeetingSession)` - The newly created and active session
+    /// * `Err` - If session creation, recorder initialization, or audio capture fails
+    pub fn start_recording(&self) -> Result<MeetingSession> {
+        // Check if already recording
+        {
+            let state = self.state.lock().unwrap();
+            if let Some(session) = &state.current_session {
+                if session.status == MeetingStatus::Recording {
+                    return Err(anyhow::anyhow!(
+                        "Cannot start recording: already recording session {}",
+                        session.id
+                    ));
+                }
+            }
+        }
+
+        // Create a new session
+        let session = self.create_session()?;
+
+        // Initialize audio recorder
+        let recorder = AudioRecorder::new()
+            .map_err(|e| anyhow::anyhow!("Failed to create audio recorder: {}", e))?;
+
+        // Open recorder with default device
+        recorder
+            .open(None)
+            .map_err(|e| anyhow::anyhow!("Failed to open audio recorder: {}", e))?;
+
+        // Start audio capture
+        recorder
+            .start()
+            .map_err(|e| anyhow::anyhow!("Failed to start audio capture: {}", e))?;
+
+        // Update state with recorder and session
+        {
+            let mut state = self.state.lock().unwrap();
+            state.recorder = Some(recorder);
+        }
+
+        // Update session status to Recording in database
+        self.update_session_status(&session.id, MeetingStatus::Recording)?;
+
+        // Update current session in state with Recording status
+        {
+            let mut state = self.state.lock().unwrap();
+            let mut recording_session = session.clone();
+            recording_session.status = MeetingStatus::Recording;
+            state.current_session = Some(recording_session);
+        }
+
+        info!(
+            "Started recording for meeting session: {} - {}",
+            session.id, session.title
+        );
+
+        Ok(session)
     }
 }
 
@@ -399,5 +651,362 @@ mod tests {
             table_exists,
             "meeting_sessions table should exist after multiple inits"
         );
+    }
+
+    /// Helper struct for testing CRUD operations without a full Tauri AppHandle.
+    /// This mimics the relevant parts of MeetingSessionManager for unit testing.
+    struct TestMeetingManager {
+        meetings_dir: PathBuf,
+        db_path: PathBuf,
+        // Note: We don't include recorder in TestMeetingManager as it's for testing
+        // CRUD operations, not audio recording functionality
+    }
+
+    impl TestMeetingManager {
+        fn new(temp_dir: &std::path::Path) -> Self {
+            let meetings_dir = temp_dir.join("meetings");
+            let db_path = temp_dir.join("meetings.db");
+            fs::create_dir_all(&meetings_dir).expect("Failed to create meetings dir");
+            init_meeting_database(&db_path).expect("Failed to init database");
+            Self {
+                meetings_dir,
+                db_path,
+            }
+        }
+
+        fn get_connection(&self) -> Result<Connection> {
+            Ok(Connection::open(&self.db_path)?)
+        }
+
+        fn status_to_string(&self, status: &MeetingStatus) -> String {
+            match status {
+                MeetingStatus::Idle => "idle".to_string(),
+                MeetingStatus::Recording => "recording".to_string(),
+                MeetingStatus::Processing => "processing".to_string(),
+                MeetingStatus::Completed => "completed".to_string(),
+                MeetingStatus::Failed => "failed".to_string(),
+            }
+        }
+
+        fn string_to_status(&self, s: &str) -> MeetingStatus {
+            match s {
+                "idle" => MeetingStatus::Idle,
+                "recording" => MeetingStatus::Recording,
+                "processing" => MeetingStatus::Processing,
+                "completed" => MeetingStatus::Completed,
+                "failed" => MeetingStatus::Failed,
+                _ => MeetingStatus::Idle,
+            }
+        }
+
+        fn row_to_session(&self, row: &rusqlite::Row) -> rusqlite::Result<MeetingSession> {
+            let status_str: String = row.get("status")?;
+            Ok(MeetingSession {
+                id: row.get("id")?,
+                title: row.get("title")?,
+                created_at: row.get("created_at")?,
+                duration: row.get("duration")?,
+                status: self.string_to_status(&status_str),
+                audio_path: row.get("audio_path")?,
+                transcript_path: row.get("transcript_path")?,
+                error_message: row.get("error_message")?,
+            })
+        }
+
+        fn create_session(&self) -> Result<MeetingSession> {
+            let id = Uuid::new_v4().to_string();
+            let created_at = chrono::Utc::now().timestamp();
+            let title = format!("Test Meeting - {}", created_at);
+
+            let session_dir = self.meetings_dir.join(&id);
+            fs::create_dir_all(&session_dir)?;
+
+            let session = MeetingSession::new(id.clone(), title.clone(), created_at);
+
+            let conn = self.get_connection()?;
+            conn.execute(
+                "INSERT INTO meeting_sessions (id, title, created_at, status) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    session.id,
+                    session.title,
+                    session.created_at,
+                    self.status_to_string(&session.status)
+                ],
+            )?;
+
+            Ok(session)
+        }
+
+        fn get_session(&self, session_id: &str) -> Result<Option<MeetingSession>> {
+            let conn = self.get_connection()?;
+            let session = conn
+                .query_row(
+                    "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message
+                     FROM meeting_sessions WHERE id = ?1",
+                    params![session_id],
+                    |row| self.row_to_session(row),
+                )
+                .optional()?;
+
+            Ok(session)
+        }
+
+        fn update_session_status(&self, session_id: &str, status: MeetingStatus) -> Result<()> {
+            let conn = self.get_connection()?;
+            let rows_affected = conn.execute(
+                "UPDATE meeting_sessions SET status = ?1 WHERE id = ?2",
+                params![self.status_to_string(&status), session_id],
+            )?;
+
+            if rows_affected == 0 {
+                return Err(anyhow::anyhow!("Session not found: {}", session_id));
+            }
+
+            Ok(())
+        }
+
+        fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
+            let conn = self.get_connection()?;
+            let mut stmt = conn.prepare(
+                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message
+                 FROM meeting_sessions ORDER BY created_at DESC",
+            )?;
+
+            let rows = stmt.query_map([], |row| self.row_to_session(row))?;
+
+            let mut sessions = Vec::new();
+            for row in rows {
+                sessions.push(row?);
+            }
+
+            Ok(sessions)
+        }
+    }
+
+    #[test]
+    fn test_create_session() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        let session = manager.create_session().expect("Failed to create session");
+
+        // Verify session has valid properties
+        assert!(!session.id.is_empty(), "Session ID should not be empty");
+        assert!(
+            !session.title.is_empty(),
+            "Session title should not be empty"
+        );
+        assert!(session.created_at > 0, "Created at should be positive");
+        assert_eq!(session.status, MeetingStatus::Idle);
+        assert!(session.duration.is_none());
+        assert!(session.audio_path.is_none());
+        assert!(session.transcript_path.is_none());
+
+        // Verify session folder was created
+        let session_dir = manager.meetings_dir.join(&session.id);
+        assert!(session_dir.exists(), "Session folder should exist");
+    }
+
+    #[test]
+    fn test_create_session_unique_ids() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        let session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
+        let session2 = manager
+            .create_session()
+            .expect("Failed to create session 2");
+        let session3 = manager
+            .create_session()
+            .expect("Failed to create session 3");
+
+        // Verify all IDs are unique
+        assert_ne!(session1.id, session2.id, "Session IDs should be unique");
+        assert_ne!(session2.id, session3.id, "Session IDs should be unique");
+        assert_ne!(session1.id, session3.id, "Session IDs should be unique");
+
+        // Verify UUID format (8-4-4-4-12 hex format)
+        let uuid_pattern = regex::Regex::new(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        )
+        .unwrap();
+        assert!(
+            uuid_pattern.is_match(&session1.id),
+            "Session ID should be valid UUID v4"
+        );
+        assert!(
+            uuid_pattern.is_match(&session2.id),
+            "Session ID should be valid UUID v4"
+        );
+    }
+
+    #[test]
+    fn test_get_session() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        // Create a session
+        let created_session = manager.create_session().expect("Failed to create session");
+
+        // Retrieve the session
+        let retrieved = manager
+            .get_session(&created_session.id)
+            .expect("Failed to get session");
+
+        assert!(retrieved.is_some(), "Session should be found");
+        let retrieved = retrieved.unwrap();
+
+        assert_eq!(retrieved.id, created_session.id);
+        assert_eq!(retrieved.title, created_session.title);
+        assert_eq!(retrieved.created_at, created_session.created_at);
+        assert_eq!(retrieved.status, MeetingStatus::Idle);
+    }
+
+    #[test]
+    fn test_get_session_not_found() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        // Try to get a non-existent session
+        let result = manager
+            .get_session("non-existent-id")
+            .expect("Query should succeed");
+
+        assert!(result.is_none(), "Non-existent session should return None");
+    }
+
+    #[test]
+    fn test_update_session_status() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        // Create a session
+        let session = manager.create_session().expect("Failed to create session");
+        assert_eq!(session.status, MeetingStatus::Idle);
+
+        // Update to Recording
+        manager
+            .update_session_status(&session.id, MeetingStatus::Recording)
+            .expect("Failed to update status");
+
+        let updated = manager
+            .get_session(&session.id)
+            .expect("Failed to get session")
+            .expect("Session should exist");
+        assert_eq!(updated.status, MeetingStatus::Recording);
+
+        // Update to Processing
+        manager
+            .update_session_status(&session.id, MeetingStatus::Processing)
+            .expect("Failed to update status");
+
+        let updated = manager
+            .get_session(&session.id)
+            .expect("Failed to get session")
+            .expect("Session should exist");
+        assert_eq!(updated.status, MeetingStatus::Processing);
+
+        // Update to Completed
+        manager
+            .update_session_status(&session.id, MeetingStatus::Completed)
+            .expect("Failed to update status");
+
+        let updated = manager
+            .get_session(&session.id)
+            .expect("Failed to get session")
+            .expect("Session should exist");
+        assert_eq!(updated.status, MeetingStatus::Completed);
+    }
+
+    #[test]
+    fn test_update_session_status_not_found() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        // Try to update a non-existent session
+        let result = manager.update_session_status("non-existent-id", MeetingStatus::Recording);
+
+        assert!(result.is_err(), "Should fail for non-existent session");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Session not found"),
+            "Error should mention session not found"
+        );
+    }
+
+    #[test]
+    fn test_list_sessions() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        // Initially empty
+        let sessions = manager.list_sessions().expect("Failed to list sessions");
+        assert!(sessions.is_empty(), "Initially should have no sessions");
+
+        // Create some sessions
+        let session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
+        std::thread::sleep(std::time::Duration::from_millis(10)); // Ensure different timestamps
+        let session2 = manager
+            .create_session()
+            .expect("Failed to create session 2");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let session3 = manager
+            .create_session()
+            .expect("Failed to create session 3");
+
+        // List sessions
+        let sessions = manager.list_sessions().expect("Failed to list sessions");
+        assert_eq!(sessions.len(), 3, "Should have 3 sessions");
+
+        // Verify order (newest first)
+        assert_eq!(
+            sessions[0].id, session3.id,
+            "Newest session should be first"
+        );
+        assert_eq!(sessions[1].id, session2.id);
+        assert_eq!(sessions[2].id, session1.id, "Oldest session should be last");
+    }
+
+    #[test]
+    fn test_list_sessions_with_different_statuses() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        // Create sessions with different statuses
+        let session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
+        manager
+            .update_session_status(&session1.id, MeetingStatus::Completed)
+            .expect("Failed to update status");
+
+        let session2 = manager
+            .create_session()
+            .expect("Failed to create session 2");
+        manager
+            .update_session_status(&session2.id, MeetingStatus::Failed)
+            .expect("Failed to update status");
+
+        let session3 = manager
+            .create_session()
+            .expect("Failed to create session 3");
+        // session3 stays as Idle
+
+        // List sessions and verify statuses are preserved
+        let sessions = manager.list_sessions().expect("Failed to list sessions");
+        assert_eq!(sessions.len(), 3);
+
+        // Find sessions by ID and check their statuses
+        let s1 = sessions.iter().find(|s| s.id == session1.id).unwrap();
+        let s2 = sessions.iter().find(|s| s.id == session2.id).unwrap();
+        let s3 = sessions.iter().find(|s| s.id == session3.id).unwrap();
+
+        assert_eq!(s1.status, MeetingStatus::Completed);
+        assert_eq!(s2.status, MeetingStatus::Failed);
+        assert_eq!(s3.status, MeetingStatus::Idle);
     }
 }
