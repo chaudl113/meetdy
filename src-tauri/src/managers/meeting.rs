@@ -581,6 +581,107 @@ impl MeetingSessionManager {
 
         Ok(session_with_audio)
     }
+
+    /// Stops recording for the current meeting session.
+    ///
+    /// This method:
+    /// 1. Stops audio capture from the AudioRecorder
+    /// 2. Finalizes the WAV file (flush and close)
+    /// 3. Calculates the recording duration
+    /// 4. Updates the session status to Processing
+    /// 5. Returns the audio file path
+    ///
+    /// # Returns
+    /// * `Ok(String)` - The relative path to the audio file (e.g., "{session-id}/audio.wav")
+    /// * `Err` - If no recording is active or if stopping/finalization fails
+    pub fn stop_recording(&self) -> Result<String> {
+        // Get current session and check if recording
+        let (session_id, audio_path_opt) = {
+            let state = self.state.lock().unwrap();
+            let session = state.current_session.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("Cannot stop recording: no active session")
+            })?;
+
+            if session.status != MeetingStatus::Recording {
+                return Err(anyhow::anyhow!(
+                    "Cannot stop recording: session {} is not recording (current status: {:?})",
+                    session.id,
+                    session.status
+                ));
+            }
+
+            let audio_path = session.audio_path.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("Cannot stop recording: no audio path set for session {}", session.id)
+            })?;
+
+            (session.id.clone(), audio_path.clone())
+        };
+
+        // Stop audio capture
+        let recorder_opt = {
+            let mut state = self.state.lock().unwrap();
+            state.recorder.take()
+        };
+
+        if let Some(mut recorder) = recorder_opt {
+            recorder
+                .stop()
+                .map_err(|e| anyhow::anyhow!("Failed to stop audio recorder: {}", e))?;
+            info!("Stopped audio capture for session {}", session_id);
+        }
+
+        // Finalize WAV file
+        let wav_writer_opt = {
+            let mut state = self.state.lock().unwrap();
+            state.wav_writer.take()
+        };
+
+        if let Some(wav_writer) = wav_writer_opt {
+            wav_writer
+                .finalize()
+                .map_err(|e| anyhow::anyhow!("Failed to finalize WAV file: {}", e))?;
+            info!("Finalized WAV file for session {}", session_id);
+        }
+
+        // Calculate duration
+        let current_session = self.get_session(&session_id)?.ok_or_else(|| {
+            anyhow::anyhow!("Session {} not found after stopping recording", session_id)
+        })?;
+
+        let duration = chrono::Utc::now().timestamp() - current_session.created_at;
+        if duration < 0 {
+            return Err(anyhow::anyhow!(
+                "Invalid duration calculated for session {}: created_at {} > now {}",
+                session_id,
+                current_session.created_at,
+                chrono::Utc::now().timestamp()
+            ));
+        }
+
+        // Update database with duration and status
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE meeting_sessions SET duration = ?1, status = ?2 WHERE id = ?3",
+            params![duration, self.status_to_string(&MeetingStatus::Processing), session_id],
+        )?;
+
+        // Update in-memory state
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(mut session) = state.current_session.take() {
+                session.status = MeetingStatus::Processing;
+                session.duration = Some(duration);
+                state.current_session = Some(session);
+            }
+        }
+
+        info!(
+            "Stopped recording for session {}: duration={}s, status=Processing, audio={}",
+            session_id, duration, audio_path_opt
+        );
+
+        Ok(audio_path_opt)
+    }
 }
 
 #[cfg(test)]
