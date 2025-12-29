@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { SettingsGroup } from "../ui/SettingsGroup";
 import { MeetingControls } from "./MeetingControls";
+import { MeetingStatusIndicator } from "./MeetingStatusIndicator";
 
 /**
  * MeetingMode - Main container component for Meeting Mode functionality.
@@ -10,10 +11,10 @@ import { MeetingControls } from "./MeetingControls";
  * This component serves as the root container for the meeting recording feature,
  * composing child components and connecting to the meetingStore for state management.
  *
- * Child components (to be implemented in subsequent subtasks):
+ * Child components:
  * - MeetingControls: Start/Stop buttons and timer display
  * - MeetingStatusIndicator: Visual state indicator (recording/processing/etc)
- * - MeetingTitleEditor: Editable meeting title field
+ * - MeetingTitleEditor: Editable meeting title field (to be implemented)
  */
 export const MeetingMode: React.FC = () => {
   const { t } = useTranslation();
@@ -48,29 +49,7 @@ export const MeetingMode: React.FC = () => {
         <div className="p-4 space-y-4">
           {/* Session Status Indicator */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              {sessionStatus === "recording" && (
-                <span className="flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-red-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                </span>
-              )}
-              {sessionStatus === "processing" && (
-                <span className="inline-flex h-3 w-3 rounded-full border-2 border-yellow-500 border-t-transparent animate-spin"></span>
-              )}
-              {sessionStatus === "completed" && (
-                <span className="inline-flex h-3 w-3 rounded-full bg-green-500"></span>
-              )}
-              {sessionStatus === "failed" && (
-                <span className="inline-flex h-3 w-3 rounded-full bg-red-500"></span>
-              )}
-              {sessionStatus === "idle" && (
-                <span className="inline-flex h-3 w-3 rounded-full bg-gray-400"></span>
-              )}
-            </div>
-            <span className="text-sm font-medium capitalize">
-              {t(`meeting.status.${sessionStatus}`, sessionStatus)}
-            </span>
+            <MeetingStatusIndicator status={sessionStatus} showLabel size="sm" />
             {sessionStatus === "recording" && (
               <span className="text-sm text-mid-gray font-mono">
                 {formatDuration(recordingDuration)}
