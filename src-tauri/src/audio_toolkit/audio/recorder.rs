@@ -29,6 +29,7 @@ pub struct AudioRecorder {
     vad: Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    error_cb: Option<Arc<dyn Fn(String) + Send + Sync + 'static>>,
 }
 
 impl AudioRecorder {
@@ -40,6 +41,7 @@ impl AudioRecorder {
             vad: None,
             level_cb: None,
             sample_cb: None,
+            error_cb: None,
         })
     }
 
@@ -61,6 +63,17 @@ impl AudioRecorder {
         F: Fn(Vec<f32>) + Send + Sync + 'static,
     {
         self.sample_cb = Some(Arc::new(cb));
+        self
+    }
+
+    /// Sets a callback to be invoked when a stream error occurs (e.g., microphone disconnect).
+    ///
+    /// The callback receives an error message string describing the error.
+    pub fn with_error_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        self.error_cb = Some(Arc::new(cb));
         self
     }
 
@@ -86,6 +99,8 @@ impl AudioRecorder {
         let level_cb = self.level_cb.clone();
         // Move the optional sample callback into the worker thread
         let sample_cb = self.sample_cb.clone();
+        // Move the optional error callback into the worker thread
+        let error_cb = self.error_cb.clone();
 
         let worker = std::thread::spawn(move || {
             let config = AudioRecorder::get_preferred_config(&thread_device)
@@ -104,23 +119,23 @@ impl AudioRecorder {
 
             let stream = match config.sample_format() {
                 cpal::SampleFormat::U8 => {
-                    AudioRecorder::build_stream::<u8>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<u8>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::I8 => {
-                    AudioRecorder::build_stream::<i8>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<i8>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::I16 => {
-                    AudioRecorder::build_stream::<i16>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<i16>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::I32 => {
-                    AudioRecorder::build_stream::<i32>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<i32>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::F32 => {
-                    AudioRecorder::build_stream::<f32>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<f32>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 _ => panic!("unsupported sample format"),
@@ -171,6 +186,7 @@ impl AudioRecorder {
         config: &cpal::SupportedStreamConfig,
         sample_tx: mpsc::Sender<Vec<f32>>,
         channels: usize,
+        error_cb: Option<Arc<dyn Fn(String) + Send + Sync + 'static>>,
     ) -> Result<cpal::Stream, cpal::BuildStreamError>
     where
         T: Sample + SizedSample + Send + 'static,
@@ -204,10 +220,19 @@ impl AudioRecorder {
             }
         };
 
+        // Create error callback that invokes the user-provided callback if available
+        let error_handler = move |err: cpal::StreamError| {
+            let error_msg = format!("Audio stream error: {}", err);
+            log::error!("{}", error_msg);
+            if let Some(ref cb) = error_cb {
+                cb(error_msg);
+            }
+        };
+
         device.build_input_stream(
             &config.clone().into(),
             stream_cb,
-            |err| log::error!("Stream error: {}", err),
+            error_handler,
             None,
         )
     }

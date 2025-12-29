@@ -512,6 +512,7 @@ impl MeetingSessionManager {
     /// Allowed transitions:
     /// - Idle -> Recording (start recording)
     /// - Recording -> Processing (stop recording)
+    /// - Recording -> Failed (mic disconnect or critical error)
     /// - Processing -> Completed (transcription success)
     /// - Processing -> Failed (transcription failure)
     /// - Failed -> Processing (retry transcription)
@@ -528,6 +529,7 @@ impl MeetingSessionManager {
             // Allowed transitions
             (MeetingStatus::Idle, MeetingStatus::Recording) => Ok(()),
             (MeetingStatus::Recording, MeetingStatus::Processing) => Ok(()),
+            (MeetingStatus::Recording, MeetingStatus::Failed) => Ok(()), // Mic disconnect
             (MeetingStatus::Processing, MeetingStatus::Completed) => Ok(()),
             (MeetingStatus::Processing, MeetingStatus::Failed) => Ok(()),
             (MeetingStatus::Failed, MeetingStatus::Processing) => Ok(()),
@@ -638,6 +640,14 @@ impl MeetingSessionManager {
         };
 
         recorder = recorder.with_sample_callback(sample_callback);
+
+        // Add error callback for mic disconnect detection
+        // Clone self for use in the callback (MeetingSessionManager is Clone)
+        let manager_for_error = self.clone();
+        let error_callback = move |error_message: String| {
+            manager_for_error.handle_mic_disconnect(&error_message);
+        };
+        recorder = recorder.with_error_callback(error_callback);
 
         // Open recorder with default device
         recorder
@@ -996,6 +1006,184 @@ impl MeetingSessionManager {
         });
 
         Ok(audio_path_opt)
+    }
+
+    /// Handles microphone disconnect or audio stream error during recording.
+    ///
+    /// This method:
+    /// 1. Logs the error
+    /// 2. Stops any ongoing recording and finalizes the WAV file
+    /// 3. Updates the session status to Failed with an error message
+    /// 4. Emits a meeting_failed event
+    /// 5. Preserves any partial audio that was captured
+    ///
+    /// This method is designed to be called from an error callback in the audio stream.
+    /// It gracefully handles the disconnect while preserving any data that was recorded.
+    ///
+    /// # Arguments
+    /// * `error_message` - Description of the error that occurred
+    pub fn handle_mic_disconnect(&self, error_message: &str) {
+        error!("Microphone disconnect detected: {}", error_message);
+
+        // Get current session info
+        let session_info = {
+            let state = self.state.lock().unwrap();
+            state.current_session.as_ref().map(|s| (s.id.clone(), s.status.clone()))
+        };
+
+        let (session_id, status) = match session_info {
+            Some((id, status)) => (id, status),
+            None => {
+                debug!("No active session during mic disconnect - ignoring");
+                return;
+            }
+        };
+
+        // Only handle if we're currently recording
+        if status != MeetingStatus::Recording {
+            debug!(
+                "Session {} is not recording (status: {:?}) - ignoring mic disconnect",
+                session_id, status
+            );
+            return;
+        }
+
+        info!(
+            "Handling mic disconnect for recording session {}: {}",
+            session_id, error_message
+        );
+
+        // Stop the recorder if it exists (don't fail if stop errors)
+        let recorder_opt = {
+            let mut state = self.state.lock().unwrap();
+            state.recorder.take()
+        };
+
+        if let Some(mut recorder) = recorder_opt {
+            if let Err(e) = recorder.stop() {
+                error!("Failed to stop recorder during mic disconnect: {}", e);
+                // Continue anyway - we want to save partial audio
+            }
+        }
+
+        // Finalize the WAV file to ensure partial audio is saved
+        let wav_writer_opt = {
+            let mut state = self.state.lock().unwrap();
+            state.wav_writer.take()
+        };
+
+        if let Some(wav_writer) = wav_writer_opt {
+            match wav_writer.finalize() {
+                Ok(()) => {
+                    info!(
+                        "Successfully finalized partial audio for session {} after mic disconnect",
+                        session_id
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to finalize WAV file during mic disconnect for session {}: {}",
+                        session_id, e
+                    );
+                    // Continue anyway - we still want to update status
+                }
+            }
+        }
+
+        // Calculate partial duration
+        let duration = {
+            if let Ok(Some(session)) = self.get_session(&session_id) {
+                let now = chrono::Utc::now().timestamp();
+                let partial_duration = now - session.created_at;
+                if partial_duration > 0 {
+                    Some(partial_duration)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Update database with Failed status, error message, and partial duration
+        let error_msg = format!("Microphone disconnected: {}", error_message);
+        if let Ok(conn) = self.get_connection() {
+            let update_result = if let Some(dur) = duration {
+                conn.execute(
+                    "UPDATE meeting_sessions SET status = ?1, error_message = ?2, duration = ?3 WHERE id = ?4",
+                    params![
+                        self.status_to_string(&MeetingStatus::Failed),
+                        &error_msg,
+                        dur,
+                        &session_id
+                    ],
+                )
+            } else {
+                conn.execute(
+                    "UPDATE meeting_sessions SET status = ?1, error_message = ?2 WHERE id = ?3",
+                    params![
+                        self.status_to_string(&MeetingStatus::Failed),
+                        &error_msg,
+                        &session_id
+                    ],
+                )
+            };
+
+            if let Err(e) = update_result {
+                error!(
+                    "Failed to update session {} to Failed status: {}",
+                    session_id, e
+                );
+            }
+        }
+
+        // Update in-memory state
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(mut session) = state.current_session.take() {
+                if session.id == session_id {
+                    session.status = MeetingStatus::Failed;
+                    session.error_message = Some(error_msg.clone());
+                    session.duration = duration;
+                    state.current_session = Some(session);
+                }
+            }
+        }
+
+        // Emit meeting_failed event
+        if let Ok(Some(session_data)) = self.get_session(&session_id) {
+            if let Err(e) = self.app_handle.emit("meeting_failed", session_data.clone()) {
+                error!("Failed to emit meeting_failed event: {}", e);
+            } else {
+                info!(
+                    "Emitted meeting_failed event for session {} after mic disconnect",
+                    session_id
+                );
+            }
+        }
+
+        // Also emit a specific mic_disconnected event for the frontend
+        #[derive(Clone, Serialize)]
+        struct MicDisconnectEvent {
+            session_id: String,
+            error_message: String,
+            partial_audio_saved: bool,
+        }
+
+        let disconnect_event = MicDisconnectEvent {
+            session_id: session_id.clone(),
+            error_message: error_msg,
+            partial_audio_saved: true, // WAV writer should have saved partial data
+        };
+
+        if let Err(e) = self.app_handle.emit("mic_disconnected", disconnect_event) {
+            error!("Failed to emit mic_disconnected event: {}", e);
+        } else {
+            info!(
+                "Emitted mic_disconnected event for session {}",
+                session_id
+            );
+        }
     }
 
     /// Saves the transcript to a file and updates the session status.
@@ -1395,6 +1583,25 @@ mod tests {
 
             Ok(sessions)
         }
+
+        fn validate_state_transition(&self, from: &MeetingStatus, to: &MeetingStatus) -> Result<()> {
+            match (from, to) {
+                // Allowed transitions
+                (MeetingStatus::Idle, MeetingStatus::Recording) => Ok(()),
+                (MeetingStatus::Recording, MeetingStatus::Processing) => Ok(()),
+                (MeetingStatus::Recording, MeetingStatus::Failed) => Ok(()), // Mic disconnect
+                (MeetingStatus::Processing, MeetingStatus::Completed) => Ok(()),
+                (MeetingStatus::Processing, MeetingStatus::Failed) => Ok(()),
+                (MeetingStatus::Failed, MeetingStatus::Processing) => Ok(()),
+
+                // Disallowed transitions
+                _ => Err(anyhow::anyhow!(
+                    "Invalid state transition: {:?} -> {:?}",
+                    from,
+                    to
+                )),
+            }
+        }
     }
 
     #[test]
@@ -1635,6 +1842,9 @@ mod tests {
 
         let result = manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Processing);
         assert!(result.is_ok(), "Recording -> Processing should be valid");
+
+        let result = manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Failed);
+        assert!(result.is_ok(), "Recording -> Failed (mic disconnect) should be valid");
 
         let result = manager.validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Completed);
         assert!(result.is_ok(), "Processing -> Completed should be valid");
