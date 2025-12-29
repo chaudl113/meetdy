@@ -14,6 +14,7 @@ use specta::Type;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -771,7 +772,128 @@ impl MeetingSessionManager {
             session_id, duration, audio_path_opt
         );
 
+        // Spawn background task for transcription to avoid blocking UI
+        let manager_clone = self.clone();
+        let session_id_clone = session_id.clone();
+        let audio_path_clone = audio_path_opt.clone();
+
+        thread::spawn(move || {
+            debug!(
+                "Background transcription task started for session {}",
+                session_id_clone
+            );
+
+            // Process transcription in background
+            match manager_clone.process_transcription(&audio_path_clone) {
+                Ok(transcription_text) => {
+                    debug!(
+                        "Background transcription succeeded for session {}: {} bytes",
+                        session_id_clone,
+                        transcription_text.len()
+                    );
+
+                    // Save transcript and update status to Completed
+                    if let Err(e) = manager_clone.save_transcript_and_update_status(
+                        &session_id_clone,
+                        &transcription_text,
+                    ) {
+                        error!(
+                            "Failed to save transcript for session {}: {}",
+                            session_id_clone, e
+                        );
+                        // Update status to Failed on save error
+                        let _ = manager_clone
+                            .update_session_status(&session_id_clone, MeetingStatus::Failed);
+                    } else {
+                        info!(
+                            "Session {} transcription completed successfully",
+                            session_id_clone
+                        );
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "Background transcription failed for session {}: {}",
+                        session_id_clone, e
+                    );
+                    // Update status to Failed on transcription error
+                    let _ = manager_clone
+                        .update_session_status(&session_id_clone, MeetingStatus::Failed);
+                }
+            }
+        });
+
         Ok(audio_path_opt)
+    }
+
+    /// Saves the transcript to a file and updates the session status.
+    ///
+    /// This method:
+    /// 1. Creates the transcript file in the session's folder
+    /// 2. Updates the session status (Completed on success, Failed on error)
+    /// 3. Stores the transcript path and optional error message
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session
+    /// * `transcript_text` - The transcribed text to save
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the transcript was saved and status updated successfully
+    /// * `Err` - If file writing or database update fails
+    fn save_transcript_and_update_status(
+        &self,
+        session_id: &str,
+        transcript_text: &str,
+    ) -> Result<()> {
+        debug!(
+            "Saving transcript for session {}: {} bytes",
+            session_id,
+            transcript_text.len()
+        );
+
+        // Create transcript file path: {session-id}/transcript.txt
+        let transcript_filename = format!("{}/transcript.txt", session_id);
+        let transcript_path = self.meetings_dir.join(&transcript_filename);
+
+        // Write transcript to file
+        fs::write(&transcript_path, transcript_text).map_err(|e| {
+            anyhow::anyhow!("Failed to write transcript file {:?}: {}", transcript_path, e)
+        })?;
+
+        info!(
+            "Saved transcript to {:?} for session {}",
+            transcript_path, session_id
+        );
+
+        // Update database with transcript path and Completed status
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE meeting_sessions SET transcript_path = ?1, status = ?2 WHERE id = ?3",
+            params![
+                transcript_filename,
+                self.status_to_string(&MeetingStatus::Completed),
+                session_id
+            ],
+        )?;
+
+        // Update in-memory state
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(mut session) = state.current_session.take() {
+                if session.id == session_id {
+                    session.transcript_path = Some(transcript_filename.clone());
+                    session.status = MeetingStatus::Completed;
+                    state.current_session = Some(session);
+                }
+            }
+        }
+
+        info!(
+            "Updated session {} status to Completed, transcript saved",
+            session_id
+        );
+
+        Ok(())
     }
 
     /// Processes transcription for a meeting session.
