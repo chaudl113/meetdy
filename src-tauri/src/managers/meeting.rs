@@ -3,8 +3,77 @@
 //! This module provides the core data structures for meeting sessions,
 //! which are completely separate from the existing Quick Dictation functionality.
 
+use anyhow::Result;
+use log::{debug, info};
+use rusqlite::Connection;
+use rusqlite_migration::{Migrations, M};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::path::PathBuf;
+
+/// Database migrations for meeting sessions.
+/// Each migration is applied in order. The library tracks which migrations
+/// have been applied using SQLite's user_version pragma.
+///
+/// Note: This uses a separate database file from transcription history
+/// to maintain complete separation between Meeting Mode and Quick Dictation.
+static MIGRATIONS: &[M] = &[M::up(
+    "CREATE TABLE IF NOT EXISTS meeting_sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        duration INTEGER,
+        status TEXT NOT NULL DEFAULT 'idle',
+        audio_path TEXT,
+        transcript_path TEXT,
+        error_message TEXT
+    );",
+)];
+
+/// Initialize the meeting sessions database and run any pending migrations.
+///
+/// This function opens (or creates) the database at the specified path and
+/// applies all pending migrations. It follows the same pattern as HistoryManager.
+///
+/// # Arguments
+/// * `db_path` - Path to the SQLite database file
+///
+/// # Returns
+/// * `Ok(())` if the database was initialized successfully
+/// * `Err` if the database could not be opened or migrations failed
+pub fn init_meeting_database(db_path: &PathBuf) -> Result<()> {
+    info!("Initializing meeting database at {:?}", db_path);
+
+    let mut conn = Connection::open(db_path)?;
+
+    // Create migrations object and run to latest version
+    let migrations = Migrations::new(MIGRATIONS.to_vec());
+
+    // Validate migrations in debug builds
+    #[cfg(debug_assertions)]
+    migrations.validate().expect("Invalid migrations");
+
+    // Get current version before migration
+    let version_before: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    debug!("Meeting database version before migration: {}", version_before);
+
+    // Apply any pending migrations
+    migrations.to_latest(&mut conn)?;
+
+    // Get version after migration
+    let version_after: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+
+    if version_after > version_before {
+        info!(
+            "Meeting database migrated from version {} to {}",
+            version_before, version_after
+        );
+    } else {
+        debug!("Meeting database already at latest version {}", version_after);
+    }
+
+    Ok(())
+}
 
 /// Represents the lifecycle status of a meeting session.
 ///
@@ -90,6 +159,7 @@ impl MeetingSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_meeting_status_default() {
@@ -138,5 +208,73 @@ mod tests {
         let json = serde_json::to_string(&session).unwrap();
         assert!(json.contains("\"id\":\"uuid-abc\""));
         assert!(json.contains("\"status\":\"idle\""));
+    }
+
+    #[test]
+    fn test_init_meeting_database_creates_table() {
+        // Create a temporary directory for the test database
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test_meetings.db");
+
+        // Initialize the database
+        init_meeting_database(&db_path).expect("Failed to initialize database");
+
+        // Verify the database file was created
+        assert!(db_path.exists(), "Database file should exist");
+
+        // Open the database and check the table exists
+        let conn = Connection::open(&db_path).expect("Failed to open database");
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='meeting_sessions'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to query for table");
+
+        assert!(table_exists, "meeting_sessions table should exist");
+
+        // Verify the table has the correct columns
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(meeting_sessions)")
+            .expect("Failed to prepare statement");
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .expect("Failed to query columns")
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(columns.contains(&"id".to_string()));
+        assert!(columns.contains(&"title".to_string()));
+        assert!(columns.contains(&"created_at".to_string()));
+        assert!(columns.contains(&"duration".to_string()));
+        assert!(columns.contains(&"status".to_string()));
+        assert!(columns.contains(&"audio_path".to_string()));
+        assert!(columns.contains(&"transcript_path".to_string()));
+        assert!(columns.contains(&"error_message".to_string()));
+    }
+
+    #[test]
+    fn test_init_meeting_database_is_idempotent() {
+        // Create a temporary directory for the test database
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test_meetings_idempotent.db");
+
+        // Initialize the database multiple times - should not fail
+        init_meeting_database(&db_path).expect("First init should succeed");
+        init_meeting_database(&db_path).expect("Second init should succeed");
+        init_meeting_database(&db_path).expect("Third init should succeed");
+
+        // Verify the database is still functional
+        let conn = Connection::open(&db_path).expect("Failed to open database");
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='meeting_sessions'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Failed to query for table");
+
+        assert!(table_exists, "meeting_sessions table should exist after multiple inits");
     }
 }
