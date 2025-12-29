@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { SettingsGroup } from "../ui/SettingsGroup";
+import { MeetingControls } from "./MeetingControls";
 
 /**
  * MeetingMode - Main container component for Meeting Mode functionality.
@@ -107,10 +108,8 @@ export const MeetingMode: React.FC = () => {
             </div>
           )}
 
-          {/* Placeholder for MeetingControls component (subtask 6.2) */}
-          <div className="text-xs text-mid-gray/60 italic">
-            {/* MeetingControls will be added in subtask 6.2 */}
-          </div>
+          {/* Meeting Controls - Start/Stop button and timer */}
+          <MeetingControls />
         </div>
       </SettingsGroup>
     </div>

@@ -5,7 +5,7 @@
  */
 
 export { MeetingMode } from "./MeetingMode";
-// Future exports for subtasks 6.2-6.4:
-// export { MeetingControls } from "./MeetingControls";
+export { MeetingControls } from "./MeetingControls";
+// Future exports for subtasks 6.3-6.4:
 // export { MeetingStatusIndicator } from "./MeetingStatusIndicator";
 // export { MeetingTitleEditor } from "./MeetingTitleEditor";
