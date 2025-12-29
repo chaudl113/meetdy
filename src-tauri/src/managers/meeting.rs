@@ -671,6 +671,17 @@ impl MeetingSessionManager {
         // Update session status to Recording in database
         self.update_session_status(&session.id, MeetingStatus::Recording)?;
 
+        // Emit meeting_started event
+        let session_clone = session_with_audio.clone();
+        if let Err(e) = self
+            .app_handle
+            .emit("meeting_started", session_clone.clone())
+        {
+            error!("Failed to emit meeting_started event: {}", e);
+        } else {
+            info!("Emitted meeting_started event for session {}", session.id);
+        }
+
         // Update current session in state with Recording status
         {
             let mut state = self.state.lock().unwrap();
@@ -790,6 +801,20 @@ impl MeetingSessionManager {
             }
         }
 
+        // Emit meeting_stopped event with session details
+        let session_for_event = self.get_session(&session_id)?.ok_or_else(|| {
+            anyhow::anyhow!("Session {} not found when emitting meeting_stopped", session_id)
+        })?;
+
+        if let Err(e) = self
+            .app_handle
+            .emit("meeting_stopped", session_for_event.clone())
+        {
+            error!("Failed to emit meeting_stopped event: {}", e);
+        } else {
+            info!("Emitted meeting_stopped event for session {}", session_id);
+        }
+
         // Update database with duration and status
         let conn = self.get_connection()?;
         conn.execute(
@@ -798,13 +823,26 @@ impl MeetingSessionManager {
         )?;
 
         // Update in-memory state atomically
-        {
+        let updated_session = {
             let mut state = self.state.lock().unwrap();
             if let Some(mut session) = state.current_session.take() {
                 session.status = MeetingStatus::Processing;
                 session.duration = Some(duration);
-                state.current_session = Some(session);
+                state.current_session = Some(session.clone());
+                session
+            } else {
+                return Err(anyhow::anyhow!("No current session found"));
             }
+        };
+
+        // Emit meeting_processing event after status update
+        if let Err(e) = self
+            .app_handle
+            .emit("meeting_processing", updated_session.clone())
+        {
+            error!("Failed to emit meeting_processing event: {}", e);
+        } else {
+            info!("Emitted meeting_processing event for session {}", session_id);
         }
 
         info!(
@@ -851,6 +889,26 @@ impl MeetingSessionManager {
                                 session_id_clone, update_err
                             );
                         } else {
+                            // Emit meeting_failed event
+                            if let Ok(session) = manager_clone.get_session(&session_id_clone) {
+                                if let Some(session_data) = session {
+                                    if let Err(emit_err) = manager_clone
+                                        .app_handle
+                                        .emit("meeting_failed", session_data.clone())
+                                    {
+                                        error!(
+                                            "Failed to emit meeting_failed event: {}",
+                                            emit_err
+                                        );
+                                    } else {
+                                        info!(
+                                            "Emitted meeting_failed event for session {}",
+                                            session_id_clone
+                                        );
+                                    }
+                                }
+                            }
+
                             // Update in-memory state with error message
                             let mut state = manager_clone.state.lock().unwrap();
                             if let Some(mut session) = state.current_session.take() {
@@ -866,6 +924,26 @@ impl MeetingSessionManager {
                             "Session {} transcription completed successfully",
                             session_id_clone
                         );
+
+                        // Emit meeting_completed event
+                        if let Ok(session) = manager_clone.get_session(&session_id_clone) {
+                            if let Some(session_data) = session {
+                                if let Err(emit_err) = manager_clone
+                                    .app_handle
+                                    .emit("meeting_completed", session_data.clone())
+                                {
+                                    error!(
+                                        "Failed to emit meeting_completed event: {}",
+                                        emit_err
+                                    );
+                                } else {
+                                    info!(
+                                        "Emitted meeting_completed event for session {}",
+                                        session_id_clone
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -883,6 +961,26 @@ impl MeetingSessionManager {
                             session_id_clone, update_err
                         );
                     } else {
+                        // Emit meeting_failed event
+                        if let Ok(session) = manager_clone.get_session(&session_id_clone) {
+                            if let Some(session_data) = session {
+                                if let Err(emit_err) = manager_clone
+                                    .app_handle
+                                    .emit("meeting_failed", session_data.clone())
+                                {
+                                    error!(
+                                        "Failed to emit meeting_failed event: {}",
+                                        emit_err
+                                    );
+                                } else {
+                                    info!(
+                                        "Emitted meeting_failed event for session {}",
+                                        session_id_clone
+                                    );
+                                }
+                            }
+                        }
+
                         // Update in-memory state with error message
                         let mut state = manager_clone.state.lock().unwrap();
                         if let Some(mut session) = state.current_session.take() {

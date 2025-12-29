@@ -288,7 +288,7 @@
           "id": "4.2",
           "title": "Register meeting commands in lib.rs",
           "description": "Add meeting commands to collect_commands![] macro in src-tauri/src/lib.rs. Initialize MeetingSessionManager in AppState.",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/lib.rs",
@@ -298,7 +298,9 @@
             "src-tauri/src/lib.rs"
           ],
           "verification": "Commands registered successfully, available in TypeScript bindings",
-          "estimated_effort": "small"
+          "estimated_effort": "small",
+          "notes": "Added 5 meeting commands to collect_commands![] macro in src-tauri/src/lib.rs:\n- start_meeting_session\n- stop_meeting_session\n- get_meeting_status\n- get_current_meeting\n- update_meeting_title\n\nInitialized MeetingSessionManager in initialize_core_logic() function with MeetingSessionManager::new(app_handle, transcription_manager.clone()). Added import for managers::meeting::MeetingSessionManager. Added manager to app state via app_handle.manage(meeting_manager.clone()). Follows same pattern as other managers (recording_manager, model_manager, transcription_manager, history_manager). Committed successfully with message 'auto-claude: 4.2 - Add meeting commands to collect_commands![] macro'. Commands are now registered and will be available in TypeScript bindings when generated.",
+          "updated_at": "2025-12-29T17:30:00.000000+00:00"
         },
         {
           "id": "4.3",
