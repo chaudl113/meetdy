@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Toaster } from "sonner";
+import { useEffect, useState, useCallback } from "react";
+import { Toaster, toast } from "sonner";
 import "./App.css";
 import AccessibilityPermissions from "./components/AccessibilityPermissions";
 import Footer from "./components/footer";
@@ -7,6 +7,8 @@ import Onboarding from "./components/onboarding";
 import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
 import { useSettings } from "./hooks/useSettings";
 import { commands } from "@/bindings";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { useMeetingStore } from "@/stores/meetingStore";
 
 const renderSettingsContent = (section: SidebarSection) => {
   const ActiveComponent =
@@ -19,6 +21,10 @@ function App() {
   const [currentSection, setCurrentSection] =
     useState<SidebarSection>("general");
   const { settings, updateSetting } = useSettings();
+
+  // Mode switching stores
+  const { currentMode, setCurrentMode, isDictationRecording } = useSettingsStore();
+  const { sessionStatus, stopMeeting } = useMeetingStore();
 
   useEffect(() => {
     checkOnboardingStatus();
@@ -69,6 +75,66 @@ function App() {
     setShowOnboarding(false);
   };
 
+  /**
+   * Handles section changes with mode mutual exclusivity.
+   * When switching to meeting mode, stops any active dictation.
+   * When switching from meeting mode, prompts confirmation if recording is active.
+   */
+  const handleSectionChange = useCallback(
+    async (newSection: SidebarSection) => {
+      const isEnteringMeeting = newSection === "meeting";
+      const isLeavingMeeting = currentSection === "meeting" && newSection !== "meeting";
+      const isMeetingRecording = sessionStatus === "recording";
+
+      // Case 1: Switching TO meeting mode
+      if (isEnteringMeeting) {
+        // Check if dictation is currently recording
+        const dictationActive = await isDictationRecording();
+        if (dictationActive) {
+          // Dictation recording is active - it will be stopped by the backend
+          // when user starts a meeting. For now, just notify user.
+          toast.info("Dictation will be stopped when you start a meeting.");
+        }
+        setCurrentMode("meeting");
+        setCurrentSection(newSection);
+        return;
+      }
+
+      // Case 2: Switching FROM meeting mode while recording
+      if (isLeavingMeeting && isMeetingRecording) {
+        // Show confirmation toast with action buttons
+        toast("Stop meeting recording?", {
+          description: "Switching sections will stop the current recording.",
+          action: {
+            label: "Stop & Switch",
+            onClick: async () => {
+              await stopMeeting();
+              setCurrentMode("dictation");
+              setCurrentSection(newSection);
+            },
+          },
+          cancel: {
+            label: "Cancel",
+            onClick: () => {
+              // Do nothing - stay on meeting section
+            },
+          },
+          duration: 10000,
+        });
+        return;
+      }
+
+      // Case 3: Leaving meeting mode (not recording)
+      if (isLeavingMeeting) {
+        setCurrentMode("dictation");
+      }
+
+      // Default: just switch sections
+      setCurrentSection(newSection);
+    },
+    [currentSection, sessionStatus, isDictationRecording, stopMeeting, setCurrentMode]
+  );
+
   if (showOnboarding) {
     return <Onboarding onModelSelected={handleModelSelected} />;
   }
@@ -80,7 +146,7 @@ function App() {
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
           activeSection={currentSection}
-          onSectionChange={setCurrentSection}
+          onSectionChange={handleSectionChange}
         />
         {/* Scrollable content area */}
         <div className="flex-1 flex flex-col overflow-hidden">

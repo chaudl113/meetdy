@@ -3,6 +3,12 @@ import { subscribeWithSelector } from "zustand/middleware";
 import type { AppSettings as Settings, AudioDevice } from "@/bindings";
 import { commands } from "@/bindings";
 
+/**
+ * Application mode - determines whether the app is in dictation or meeting mode.
+ * Only one mode can be active at a time.
+ */
+export type AppMode = "dictation" | "meeting";
+
 interface SettingsStore {
   settings: Settings | null;
   defaultSettings: Settings | null;
@@ -12,6 +18,7 @@ interface SettingsStore {
   outputDevices: AudioDevice[];
   customSounds: { start: boolean; stop: boolean };
   postProcessModelOptions: Record<string, string[]>;
+  currentMode: AppMode;
 
   // Actions
   initialize: () => Promise<void>;
@@ -47,6 +54,10 @@ interface SettingsStore {
   updatePostProcessModel: (providerId: string, model: string) => Promise<void>;
   fetchPostProcessModels: (providerId: string) => Promise<string[]>;
   setPostProcessModelOptions: (providerId: string, models: string[]) => void;
+
+  // Mode switching
+  setCurrentMode: (mode: AppMode) => void;
+  isDictationRecording: () => Promise<boolean>;
 
   // Internal state setters
   setSettings: (settings: Settings | null) => void;
@@ -137,6 +148,7 @@ export const useSettingsStore = create<SettingsStore>()(
     outputDevices: [],
     customSounds: { start: false, stop: false },
     postProcessModelOptions: {},
+    currentMode: "dictation" as AppMode,
 
     // Internal setters
     setSettings: (settings) => set({ settings }),
@@ -149,6 +161,16 @@ export const useSettingsStore = create<SettingsStore>()(
     setAudioDevices: (audioDevices) => set({ audioDevices }),
     setOutputDevices: (outputDevices) => set({ outputDevices }),
     setCustomSounds: (customSounds) => set({ customSounds }),
+
+    // Mode switching
+    setCurrentMode: (mode) => set({ currentMode: mode }),
+    isDictationRecording: async () => {
+      try {
+        return await commands.isRecording();
+      } catch {
+        return false;
+      }
+    },
 
     // Getters
     getSetting: (key) => get().settings?.[key],
