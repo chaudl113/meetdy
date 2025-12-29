@@ -4,6 +4,7 @@ import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { SettingsGroup } from "../ui/SettingsGroup";
 import { MeetingControls } from "./MeetingControls";
 import { MeetingStatusIndicator } from "./MeetingStatusIndicator";
+import { MeetingTitleEditor } from "./MeetingTitleEditor";
 
 /**
  * MeetingMode - Main container component for Meeting Mode functionality.
@@ -14,7 +15,7 @@ import { MeetingStatusIndicator } from "./MeetingStatusIndicator";
  * Child components:
  * - MeetingControls: Start/Stop buttons and timer display
  * - MeetingStatusIndicator: Visual state indicator (recording/processing/etc)
- * - MeetingTitleEditor: Editable meeting title field (to be implemented)
+ * - MeetingTitleEditor: Editable meeting title field
  */
 export const MeetingMode: React.FC = () => {
   const { t } = useTranslation();
@@ -57,10 +58,10 @@ export const MeetingMode: React.FC = () => {
             )}
           </div>
 
-          {/* Current Session Info */}
+          {/* Current Session Title - Editable */}
           {currentSession && (
-            <div className="text-sm text-mid-gray">
-              <p>{currentSession.title}</p>
+            <div className="py-1">
+              <MeetingTitleEditor />
             </div>
           )}
 
