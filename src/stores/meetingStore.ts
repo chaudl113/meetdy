@@ -14,6 +14,8 @@ interface MeetingStore {
   // Actions
   startMeeting: () => Promise<void>;
   stopMeeting: () => Promise<void>;
+  retryTranscription: () => Promise<void>;
+  updateTitle: (title: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
   clearError: () => void;
 
@@ -154,6 +156,75 @@ export const useMeetingStore = create<MeetingStore>()(
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to refresh meeting status";
+        setError(errorMessage);
+      }
+    },
+
+    // Retry transcription for a failed meeting session
+    retryTranscription: async () => {
+      const { currentSession, setLoading, setError, setSessionStatus } = get();
+
+      // Validate we have a current session
+      if (!currentSession) {
+        setError("No meeting session to retry");
+        return;
+      }
+
+      // Validate session is in Failed status
+      if (currentSession.status !== "failed") {
+        setError("Can only retry transcription for failed sessions");
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const result = await commands.retryTranscription(currentSession.id);
+        if (result.status === "ok") {
+          setSessionStatus("processing");
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to retry transcription";
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    },
+
+    // Update the title of the current meeting session
+    updateTitle: async (title: string) => {
+      const { currentSession, setCurrentSession, setError } = get();
+
+      // Validate we have a current session
+      if (!currentSession) {
+        setError("No meeting session to update");
+        return;
+      }
+
+      // Validate title is not empty
+      if (!title.trim()) {
+        setError("Title cannot be empty");
+        return;
+      }
+
+      try {
+        const result = await commands.updateMeetingTitle(currentSession.id, title);
+        if (result.status === "ok") {
+          // Optimistically update local state
+          setCurrentSession({
+            ...currentSession,
+            title: title,
+          });
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to update title";
         setError(errorMessage);
       }
     },

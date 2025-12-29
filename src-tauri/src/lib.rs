@@ -319,6 +319,7 @@ pub fn run() {
         commands::meeting::get_meeting_status,
         commands::meeting::get_current_meeting,
         commands::meeting::update_meeting_title,
+        commands::meeting::retry_transcription,
         helpers::clamshell::is_laptop,
     ]);
 

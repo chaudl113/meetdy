@@ -166,3 +166,140 @@ pub fn update_meeting_title(
 
     Ok(())
 }
+
+/// Retries transcription for a failed meeting session.
+///
+/// This command:
+/// 1. Validates the session exists and is in Failed status
+/// 2. Updates status to Processing
+/// 3. Spawns background transcription task
+///
+/// # Arguments
+/// * `session_id` - The unique ID of the session to retry
+///
+/// # Returns
+/// * `Ok(())` - If retry was initiated successfully
+/// * `Err(String)` - If session not found, not in Failed status, or retry fails
+#[tauri::command]
+#[specta::specta]
+pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), String> {
+    info!(
+        "retry_transcription command called for session: {}",
+        session_id
+    );
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+
+    // Get session from database
+    let session = manager
+        .get_session(&session_id)
+        .map_err(|e| format!("Failed to get session: {}", e))?
+        .ok_or_else(|| format!("Session not found: {}", session_id))?;
+
+    // Validate session is in Failed status
+    if session.status != MeetingStatus::Failed {
+        return Err(format!(
+            "Cannot retry transcription: session is in {:?} status, expected Failed",
+            session.status
+        ));
+    }
+
+    // Get audio path
+    let audio_path = session
+        .audio_path
+        .ok_or("Session has no audio file to transcribe")?;
+
+    // Update status to Processing
+    manager
+        .update_session_status(&session_id, MeetingStatus::Processing)
+        .map_err(|e| format!("Failed to update session status: {}", e))?;
+
+    // Update in-memory state
+    {
+        let mut state = manager.state.lock().unwrap();
+        if let Some(ref mut current_session) = state.current_session {
+            if current_session.id == session_id {
+                current_session.status = MeetingStatus::Processing;
+                current_session.error_message = None;
+            }
+        } else {
+            // Set this as current session if none active
+            let mut updated_session = session.clone();
+            updated_session.status = MeetingStatus::Processing;
+            updated_session.error_message = None;
+            state.current_session = Some(updated_session);
+        }
+    }
+
+    // Emit processing event
+    let _ = app.emit("meeting_processing", &session);
+
+    // Spawn background transcription task
+    let manager_clone = Arc::clone(&manager);
+    let session_id_clone = session_id.clone();
+    let audio_path_clone = audio_path.clone();
+    let app_clone = app.clone();
+
+    std::thread::spawn(move || {
+        match manager_clone.process_transcription(&audio_path_clone) {
+            Ok(transcript) => {
+                // Save transcript and update status to Completed
+                if let Err(e) =
+                    manager_clone.save_transcript_and_update_status(&session_id_clone, &transcript)
+                {
+                    // Failed to save transcript
+                    let error_msg = format!("Failed to save transcript: {}", e);
+                    let _ = manager_clone
+                        .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg);
+
+                    // Update in-memory state
+                    {
+                        let mut state = manager_clone.state.lock().unwrap();
+                        if let Some(ref mut session) = state.current_session {
+                            if session.id == session_id_clone {
+                                session.status = MeetingStatus::Failed;
+                                session.error_message = Some(error_msg.clone());
+                            }
+                        }
+                    }
+
+                    // Emit failed event
+                    if let Some(updated_session) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                        let _ = app_clone.emit("meeting_failed", &updated_session);
+                    }
+                } else {
+                    // Success - emit completed event
+                    if let Some(updated_session) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                        let _ = app_clone.emit("meeting_completed", &updated_session);
+                    }
+                }
+            }
+            Err(e) => {
+                // Transcription failed
+                let error_msg = format!("Transcription failed: {}", e);
+                let _ = manager_clone
+                    .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg);
+
+                // Update in-memory state
+                {
+                    let mut state = manager_clone.state.lock().unwrap();
+                    if let Some(ref mut session) = state.current_session {
+                        if session.id == session_id_clone {
+                            session.status = MeetingStatus::Failed;
+                            session.error_message = Some(error_msg.clone());
+                        }
+                    }
+                }
+
+                // Emit failed event
+                if let Some(updated_session) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                    let _ = app_clone.emit("meeting_failed", &updated_session);
+                }
+            }
+        }
+    });
+
+    info!("Retry transcription initiated for session: {}", session_id);
+
+    Ok(())
+}
