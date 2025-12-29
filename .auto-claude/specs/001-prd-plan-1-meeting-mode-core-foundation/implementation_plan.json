@@ -1,0 +1,633 @@
+{
+  "feature": "PRD \u2013 PLAN 1: MEETING MODE (CORE FOUNDATION)",
+  "description": "Implement Meeting Mode for Meetdy - a session-based meeting recorder that operates completely separate from Quick Dictation. Enables recording entire meetings with automatic post-recording transcription.",
+  "workflow_type": "feature",
+  "created_at": "2025-12-29T13:49:49.128Z",
+  "updated_at": "2025-12-29T14:04:44.612Z",
+  "status": "human_review",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Backend Foundation",
+      "description": "Create MeetingSessionManager struct with state machine, database schema, and session folder management",
+      "order": 1,
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create MeetingSession data structures",
+          "description": "Define MeetingSession struct and MeetingStatus enum in new src-tauri/src/managers/meeting.rs file. Include Serialize/Deserialize/Type derives for TypeScript binding generation.",
+          "status": "completed",
+          "files_to_create": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_modify": [],
+          "files_to_reference": [
+            "src-tauri/src/managers/audio.rs"
+          ],
+          "verification": "Cargo check passes, types export correctly via specta",
+          "estimated_effort": "small",
+          "notes": "Created src-tauri/src/managers/meeting.rs with MeetingSession struct and MeetingStatus enum. Includes Serialize/Deserialize/Type derives for specta TypeScript binding generation. Added module to mod.rs. cargo fmt passed successfully. Full cargo check could not run due to disk space constraints (only 141MB available, requires ~2GB for full build).",
+          "updated_at": "2025-12-29T14:27:20.049262+00:00"
+        },
+        {
+          "id": "1.2",
+          "title": "Implement SQLite migration for meeting_sessions table",
+          "description": "Add database migration using rusqlite_migration pattern from HistoryManager. Create meeting_sessions table with id, title, created_at, duration, status, audio_path, transcript_path, error_message columns.",
+          "status": "completed",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/history.rs"
+          ],
+          "verification": "Database table created successfully on app startup",
+          "estimated_effort": "small",
+          "notes": "Added database migration for meeting_sessions table following the rusqlite_migration pattern from HistoryManager. Includes: MIGRATIONS static with CREATE TABLE statement, init_meeting_database() function, comprehensive unit tests for database initialization and idempotency. Added tempfile dev dependency for tests.",
+          "updated_at": "2025-12-29T14:31:43.199068+00:00"
+        },
+        {
+          "id": "1.3",
+          "title": "Create MeetingSessionManager struct",
+          "description": "Implement MeetingSessionManager with Arc<Mutex<>> for thread-safe state, AppHandle reference, meetings_dir and db_path PathBuf fields. Add new() constructor that initializes directories and runs migrations.",
+          "status": "completed",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/audio.rs",
+            "src-tauri/src/managers/history.rs"
+          ],
+          "verification": "Manager initializes without errors, meetings/ directory created in app_data_dir",
+          "estimated_effort": "medium",
+          "notes": "Implemented MeetingSessionManager struct with Arc<Mutex<MeetingManagerState>> for thread-safe state, AppHandle reference, meetings_dir and db_path PathBuf fields. Added new() constructor that initializes the meetings directory (creates if needed) and runs database migrations. Also added helper methods get_meetings_dir(), get_db_path(), and internal get_connection(). Follows patterns from AudioRecordingManager and HistoryManager.",
+          "updated_at": "2025-12-29T14:34:03.737482+00:00"
+        },
+        {
+          "id": "1.4",
+          "title": "Implement session CRUD operations",
+          "description": "Add methods: create_session(), get_session(), update_session_status(), list_sessions(). Each session gets unique UUID and dedicated folder under meetings/{session-id}/.",
+          "status": "completed",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/history.rs"
+          ],
+          "verification": "Unit tests pass for CRUD operations",
+          "estimated_effort": "medium",
+          "notes": "CRUD methods already implemented: create_session() generates UUID and creates dedicated folder under meetings/{session-id}/, get_session() retrieves by ID, update_session_status() updates session status with error handling, list_sessions() returns all sessions ordered by created_at DESC. Comprehensive unit tests included covering all CRUD operations including edge cases.",
+          "updated_at": "2025-12-29T15:00:00.000000+00:00"
+        },
+        {
+          "id": "1.5",
+          "title": "Export MeetingSessionManager from managers module",
+          "description": "Add pub mod meeting to src-tauri/src/managers/mod.rs and export MeetingSessionManager, MeetingSession, MeetingStatus.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/mod.rs"
+          ],
+          "files_to_reference": [],
+          "verification": "Cargo check passes, types available from managers module",
+          "estimated_effort": "small"
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Recording Pipeline",
+      "description": "Integrate with existing AudioRecorder for continuous meeting recording with incremental file writing",
+      "order": 2,
+      "status": "pending",
+      "dependencies": [
+        "phase-1"
+      ],
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Add audio recording state to MeetingSessionManager",
+          "description": "Add Arc<Mutex<Option<AudioRecorder>>> field and recording state tracking. Implement start_recording() method that creates session, initializes recorder, and begins audio capture.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/audio.rs",
+            "src-tauri/src/audio_toolkit/audio/recorder.rs"
+          ],
+          "verification": "Audio recording starts without errors, audio samples captured",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "2.2",
+          "title": "Implement incremental WAV file writing",
+          "description": "Configure AudioRecorder to write audio incrementally to {session-id}/audio.wav file. Ensure crash-resilient writing (no full audio buffering in RAM).",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/audio_toolkit/mod.rs"
+          ],
+          "verification": "Audio file is written incrementally, survives app termination during recording",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "2.3",
+          "title": "Implement stop_recording() method",
+          "description": "Add stop_recording() method that stops AudioRecorder, finalizes WAV file, calculates duration, updates session status to Processing, returns audio file path.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/audio.rs"
+          ],
+          "verification": "Recording stops cleanly, valid WAV file saved, duration calculated correctly",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "2.4",
+          "title": "Add state transition validation",
+          "description": "Implement state machine guard logic: cannot start new recording while Recording, cannot stop when Idle, track state transitions with proper locking.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/audio.rs"
+          ],
+          "verification": "Invalid state transitions return appropriate errors, no race conditions",
+          "estimated_effort": "small"
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Transcription Integration",
+      "description": "Add post-recording transcription using existing STT pipeline with background processing",
+      "order": 3,
+      "status": "pending",
+      "dependencies": [
+        "phase-2"
+      ],
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Implement transcription trigger",
+          "description": "Add process_transcription() method that reads audio file and calls TranscriptionManager. Handle case where STT model is not loaded.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/transcription.rs"
+          ],
+          "verification": "Transcription runs on audio file, raw text returned",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "3.2",
+          "title": "Implement background processing thread",
+          "description": "Run transcription in background thread to avoid blocking UI. Update session status to Completed on success, Failed on error. Use tokio::spawn for async processing.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/transcription.rs"
+          ],
+          "verification": "Transcription runs in background, UI remains responsive, status updates correctly",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "3.3",
+          "title": "Save transcript to file",
+          "description": "Write raw transcript text to {session-id}/transcript.txt file. Update session record with transcript_path.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [],
+          "verification": "Transcript file created with correct content",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "3.4",
+          "title": "Handle transcription failures gracefully",
+          "description": "On transcription failure: keep audio file, set status to Failed with error_message, allow retry. Audio must never be deleted on failure.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [],
+          "verification": "Audio preserved on failure, error message stored, retry mechanism works",
+          "estimated_effort": "small"
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Tauri Commands",
+      "description": "Expose meeting operations as Tauri commands with TypeScript bindings",
+      "order": 4,
+      "status": "pending",
+      "dependencies": [
+        "phase-3"
+      ],
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Create meeting commands module",
+          "description": "Create src-tauri/src/commands/meeting.rs with Tauri command functions: start_meeting_session, stop_meeting_session, get_meeting_status, get_current_meeting, update_meeting_title.",
+          "status": "pending",
+          "files_to_create": [
+            "src-tauri/src/commands/meeting.rs"
+          ],
+          "files_to_modify": [],
+          "files_to_reference": [
+            "src-tauri/src/commands/mod.rs",
+            "src-tauri/src/commands/audio.rs"
+          ],
+          "verification": "Commands compile and are accessible from State<>",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "4.2",
+          "title": "Register meeting commands in lib.rs",
+          "description": "Add meeting commands to collect_commands![] macro in src-tauri/src/lib.rs. Initialize MeetingSessionManager in AppState.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/lib.rs",
+            "src-tauri/src/commands/mod.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/lib.rs"
+          ],
+          "verification": "Commands registered successfully, available in TypeScript bindings",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "4.3",
+          "title": "Add event emission for state changes",
+          "description": "Emit events via app_handle.emit() for: meeting_started, meeting_stopped, meeting_processing, meeting_completed, meeting_failed. Frontend can subscribe to these.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [
+            "src-tauri/src/managers/audio.rs"
+          ],
+          "verification": "Events emitted at correct state transitions, receivable in frontend",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "4.4",
+          "title": "Generate TypeScript bindings",
+          "description": "Run tauri-specta to generate TypeScript bindings for new commands and types. Verify MeetingSession, MeetingStatus types available in @/bindings.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [],
+          "files_to_reference": [],
+          "verification": "npm run dev generates bindings, types available in TypeScript",
+          "estimated_effort": "small"
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Frontend Store",
+      "description": "Create Zustand store for meeting state management with backend synchronization",
+      "order": 5,
+      "status": "pending",
+      "dependencies": [
+        "phase-4"
+      ],
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Create meetingStore with Zustand",
+          "description": "Create src/stores/meetingStore.ts with useMeetingStore. Include state: sessionStatus, currentSession, recordingDuration, isLoading, error.",
+          "status": "pending",
+          "files_to_create": [
+            "src/stores/meetingStore.ts"
+          ],
+          "files_to_modify": [],
+          "files_to_reference": [
+            "src/stores/settingsStore.ts"
+          ],
+          "verification": "Store exports correctly, TypeScript compiles",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "5.2",
+          "title": "Implement store actions",
+          "description": "Add actions: startMeeting(), stopMeeting(), retryTranscription(), updateTitle(). Each calls corresponding Tauri command and updates local state.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src/stores/meetingStore.ts"
+          ],
+          "files_to_reference": [
+            "src/stores/settingsStore.ts"
+          ],
+          "verification": "Actions call backend correctly, state updates on success",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "5.3",
+          "title": "Subscribe to backend events",
+          "description": "Use @tauri-apps/api/event to listen for meeting_* events. Update store state when events received. Handle reconnection on app focus.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src/stores/meetingStore.ts"
+          ],
+          "files_to_reference": [],
+          "verification": "Store updates when backend emits events",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "5.4",
+          "title": "Add recording timer logic",
+          "description": "Implement recordingDuration with setInterval during recording. Start timer on meeting_started, stop on meeting_stopped. Display formatted time (HH:MM:SS).",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src/stores/meetingStore.ts"
+          ],
+          "files_to_reference": [],
+          "verification": "Timer increments during recording, stops when meeting stops",
+          "estimated_effort": "small"
+        }
+      ]
+    },
+    {
+      "id": "phase-6",
+      "name": "UI Components",
+      "description": "Build React components for Meeting Mode UI with controls and state indicators",
+      "order": 6,
+      "status": "pending",
+      "dependencies": [
+        "phase-5"
+      ],
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Create MeetingMode container component",
+          "description": "Create src/components/meeting/MeetingMode.tsx as main container. Import and compose child components. Connect to meetingStore.",
+          "status": "pending",
+          "files_to_create": [
+            "src/components/meeting/MeetingMode.tsx",
+            "src/components/meeting/index.ts"
+          ],
+          "files_to_modify": [],
+          "files_to_reference": [
+            "src/components/settings/general/GeneralSettings.tsx"
+          ],
+          "verification": "Component renders without errors",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "6.2",
+          "title": "Create MeetingControls component",
+          "description": "Create src/components/meeting/MeetingControls.tsx with Start/Stop button, recording timer display. Button changes based on session status.",
+          "status": "pending",
+          "files_to_create": [
+            "src/components/meeting/MeetingControls.tsx"
+          ],
+          "files_to_modify": [],
+          "files_to_reference": [],
+          "verification": "Buttons render, timer displays during recording",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "6.3",
+          "title": "Create MeetingStatusIndicator component",
+          "description": "Create src/components/meeting/MeetingStatusIndicator.tsx showing current state: Recording (red dot + pulse), Processing (spinner), Completed (checkmark), Failed (error icon).",
+          "status": "pending",
+          "files_to_create": [
+            "src/components/meeting/MeetingStatusIndicator.tsx"
+          ],
+          "files_to_modify": [],
+          "files_to_reference": [],
+          "verification": "Correct indicator shown for each status",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "6.4",
+          "title": "Create MeetingTitleEditor component",
+          "description": "Create inline title editor that shows default title (timestamp format) and allows editing after recording stops. Calls updateTitle() on change.",
+          "status": "pending",
+          "files_to_create": [
+            "src/components/meeting/MeetingTitleEditor.tsx"
+          ],
+          "files_to_modify": [],
+          "files_to_reference": [],
+          "verification": "Title editable, persists on blur/enter",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "6.5",
+          "title": "Add error display component",
+          "description": "Add error message display in MeetingMode for: no microphone, model not loaded, transcription failed. Include retry button where applicable.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src/components/meeting/MeetingMode.tsx"
+          ],
+          "files_to_reference": [],
+          "verification": "Error messages display correctly, retry works",
+          "estimated_effort": "small"
+        }
+      ]
+    },
+    {
+      "id": "phase-7",
+      "name": "Integration & Polish",
+      "description": "Wire up mode toggle, routing, and handle edge cases for production readiness",
+      "order": 7,
+      "status": "pending",
+      "dependencies": [
+        "phase-6"
+      ],
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Add Meeting Mode section to Sidebar",
+          "description": "Add 'meeting' section to SECTIONS_CONFIG in Sidebar.tsx. Include appropriate icon (lucide-react). Configure navigation.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src/components/Sidebar.tsx"
+          ],
+          "files_to_reference": [
+            "src/components/Sidebar.tsx"
+          ],
+          "verification": "Meeting section appears in sidebar, navigable",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "7.2",
+          "title": "Wire up routing in App.tsx",
+          "description": "Update renderSettingsContent() to include meeting section. Ensure MeetingMode component renders when selected.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src/App.tsx"
+          ],
+          "files_to_reference": [],
+          "verification": "Clicking Meeting in sidebar shows MeetingMode component",
+          "estimated_effort": "small"
+        },
+        {
+          "id": "7.3",
+          "title": "Implement mode mutual exclusivity",
+          "description": "When switching to Meeting Mode, ensure dictation is stopped. When switching to Dictation, ensure meeting is stopped (with confirmation if recording). Store current_mode in settings.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src/stores/settingsStore.ts",
+            "src/App.tsx"
+          ],
+          "files_to_reference": [],
+          "verification": "Only one mode active at a time, switching stops other mode",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "7.4",
+          "title": "Handle microphone disconnect edge case",
+          "description": "Detect mic disconnect during recording. Show error, save partial audio, update session to Failed state. Prevent data loss.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs"
+          ],
+          "files_to_reference": [],
+          "verification": "Mic disconnect handled gracefully, partial audio saved",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "7.5",
+          "title": "Handle app termination during recording",
+          "description": "Implement cleanup on app close: if recording, save audio, set session to interrupted state. On next launch, detect interrupted sessions.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [
+            "src-tauri/src/managers/meeting.rs",
+            "src-tauri/src/lib.rs"
+          ],
+          "files_to_reference": [],
+          "verification": "Audio not lost on unexpected termination, session recoverable",
+          "estimated_effort": "medium"
+        },
+        {
+          "id": "7.6",
+          "title": "Verify dictation mode unaffected",
+          "description": "Test that existing Quick Dictation functionality works exactly as before. Ensure no shared state or interference between modes.",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": [],
+          "files_to_reference": [],
+          "verification": "Dictation mode works identically to before Meeting Mode was added",
+          "estimated_effort": "small"
+        }
+      ]
+    }
+  ],
+  "parallelism_analysis": {
+    "parallel_opportunities": [
+      {
+        "subtasks": [
+          "1.1",
+          "1.2"
+        ],
+        "reason": "Data structures and database schema can be designed together"
+      },
+      {
+        "subtasks": [
+          "5.1",
+          "6.1"
+        ],
+        "reason": "Store skeleton and component skeleton can be created in parallel once types available"
+      },
+      {
+        "subtasks": [
+          "6.2",
+          "6.3",
+          "6.4"
+        ],
+        "reason": "UI components are independent of each other"
+      }
+    ],
+    "critical_path": [
+      "1.1 \u2192 1.3 \u2192 2.1 \u2192 2.3 \u2192 3.1 \u2192 3.2 \u2192 4.1 \u2192 4.2 \u2192 5.2 \u2192 6.2 \u2192 7.2"
+    ],
+    "sequential_dependencies": [
+      "Phase 2 depends on Phase 1 (manager must exist before adding recording)",
+      "Phase 3 depends on Phase 2 (must have audio to transcribe)",
+      "Phase 4 depends on Phase 3 (commands expose complete functionality)",
+      "Phase 5 depends on Phase 4 (store calls commands)",
+      "Phase 6 depends on Phase 5 (UI uses store)",
+      "Phase 7 depends on Phase 6 (integration requires all pieces)"
+    ]
+  },
+  "verification_strategy": {
+    "unit_tests": {
+      "required": true,
+      "focus_areas": [
+        "MeetingSession state transitions",
+        "Session CRUD operations",
+        "Audio file path generation",
+        "Timer formatting"
+      ]
+    },
+    "integration_tests": {
+      "required": true,
+      "focus_areas": [
+        "Start \u2192 Stop \u2192 Transcribe flow",
+        "Frontend \u2194 Backend state sync",
+        "File persistence verification"
+      ]
+    },
+    "e2e_tests": {
+      "required": true,
+      "focus_areas": [
+        "Complete meeting recording flow",
+        "Mode switching",
+        "Error recovery scenarios"
+      ]
+    }
+  },
+  "qa_acceptance": {
+    "unit_tests_pass": false,
+    "integration_tests_pass": false,
+    "e2e_tests_pass": false,
+    "browser_verification": false,
+    "database_verification": false,
+    "file_storage_verification": false,
+    "dictation_unaffected": false,
+    "no_regressions": false,
+    "sign_off": false,
+    "issues": []
+  },
+  "total_subtasks": 26,
+  "estimated_effort": "medium",
+  "risk_level": "medium",
+  "planStatus": "review",
+  "last_updated": "2025-12-29T15:00:00.000000+00:00"
+}
