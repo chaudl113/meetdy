@@ -4,6 +4,21 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { MeetingSession, MeetingStatus } from "@/bindings";
 import { commands } from "@/bindings";
 
+/**
+ * Formats a duration in seconds to HH:MM:SS format
+ * @param seconds - The duration in seconds
+ * @returns Formatted string in HH:MM:SS format
+ */
+export function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  const pad = (n: number) => n.toString().padStart(2, "0");
+
+  return `${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
+}
+
 interface MeetingStore {
   // State
   sessionStatus: MeetingStatus;
@@ -274,6 +289,7 @@ export const useMeetingStore = create<MeetingStore>()(
         (event) => {
           const session = event.payload;
           setCurrentSession(session);
+          _stopDurationTimer();
           // Status will transition to processing next
         }
       );
