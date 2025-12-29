@@ -131,7 +131,7 @@
           "id": "2.2",
           "title": "Implement incremental WAV file writing",
           "description": "Configure AudioRecorder to write audio incrementally to {session-id}/audio.wav file. Ensure crash-resilient writing (no full audio buffering in RAM).",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
           "files_to_modify": [
             "src-tauri/src/managers/meeting.rs"
@@ -140,7 +140,9 @@
             "src-tauri/src/audio_toolkit/mod.rs"
           ],
           "verification": "Audio file is written incrementally, survives app termination during recording",
-          "estimated_effort": "medium"
+          "estimated_effort": "medium",
+          "notes": "Added sample callback mechanism to AudioRecorder for incremental sample delivery. Added WavWriter to MeetingManagerState for crash-resilient audio writing. Modified start_recording() to create WAV file and write samples incrementally. Samples are written to disk as they're captured, not buffered in RAM. WAV file flushed periodically for crash resilience.",
+          "updated_at": "2025-12-29T16:00:00.000000+00:00"
         },
         {
           "id": "2.3",
