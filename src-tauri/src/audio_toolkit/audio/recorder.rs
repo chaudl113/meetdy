@@ -28,6 +28,8 @@ pub struct AudioRecorder {
     worker_handle: Option<std::thread::JoinHandle<()>>,
     vad: Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    error_cb: Option<Arc<dyn Fn(String) + Send + Sync + 'static>>,
 }
 
 impl AudioRecorder {
@@ -38,6 +40,8 @@ impl AudioRecorder {
             worker_handle: None,
             vad: None,
             level_cb: None,
+            sample_cb: None,
+            error_cb: None,
         })
     }
 
@@ -51,6 +55,25 @@ impl AudioRecorder {
         F: Fn(Vec<f32>) + Send + Sync + 'static,
     {
         self.level_cb = Some(Arc::new(cb));
+        self
+    }
+
+    pub fn with_sample_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(Vec<f32>) + Send + Sync + 'static,
+    {
+        self.sample_cb = Some(Arc::new(cb));
+        self
+    }
+
+    /// Sets a callback to be invoked when a stream error occurs (e.g., microphone disconnect).
+    ///
+    /// The callback receives an error message string describing the error.
+    pub fn with_error_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        self.error_cb = Some(Arc::new(cb));
         self
     }
 
@@ -74,6 +97,10 @@ impl AudioRecorder {
         let vad = self.vad.clone();
         // Move the optional level callback into the worker thread
         let level_cb = self.level_cb.clone();
+        // Move the optional sample callback into the worker thread
+        let sample_cb = self.sample_cb.clone();
+        // Move the optional error callback into the worker thread
+        let error_cb = self.error_cb.clone();
 
         let worker = std::thread::spawn(move || {
             let config = AudioRecorder::get_preferred_config(&thread_device)
@@ -92,23 +119,23 @@ impl AudioRecorder {
 
             let stream = match config.sample_format() {
                 cpal::SampleFormat::U8 => {
-                    AudioRecorder::build_stream::<u8>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<u8>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::I8 => {
-                    AudioRecorder::build_stream::<i8>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<i8>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::I16 => {
-                    AudioRecorder::build_stream::<i16>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<i16>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::I32 => {
-                    AudioRecorder::build_stream::<i32>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<i32>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 cpal::SampleFormat::F32 => {
-                    AudioRecorder::build_stream::<f32>(&thread_device, &config, sample_tx, channels)
+                    AudioRecorder::build_stream::<f32>(&thread_device, &config, sample_tx, channels, error_cb.clone())
                         .unwrap()
                 }
                 _ => panic!("unsupported sample format"),
@@ -117,7 +144,7 @@ impl AudioRecorder {
             stream.play().expect("failed to start stream");
 
             // keep the stream alive while we process samples
-            run_consumer(sample_rate, vad, sample_rx, cmd_rx, level_cb);
+            run_consumer(sample_rate, vad, sample_rx, cmd_rx, level_cb, sample_cb);
             // stream is dropped here, after run_consumer returns
         });
 
@@ -159,6 +186,7 @@ impl AudioRecorder {
         config: &cpal::SupportedStreamConfig,
         sample_tx: mpsc::Sender<Vec<f32>>,
         channels: usize,
+        error_cb: Option<Arc<dyn Fn(String) + Send + Sync + 'static>>,
     ) -> Result<cpal::Stream, cpal::BuildStreamError>
     where
         T: Sample + SizedSample + Send + 'static,
@@ -192,10 +220,19 @@ impl AudioRecorder {
             }
         };
 
+        // Create error callback that invokes the user-provided callback if available
+        let error_handler = move |err: cpal::StreamError| {
+            let error_msg = format!("Audio stream error: {}", err);
+            log::error!("{}", error_msg);
+            if let Some(ref cb) = error_cb {
+                cb(error_msg);
+            }
+        };
+
         device.build_input_stream(
             &config.clone().into(),
             stream_cb,
-            |err| log::error!("Stream error: {}", err),
+            error_handler,
             None,
         )
     }
@@ -245,6 +282,7 @@ fn run_consumer(
     sample_rx: mpsc::Receiver<Vec<f32>>,
     cmd_rx: mpsc::Receiver<Cmd>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
 ) {
     let mut frame_resampler = FrameResampler::new(
         in_sample_rate as usize,
@@ -271,6 +309,7 @@ fn run_consumer(
         recording: bool,
         vad: &Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
         out_buf: &mut Vec<f32>,
+        sample_cb: &Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     ) {
         if !recording {
             return;
@@ -279,11 +318,21 @@ fn run_consumer(
         if let Some(vad_arc) = vad {
             let mut det = vad_arc.lock().unwrap();
             match det.push_frame(samples).unwrap_or(VadFrame::Speech(samples)) {
-                VadFrame::Speech(buf) => out_buf.extend_from_slice(buf),
+                VadFrame::Speech(buf) => {
+                    out_buf.extend_from_slice(buf);
+                    // Call sample callback for incremental delivery
+                    if let Some(cb) = sample_cb {
+                        cb(buf.to_vec());
+                    }
+                }
                 VadFrame::Noise => {}
             }
         } else {
             out_buf.extend_from_slice(samples);
+            // Call sample callback for incremental delivery
+            if let Some(cb) = sample_cb {
+                cb(samples.to_vec());
+            }
         }
     }
 
@@ -302,7 +351,7 @@ fn run_consumer(
 
         // ---------- existing pipeline ------------------------------------ //
         frame_resampler.push(&raw, &mut |frame: &[f32]| {
-            handle_frame(frame, recording, &vad, &mut processed_samples)
+            handle_frame(frame, recording, &vad, &mut processed_samples, &sample_cb)
         });
 
         // non-blocking check for a command
@@ -321,7 +370,7 @@ fn run_consumer(
 
                     frame_resampler.finish(&mut |frame: &[f32]| {
                         // we still want to process the last few frames
-                        handle_frame(frame, true, &vad, &mut processed_samples)
+                        handle_frame(frame, true, &vad, &mut processed_samples, &sample_cb)
                     });
 
                     let _ = reply_tx.send(std::mem::take(&mut processed_samples));

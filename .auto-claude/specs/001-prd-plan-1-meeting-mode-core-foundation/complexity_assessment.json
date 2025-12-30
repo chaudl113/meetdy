@@ -1,0 +1,98 @@
+{
+  "complexity": "standard",
+  "workflow_type": "feature",
+  "confidence": 0.85,
+  "reasoning": "Meeting Mode is a significant new feature requiring changes across both frontend (React/TypeScript) and backend (Rust/Tauri). However, all required patterns already exist in the codebase - AudioRecorder for audio capture, TranscriptionManager for STT, and HistoryManager for persistence. No external integrations or new dependencies are needed, making this a well-scoped standard feature build.",
+
+  "analysis": {
+    "scope": {
+      "estimated_files": 15,
+      "estimated_services": 1,
+      "is_cross_cutting": true,
+      "notes": "Touches both frontend (UI components, state management) and backend (new manager, commands, storage). Approximately: 5-6 new Rust files, 5-6 new React components, 3-4 modified existing files."
+    },
+    "integrations": {
+      "external_services": [],
+      "new_dependencies": [],
+      "research_needed": false,
+      "notes": "No external APIs or services. Reuses existing STT pipeline (Whisper/Parakeet). May need uuid crate if not already present, but this is trivial."
+    },
+    "infrastructure": {
+      "docker_changes": false,
+      "database_changes": false,
+      "config_changes": true,
+      "notes": "New storage directory for meetings (separate from dictation recordings). File-based storage per PRD, no database changes required. Potentially new app settings for meeting mode preferences."
+    },
+    "knowledge": {
+      "patterns_exist": true,
+      "research_required": false,
+      "unfamiliar_tech": [],
+      "notes": "Strong patterns exist: AudioRecorder shows exact recording pattern, HistoryManager shows persistence pattern with SQLite, TranscriptionManager shows STT integration. All Tauri command patterns established. Zustand stores exist for state management."
+    },
+    "risk": {
+      "level": "medium",
+      "concerns": [
+        "Must ensure dictation mode remains completely unaffected",
+        "State machine with 5 states requires careful implementation",
+        "Edge case handling: app crash during recording/processing, disk full, mic disconnect",
+        "Audio file corruption prevention during unexpected termination"
+      ],
+      "notes": "Core risk is breaking existing dictation functionality. Meeting Mode must be fully isolated. Edge cases around reliability (crash recovery, disk space) need attention per PRD requirements."
+    }
+  },
+
+  "recommended_phases": [
+    "discovery",
+    "requirements",
+    "context",
+    "spec_writing",
+    "planning",
+    "validation"
+  ],
+
+  "flags": {
+    "needs_research": false,
+    "needs_self_critique": false,
+    "needs_infrastructure_setup": false
+  },
+
+  "validation_recommendations": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "minimal_mode": false,
+    "test_types_required": ["unit", "integration"],
+    "security_scan_required": false,
+    "staging_deployment_required": false,
+    "reasoning": "New feature with state machine complexity and reliability requirements. Unit tests needed for MeetingManager logic and state transitions. Integration tests needed for audio recording + transcription pipeline. No security-sensitive changes (no auth, no external data transmission per PRD privacy requirements)."
+  },
+
+  "key_findings": {
+    "existing_patterns_to_leverage": [
+      "AudioRecorder (src-tauri/src/audio_toolkit/audio/recorder.rs) - exact pattern for audio capture with start/stop",
+      "HistoryManager (src-tauri/src/managers/history.rs) - persistence pattern with SQLite migrations",
+      "TranscriptionManager (src-tauri/src/managers/transcription.rs) - STT pipeline integration",
+      "save_wav_file utility - audio file persistence",
+      "Sidebar sections (src/components/Sidebar.tsx) - UI section organization"
+    ],
+    "isolation_requirements": [
+      "Separate storage directory for meetings (not in 'recordings' used by dictation)",
+      "Separate state management (new Zustand store, not shared with dictation)",
+      "Mode toggle with mutual exclusivity (only 1 mode active at a time)"
+    ],
+    "prd_constraints": [
+      "No AI summary/action items (PLAN 1)",
+      "No search/history UI (PLAN 1)",
+      "Raw transcript only, no formatting",
+      "Local-first, no cloud sync",
+      "Single audio file per meeting (no auto-split)"
+    ]
+  },
+
+  "estimated_effort": {
+    "backend_rust": "60%",
+    "frontend_react": "40%",
+    "total_subtasks_estimate": "12-18 subtasks"
+  },
+
+  "created_at": "2025-06-30T00:00:00.000Z"
+}

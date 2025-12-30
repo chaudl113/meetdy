@@ -22,6 +22,7 @@ use tauri_specta::{collect_commands, Builder};
 use env_filter::Builder as EnvFilterBuilder;
 use managers::audio::AudioRecordingManager;
 use managers::history::HistoryManager;
+use managers::meeting::MeetingSessionManager;
 use managers::model::ModelManager;
 use managers::transcription::TranscriptionManager;
 #[cfg(unix)]
@@ -35,7 +36,7 @@ use tauri::image::Image;
 
 use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy, Target, TargetKind};
 
@@ -126,12 +127,22 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     );
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
+    let meeting_manager = Arc::new(
+        MeetingSessionManager::new(app_handle, transcription_manager.clone())
+            .expect("Failed to initialize meeting manager"),
+    );
 
     // Add managers to Tauri's managed state
     app_handle.manage(recording_manager.clone());
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(meeting_manager.clone());
+
+    // Check for interrupted meeting sessions from previous runs
+    if let Err(e) = meeting_manager.check_interrupted_sessions() {
+        log::error!("Failed to check for interrupted meeting sessions: {}", e);
+    }
 
     // Initialize the shortcuts
     shortcut::init_shortcuts(app_handle);
@@ -308,6 +319,12 @@ pub fn run() {
         commands::history::delete_history_entry,
         commands::history::update_history_limit,
         commands::history::update_recording_retention_period,
+        commands::meeting::start_meeting_session,
+        commands::meeting::stop_meeting_session,
+        commands::meeting::get_meeting_status,
+        commands::meeting::get_current_meeting,
+        commands::meeting::update_meeting_title,
+        commands::meeting::retry_transcription,
         helpers::clamshell::is_laptop,
     ]);
 
@@ -408,6 +425,18 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(specta_builder.invoke_handler())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let RunEvent::Exit = event {
+                // Handle graceful shutdown for meeting sessions
+                log::info!("Application exit requested, cleaning up meeting sessions");
+                if let Some(meeting_manager) = app_handle.try_state::<Arc<MeetingSessionManager>>() {
+                    let had_active_recording = meeting_manager.handle_app_shutdown();
+                    if had_active_recording {
+                        log::info!("Active recording was interrupted and saved during shutdown");
+                    }
+                }
+            }
+        });
 }

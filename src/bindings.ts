@@ -608,6 +608,49 @@ async isLaptop() : Promise<Result<boolean, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async startMeetingSession() : Promise<Result<MeetingSession, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting_session") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopMeetingSession() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_meeting_session") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeetingStatus() : Promise<MeetingStatus | null> {
+    return await TAURI_INVOKE("get_meeting_status");
+},
+async getCurrentMeeting() : Promise<Result<MeetingSession | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_current_meeting") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateMeetingTitle(sessionId: string, title: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_title", { sessionId, title }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async retryTranscription(sessionId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("retry_transcription", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -639,6 +682,8 @@ export type PostProcessProvider = { id: string; label: string; base_url: string 
 export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "weeks_2" | "months_3"
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
 export type SoundTheme = "marimba" | "pop" | "custom"
+export type MeetingStatus = "idle" | "recording" | "processing" | "completed" | "failed"
+export type MeetingSession = { id: string; title: string; created_at: number; duration: number | null; status: MeetingStatus; audio_path: string | null; transcript_path: string | null; error_message: string | null }
 
 /** tauri-specta globals **/
 

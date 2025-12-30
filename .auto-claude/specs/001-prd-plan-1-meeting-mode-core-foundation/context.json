@@ -1,0 +1,55 @@
+{
+  "task_description": "# PRD – PLAN 1: MEETING MODE (CORE FOUNDATION)\n\n## 1. Mục tiêu (Goal)\n\nTạo **Meeting Mode** trong Meetdy để:\n\n* Ghi lại **toàn bộ một phiên họp**\n* Lưu audio + transcript theo **session**\n* Tách biệt hoàn toàn với chế độ dictation hiện tại\n\n👉 Sau PLAN 1, Meetdy **đã là một meeting recorder hợp lệ**, dù chưa có AI summary.\n\n---\n\n## 2. Phạm vi (Scope)\n\n### IN SCOPE\n\n* Meeting Mode (Start / Stop)\n* Ghi audio thành file\n* Sinh transcript raw\n* Lưu trữ theo session\n* UI cơ bản để điều khiển\n\n### OUT OF SCOPE\n\n* Summary AI\n* Action items\n* Search / history UI\n* Cloud sync\n* Multi-speaker\n\n---\n\n## 3. User Stories\n\n### US-01: Start a meeting\n\n> Là người dùng, tôi muốn bấm "Start Meeting" để bắt đầu ghi lại cuộc họp.\n\n**Acceptance**\n\n* Có trạng thái "Recording"\n* Có hiển thị thời gian đang ghi\n\n---\n\n### US-02: Stop a meeting\n\n> Là người dùng, tôi muốn dừng họp và hệ thống tự xử lý dữ liệu.\n\n**Acceptance**\n\n* Audio được lưu\n* Transcript được tạo\n* Không mất dữ liệu nếu xử lý lâu\n\n---\n\n### US-03: Name a meeting\n\n> Là người dùng, tôi muốn đặt tên cuộc họp để dễ nhớ.\n\n**Acceptance**\n\n* Có tên mặc định (timestamp)\n* Có thể sửa sau khi dừng\n\n---\n\n### US-04: Keep dictation mode intact\n\n> Là người dùng cũ của Handy, tôi vẫn dùng dictation như trước.\n\n**Acceptance**\n\n* Dictation không bị ảnh hưởng\n* Hai mode tách biệt rõ ràng\n\n---\n\n## 4. Functional Requirements\n\n### 4.1 Meeting Mode Toggle\n\n* Có 2 mode:\n\n  * Quick Dictation (default)\n  * Meeting Mode\n* Chỉ **1 mode hoạt động tại 1 thời điểm**\n\n---\n\n### 4.2 Meeting Session Lifecycle\n\n**States**\n\n1. Idle\n2. Recording\n3. Processing\n4. Completed\n5. Failed (recoverable)\n\n**Rules**\n\n* Không được start meeting mới khi đang Recording\n* Processing có thể chạy nền\n\n---\n\n### 4.3 Audio Recording\n\n* Ghi audio liên tục từ mic\n* Lưu thành **1 file duy nhất**\n* Format:\n\n  * WAV (ưu tiên)\n* Không auto-split\n\n---\n\n### 4.4 Transcription\n\n* Chạy **sau khi Stop**\n* Dùng pipeline STT hiện có\n* Output:\n\n  * Raw transcript\n  * Không cần format đẹp\n\n---\n\n### 4.5 Data Persistence (Local)\n\nMỗi meeting session phải có:\n\n* Unique ID\n* Metadata\n* Audio file\n* Transcript file\n\n**Nguyên tắc**\n\n* Không lưu tạm trong RAM\n* Crash app vẫn không mất dữ liệu\n\n---\n\n## 5. Non-Functional Requirements\n\n### Performance\n\n* Recording không lag\n* Transcription có thể chậm nhưng không block UI\n\n### Reliability\n\n* Nếu transcription fail:\n\n  * Audio vẫn giữ\n  * Có thể retry\n\n### Privacy\n\n* Không gửi audio ra ngoài\n* Không analytics mặc định\n\n---\n\n## 6. UX Requirements\n\n### Controls\n\n* Start / Stop rõ ràng\n* Trạng thái dễ nhận biết\n\n### Feedback\n\n* Recording indicator (icon / màu)\n* Processing indicator sau khi stop\n\n### Error Handling\n\n* Thông báo rõ:\n\n  * Không có mic\n  * Không load được model\n  * Transcription fail\n\n---\n\n## 7. Data Model (Conceptual – không code)\n\n### MeetingSession\n\n* id\n* title\n* created_at\n* duration\n* status\n\n### Assets\n\n* audio_path\n* transcript_path\n\n---\n\n## 8. Folder / Storage Strategy (Conceptual)\n\n* Mỗi meeting = 1 folder riêng\n* Không trộn với dictation data\n* Có thể migrate sang DB sau này\n\n---\n\n## 9. Edge Cases\n\n* User stop app khi đang recording\n* User stop app khi đang processing\n* Disk full\n* Mic bị disconnect giữa chừng\n\n**Yêu cầu**\n\n* Không crash\n* Không corrupt audio\n\n---\n\n## 10. Success Criteria (PLAN 1)\n\nPLAN 1 được coi là **hoàn thành** khi:\n\n* Start/Stop meeting hoạt động ổn định\n* Audio + transcript được lưu đúng\n* Dictation mode không bị ảnh hưởng\n* Có thể dùng để ghi họp thật (dù chưa có summary)\n\n---\n\n## 11. Notes cho các PLAN sau\n\nPLAN 1 **KHÔNG được**:\n\n* Ép format transcript\n* Gắn logic AI\n* Gắn search\n\n👉 PLAN 1 chỉ làm **"ghi & giữ"**\n\n\n---\n\n## End of PLAN 1 PRD",
+  "scoped_services": ["main"],
+  "files_to_modify": [
+    "src/App.tsx",
+    "src/components/Sidebar.tsx",
+    "src/stores/settingsStore.ts",
+    "src-tauri/src/lib.rs",
+    "src-tauri/src/managers/mod.rs",
+    "src-tauri/src/commands/mod.rs",
+    "src-tauri/src/settings.rs"
+  ],
+  "files_to_create": [
+    "src-tauri/src/managers/meeting.rs",
+    "src-tauri/src/commands/meeting.rs",
+    "src/stores/meetingStore.ts",
+    "src/components/meeting/MeetingMode.tsx",
+    "src/components/meeting/MeetingControls.tsx",
+    "src/components/meeting/MeetingStatusIndicator.tsx",
+    "src/components/meeting/MeetingTitleEditor.tsx",
+    "src/components/meeting/index.ts"
+  ],
+  "files_to_reference": [
+    "src-tauri/src/managers/audio.rs",
+    "src-tauri/src/managers/history.rs",
+    "src-tauri/src/managers/transcription.rs",
+    "src-tauri/src/audio_toolkit/audio/recorder.rs",
+    "src/stores/settingsStore.ts",
+    "src/components/settings/general/GeneralSettings.tsx"
+  ],
+  "key_patterns": {
+    "rust_manager": {
+      "description": "Thread-safe manager with Arc<Mutex<>> pattern",
+      "example_file": "src-tauri/src/managers/audio.rs",
+      "key_elements": ["Clone trait", "Arc<Mutex<>>", "AppHandle", "State machine enum"]
+    },
+    "database_migration": {
+      "description": "SQLite migrations using rusqlite_migration",
+      "example_file": "src-tauri/src/managers/history.rs",
+      "key_elements": ["static MIGRATIONS", "M::up()", "rusqlite::Connection"]
+    },
+    "zustand_store": {
+      "description": "State management with subscribeWithSelector middleware",
+      "example_file": "src/stores/settingsStore.ts",
+      "key_elements": ["create()", "subscribeWithSelector", "commands from @/bindings"]
+    },
+    "tauri_commands": {
+      "description": "Commands exposed to frontend via specta",
+      "example_file": "src-tauri/src/commands/audio.rs",
+      "key_elements": ["#[tauri::command]", "#[specta::specta]", "State<>"]
+    }
+  },
+  "created_at": "2025-12-29T20:52:25.447319",
+  "updated_at": "2025-12-29T21:20:00.000000"
+}

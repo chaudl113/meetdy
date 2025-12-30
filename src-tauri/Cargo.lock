@@ -2393,6 +2393,7 @@ dependencies = [
  "natural",
  "once_cell",
  "rdev",
+ "regex",
  "reqwest",
  "rodio",
  "rubato",
@@ -2422,8 +2423,10 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-updater",
  "tauri-specta",
+ "tempfile",
  "tokio",
  "transcribe-rs",
+ "uuid",
  "vad-rs",
  "windows 0.61.3",
 ]
