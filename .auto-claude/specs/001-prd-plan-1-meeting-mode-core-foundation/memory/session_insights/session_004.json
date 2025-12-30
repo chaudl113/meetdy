@@ -19,8 +19,6 @@
     "changed_files": []
   },
   "what_worked": [],
-  "what_failed": [
-    "Failed to complete subtask: 1.4"
-  ],
+  "what_failed": ["Failed to complete subtask: 1.4"],
   "recommendations_for_next_session": []
 }

@@ -43,31 +43,59 @@ export const MeetingMode: React.FC = () => {
     const lowerError = errorMessage.toLowerCase();
 
     // Detect error types based on common error patterns from backend
-    if (lowerError.includes("microphone") || lowerError.includes("audio device") || lowerError.includes("no input")) {
+    if (
+      lowerError.includes("microphone") ||
+      lowerError.includes("audio device") ||
+      lowerError.includes("no input")
+    ) {
       return {
         type: "microphone" as const,
         title: t("meeting.error.noMicrophone.title", "Microphone Error"),
-        message: t("meeting.error.noMicrophone.message", "Unable to access microphone. Please check your microphone is connected and permissions are granted."),
+        message: t(
+          "meeting.error.noMicrophone.message",
+          "Unable to access microphone. Please check your microphone is connected and permissions are granted.",
+        ),
         canRetry: false,
         originalMessage: errorMessage,
       };
     }
 
-    if (lowerError.includes("model not") || lowerError.includes("model is not loaded") || lowerError.includes("not downloaded")) {
+    if (
+      lowerError.includes("model not") ||
+      lowerError.includes("model is not loaded") ||
+      lowerError.includes("not downloaded")
+    ) {
       return {
         type: "model" as const,
-        title: t("meeting.error.modelNotLoaded.title", "Transcription Model Not Ready"),
-        message: t("meeting.error.modelNotLoaded.message", "The transcription model is not loaded. Please download a model from Settings, then retry."),
+        title: t(
+          "meeting.error.modelNotLoaded.title",
+          "Transcription Model Not Ready",
+        ),
+        message: t(
+          "meeting.error.modelNotLoaded.message",
+          "The transcription model is not loaded. Please download a model from Settings, then retry.",
+        ),
         canRetry: true,
         originalMessage: errorMessage,
       };
     }
 
-    if (lowerError.includes("transcription failed") || lowerError.includes("transcription error") || lowerError.includes("whisper") || lowerError.includes("parakeet")) {
+    if (
+      lowerError.includes("transcription failed") ||
+      lowerError.includes("transcription error") ||
+      lowerError.includes("whisper") ||
+      lowerError.includes("parakeet")
+    ) {
       return {
         type: "transcription" as const,
-        title: t("meeting.error.transcriptionFailed.title", "Transcription Failed"),
-        message: t("meeting.error.transcriptionFailed.message", "Failed to transcribe the recording. Your audio has been saved and you can retry."),
+        title: t(
+          "meeting.error.transcriptionFailed.title",
+          "Transcription Failed",
+        ),
+        message: t(
+          "meeting.error.transcriptionFailed.message",
+          "Failed to transcribe the recording. Your audio has been saved and you can retry.",
+        ),
         canRetry: true,
         originalMessage: errorMessage,
       };
@@ -106,7 +134,11 @@ export const MeetingMode: React.FC = () => {
         <div className="p-4 space-y-4">
           {/* Session Status Indicator */}
           <div className="flex items-center gap-3">
-            <MeetingStatusIndicator status={sessionStatus} showLabel size="sm" />
+            <MeetingStatusIndicator
+              status={sessionStatus}
+              showLabel
+              size="sm"
+            />
             {sessionStatus === "recording" && (
               <span className="text-sm text-mid-gray font-mono">
                 {formatDuration(recordingDuration)}
@@ -141,25 +173,31 @@ export const MeetingMode: React.FC = () => {
                   </p>
 
                   {/* Show original error message for debugging if different */}
-                  {errorInfo.type !== "generic" && errorInfo.originalMessage !== errorInfo.message && (
-                    <p className="text-xs text-red-400/60 mt-2 font-mono">
-                      {errorInfo.originalMessage}
-                    </p>
-                  )}
+                  {errorInfo.type !== "generic" &&
+                    errorInfo.originalMessage !== errorInfo.message && (
+                      <p className="text-xs text-red-400/60 mt-2 font-mono">
+                        {errorInfo.originalMessage}
+                      </p>
+                    )}
 
                   {/* Action Buttons */}
                   <div className="flex items-center gap-3 mt-3">
                     {/* Retry Button - only show if retryable and session is in failed state */}
-                    {errorInfo.canRetry && sessionStatus === "failed" && currentSession && (
-                      <button
-                        onClick={handleRetry}
-                        disabled={isLoading}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-400 hover:text-red-300 bg-red-500/20 hover:bg-red-500/30 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <RotateCcw size={14} className={isLoading ? "animate-spin" : ""} />
-                        {t("meeting.error.retry", "Retry")}
-                      </button>
-                    )}
+                    {errorInfo.canRetry &&
+                      sessionStatus === "failed" &&
+                      currentSession && (
+                        <button
+                          onClick={handleRetry}
+                          disabled={isLoading}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-400 hover:text-red-300 bg-red-500/20 hover:bg-red-500/30 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <RotateCcw
+                            size={14}
+                            className={isLoading ? "animate-spin" : ""}
+                          />
+                          {t("meeting.error.retry", "Retry")}
+                        </button>
+                      )}
 
                     {/* Dismiss Button */}
                     <button

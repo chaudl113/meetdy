@@ -23,7 +23,8 @@ function App() {
   const { settings, updateSetting } = useSettings();
 
   // Mode switching stores
-  const { currentMode, setCurrentMode, isDictationRecording } = useSettingsStore();
+  const { currentMode, setCurrentMode, isDictationRecording } =
+    useSettingsStore();
   const { sessionStatus, stopMeeting } = useMeetingStore();
 
   useEffect(() => {
@@ -83,7 +84,8 @@ function App() {
   const handleSectionChange = useCallback(
     async (newSection: SidebarSection) => {
       const isEnteringMeeting = newSection === "meeting";
-      const isLeavingMeeting = currentSection === "meeting" && newSection !== "meeting";
+      const isLeavingMeeting =
+        currentSection === "meeting" && newSection !== "meeting";
       const isMeetingRecording = sessionStatus === "recording";
 
       // Case 1: Switching TO meeting mode
@@ -132,7 +134,13 @@ function App() {
       // Default: just switch sections
       setCurrentSection(newSection);
     },
-    [currentSection, sessionStatus, isDictationRecording, stopMeeting, setCurrentMode]
+    [
+      currentSection,
+      sessionStatus,
+      isDictationRecording,
+      stopMeeting,
+      setCurrentMode,
+    ],
   );
 
   if (showOnboarding) {

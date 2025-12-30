@@ -29,7 +29,8 @@ export const MeetingTitleEditor: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Determine if editing is allowed (not during recording or processing)
-  const canEdit = sessionStatus !== "recording" && sessionStatus !== "processing";
+  const canEdit =
+    sessionStatus !== "recording" && sessionStatus !== "processing";
 
   // Initialize edit value when entering edit mode
   const startEditing = useCallback(() => {
@@ -85,7 +86,7 @@ export const MeetingTitleEditor: React.FC = () => {
         cancelEditing();
       }
     },
-    [saveTitle, cancelEditing]
+    [saveTitle, cancelEditing],
   );
 
   // Handle blur event
@@ -99,12 +100,9 @@ export const MeetingTitleEditor: React.FC = () => {
   }, [isEditing, saveTitle]);
 
   // Handle input change
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setEditValue(e.target.value);
-    },
-    []
-  );
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setEditValue(e.target.value);
+  }, []);
 
   // Don't render if no session
   if (!currentSession) {
@@ -125,7 +123,10 @@ export const MeetingTitleEditor: React.FC = () => {
             onBlur={handleBlur}
             disabled={isSaving}
             className="flex-1 px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-logo-primary/60 rounded text-primary focus:outline-none focus:border-logo-primary focus:bg-logo-primary/20 transition-all duration-150"
-            placeholder={t("meeting.titlePlaceholder", "Enter meeting title...")}
+            placeholder={t(
+              "meeting.titlePlaceholder",
+              "Enter meeting title...",
+            )}
           />
           {/* Save button */}
           <button

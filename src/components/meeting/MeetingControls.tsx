@@ -149,7 +149,8 @@ export const MeetingControls: React.FC = () => {
       {!isIdle && !isRecording && recordingDuration > 0 && (
         <div className="flex items-center justify-center text-sm text-mid-gray">
           <span>
-            {t("meeting.recordedDuration", "Recorded")}: {formatDuration(recordingDuration)}
+            {t("meeting.recordedDuration", "Recorded")}:{" "}
+            {formatDuration(recordingDuration)}
           </span>
         </div>
       )}

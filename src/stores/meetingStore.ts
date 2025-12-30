@@ -106,8 +106,13 @@ export const useMeetingStore = create<MeetingStore>()(
 
     // Start a new meeting session
     startMeeting: async () => {
-      const { setLoading, setError, setSessionStatus, setCurrentSession, _startDurationTimer } =
-        get();
+      const {
+        setLoading,
+        setError,
+        setSessionStatus,
+        setCurrentSession,
+        _startDurationTimer,
+      } = get();
 
       setLoading(true);
       setError(null);
@@ -177,7 +182,9 @@ export const useMeetingStore = create<MeetingStore>()(
         }
       } catch (err) {
         const errorMessage =
-          err instanceof Error ? err.message : "Failed to refresh meeting status";
+          err instanceof Error
+            ? err.message
+            : "Failed to refresh meeting status";
         setError(errorMessage);
       }
     },
@@ -234,7 +241,10 @@ export const useMeetingStore = create<MeetingStore>()(
       }
 
       try {
-        const result = await commands.updateMeetingTitle(currentSession.id, title);
+        const result = await commands.updateMeetingTitle(
+          currentSession.id,
+          title,
+        );
         if (result.status === "ok") {
           // Optimistically update local state
           setCurrentSession({
@@ -279,7 +289,7 @@ export const useMeetingStore = create<MeetingStore>()(
           setCurrentSession(session);
           setSessionStatus("recording");
           _startDurationTimer();
-        }
+        },
       );
       unlisteners.push(startedUnlisten);
 
@@ -291,7 +301,7 @@ export const useMeetingStore = create<MeetingStore>()(
           setCurrentSession(session);
           _stopDurationTimer();
           // Status will transition to processing next
-        }
+        },
       );
       unlisteners.push(stoppedUnlisten);
 
@@ -303,7 +313,7 @@ export const useMeetingStore = create<MeetingStore>()(
           setCurrentSession(session);
           setSessionStatus("processing");
           _stopDurationTimer();
-        }
+        },
       );
       unlisteners.push(processingUnlisten);
 
@@ -315,7 +325,7 @@ export const useMeetingStore = create<MeetingStore>()(
           setCurrentSession(session);
           setSessionStatus("completed");
           _stopDurationTimer();
-        }
+        },
       );
       unlisteners.push(completedUnlisten);
 
@@ -327,7 +337,7 @@ export const useMeetingStore = create<MeetingStore>()(
           setCurrentSession(session);
           setSessionStatus("failed");
           _stopDurationTimer();
-        }
+        },
       );
       unlisteners.push(failedUnlisten);
 

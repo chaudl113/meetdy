@@ -9,7 +9,17 @@
       "description": "MeetingSessionManager follows the same patterns as AudioRecordingManager and HistoryManager: uses Arc<Mutex<>> for thread-safe state, Clone trait for sharing across Tauri state, AppHandle for accessing app resources. The manager initializes meetings/ directory and meetings.db database on construction.",
       "category": "architecture",
       "discovered_at": "2025-12-29T14:34:10.423703+00:00"
+    },
+    "src-tauri/src/audio_toolkit/audio/recorder.rs": {
+      "description": "AudioRecorder now supports error callbacks via with_error_callback(). When a cpal stream error occurs (like mic disconnect), the error_cb is invoked with the error message. MeetingSessionManager uses this to call handle_mic_disconnect() which saves partial audio, updates status to Failed, and emits meeting_failed + mic_disconnected events.",
+      "category": "patterns",
+      "discovered_at": "2025-12-29T17:25:24.432998+00:00"
+    },
+    "src-tauri/src/managers/": {
+      "description": "Meeting Mode and Quick Dictation are completely independent: AudioRecordingManager (dictation) and MeetingSessionManager (meeting) have separate Arc<Mutex<>> state, separate storage directories (recordings/ vs meetings/), separate databases (history.db vs meetings.db), separate AudioRecorder instances, separate Tauri commands, and separate frontend stores. No shared state between modes ensures they cannot interfere with each other.",
+      "category": "architecture",
+      "discovered_at": "2025-12-29T17:40:26.432806+00:00"
     }
   },
-  "last_updated": "2025-12-29T14:34:10.423722+00:00"
+  "last_updated": "2025-12-29T17:40:26.432815+00:00"
 }

@@ -9,6 +9,7 @@ This specification defines the implementation of **Meeting Mode** for the Meetdy
 **Type**: feature
 
 **Rationale**: This is a major new feature that requires:
+
 - New Rust backend managers for meeting session handling
 - New React components for Meeting Mode UI
 - New state management with Zustand
@@ -20,9 +21,11 @@ The feature is additive and must not modify existing dictation functionality.
 ## Task Scope
 
 ### Services Involved
+
 - **main** (primary) - Full-stack Tauri app with React frontend and Rust backend
 
 ### This Task Will:
+
 - [ ] Create Meeting Mode toggle to switch between Quick Dictation and Meeting Mode
 - [ ] Implement session-based audio recording with file persistence
 - [ ] Build meeting session lifecycle state machine (Idle → Recording → Processing → Completed/Failed)
@@ -34,6 +37,7 @@ The feature is additive and must not modify existing dictation functionality.
 - [ ] Add proper error handling for microphone/transcription failures
 
 ### Out of Scope:
+
 - AI summary generation
 - Action items extraction
 - Search/history UI for meetings
@@ -47,6 +51,7 @@ The feature is additive and must not modify existing dictation functionality.
 ### Main Service (Tauri App)
 
 **Tech Stack:**
+
 - Language: TypeScript (frontend) + Rust (backend)
 - Framework: React + Tauri v2
 - Build Tool: Vite
@@ -64,6 +69,7 @@ The feature is additive and must not modify existing dictation functionality.
 **Entry Point:** `src/App.tsx` (frontend), `src-tauri/src/main.rs` (backend)
 
 **How to Run:**
+
 ```bash
 npm run dev  # Starts Vite dev server + Tauri
 # Or: cargo tauri dev
@@ -73,39 +79,39 @@ npm run dev  # Starts Vite dev server + Tauri
 
 ## Files to Modify
 
-| File | Service | What to Change |
-|------|---------|---------------|
-| `src/App.tsx` | main | Add MeetingMode view routing and mode toggle logic |
-| `src/components/Sidebar.tsx` | main | Add Meeting Mode section to sidebar navigation |
-| `src/stores/settingsStore.ts` | main | Add `current_mode` setting (dictation/meeting) |
-| `src-tauri/src/lib.rs` | main | Register new meeting commands |
-| `src-tauri/src/managers/mod.rs` | main | Export new MeetingSessionManager |
-| `src-tauri/src/settings.rs` | main | Add meeting mode settings |
+| File                            | Service | What to Change                                     |
+| ------------------------------- | ------- | -------------------------------------------------- |
+| `src/App.tsx`                   | main    | Add MeetingMode view routing and mode toggle logic |
+| `src/components/Sidebar.tsx`    | main    | Add Meeting Mode section to sidebar navigation     |
+| `src/stores/settingsStore.ts`   | main    | Add `current_mode` setting (dictation/meeting)     |
+| `src-tauri/src/lib.rs`          | main    | Register new meeting commands                      |
+| `src-tauri/src/managers/mod.rs` | main    | Export new MeetingSessionManager                   |
+| `src-tauri/src/settings.rs`     | main    | Add meeting mode settings                          |
 
 ## Files to Create
 
-| File | Service | Purpose |
-|------|---------|---------|
-| `src/stores/meetingStore.ts` | main | Zustand store for meeting session state |
-| `src/components/meeting/MeetingMode.tsx` | main | Main Meeting Mode container component |
-| `src/components/meeting/MeetingControls.tsx` | main | Start/Stop/Timer controls |
-| `src/components/meeting/MeetingStatusIndicator.tsx` | main | Recording/Processing state indicator |
-| `src/components/meeting/index.ts` | main | Export barrel file |
-| `src-tauri/src/managers/meeting.rs` | main | MeetingSessionManager - core session handling |
-| `src-tauri/src/commands/meeting.rs` | main | Tauri commands for meeting operations |
+| File                                                | Service | Purpose                                       |
+| --------------------------------------------------- | ------- | --------------------------------------------- |
+| `src/stores/meetingStore.ts`                        | main    | Zustand store for meeting session state       |
+| `src/components/meeting/MeetingMode.tsx`            | main    | Main Meeting Mode container component         |
+| `src/components/meeting/MeetingControls.tsx`        | main    | Start/Stop/Timer controls                     |
+| `src/components/meeting/MeetingStatusIndicator.tsx` | main    | Recording/Processing state indicator          |
+| `src/components/meeting/index.ts`                   | main    | Export barrel file                            |
+| `src-tauri/src/managers/meeting.rs`                 | main    | MeetingSessionManager - core session handling |
+| `src-tauri/src/commands/meeting.rs`                 | main    | Tauri commands for meeting operations         |
 
 ## Files to Reference
 
 These files show patterns to follow:
 
-| File | Pattern to Copy |
-|------|----------------|
-| `src/stores/settingsStore.ts` | Zustand store structure with async actions |
-| `src-tauri/src/managers/audio.rs` | Audio recording manager pattern with state machine |
-| `src-tauri/src/managers/transcription.rs` | Transcription pipeline integration |
-| `src-tauri/src/managers/history.rs` | SQLite database operations and file storage |
-| `src/components/Sidebar.tsx` | Sidebar section configuration pattern |
-| `src/components/settings/general/GeneralSettings.tsx` | Settings component pattern |
+| File                                                  | Pattern to Copy                                    |
+| ----------------------------------------------------- | -------------------------------------------------- |
+| `src/stores/settingsStore.ts`                         | Zustand store structure with async actions         |
+| `src-tauri/src/managers/audio.rs`                     | Audio recording manager pattern with state machine |
+| `src-tauri/src/managers/transcription.rs`             | Transcription pipeline integration                 |
+| `src-tauri/src/managers/history.rs`                   | SQLite database operations and file storage        |
+| `src/components/Sidebar.tsx`                          | Sidebar section configuration pattern              |
+| `src/components/settings/general/GeneralSettings.tsx` | Settings component pattern                         |
 
 ## Patterns to Follow
 
@@ -144,6 +150,7 @@ impl AudioRecordingManager {
 ```
 
 **Key Points:**
+
 - Use Arc<Mutex<>> for thread-safe state
 - Clone trait for sharing across threads
 - State machine enum for lifecycle
@@ -175,7 +182,7 @@ interface MeetingStore {
 export const useMeetingStore = create<MeetingStore>()(
   subscribeWithSelector((set, get) => ({
     // State initialization
-    sessionStatus: 'idle',
+    sessionStatus: "idle",
     currentSession: null,
     isLoading: false,
 
@@ -183,14 +190,15 @@ export const useMeetingStore = create<MeetingStore>()(
     startMeeting: async () => {
       const result = await commands.startMeetingSession();
       if (result.status === "ok") {
-        set({ sessionStatus: 'recording', currentSession: result.data });
+        set({ sessionStatus: "recording", currentSession: result.data });
       }
     },
-  }))
+  })),
 );
 ```
 
 **Key Points:**
+
 - Use `subscribeWithSelector` middleware for selective subscriptions
 - Separate actions from internal setters
 - Use `commands` from bindings for Tauri calls
@@ -231,6 +239,7 @@ impl MeetingSessionManager {
 ```
 
 **Key Points:**
+
 - Use `rusqlite_migration` for schema migrations
 - Store files in `app_data_dir`
 - Separate directory for meeting data (not mixing with dictation)
@@ -279,6 +288,7 @@ impl MeetingSessionManager {
 ## Implementation Notes
 
 ### DO
+
 - Follow the manager pattern in `src-tauri/src/managers/audio.rs` for MeetingSessionManager
 - Reuse `AudioRecorder` from `audio_toolkit` for recording
 - Reuse `TranscriptionManager` for STT processing
@@ -289,6 +299,7 @@ impl MeetingSessionManager {
 - Store meetings in separate `meetings/` directory under app_data_dir
 
 ### DON'T
+
 - Don't modify existing dictation recording flow in `AudioRecordingManager`
 - Don't add real-time transcription during recording
 - Don't buffer entire audio in memory
@@ -367,9 +378,11 @@ cargo tauri dev
 ```
 
 ### Service URLs
+
 - Frontend Dev Server: http://localhost:3000
 
 ### Required Environment Variables
+
 - None required for local development
 - Rust toolchain must be installed
 - Xcode Command Line Tools (macOS) for native builds
@@ -395,50 +408,57 @@ The task is complete when:
 **CRITICAL**: These criteria must be verified by the QA Agent before sign-off.
 
 ### Unit Tests
-| Test | File | What to Verify |
-|------|------|----------------|
+
+| Test                             | File                                | What to Verify                                                                   |
+| -------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------- |
 | MeetingSession state transitions | `src-tauri/src/managers/meeting.rs` | State machine transitions are valid (Idle→Recording→Processing→Completed/Failed) |
-| Session ID uniqueness | `src-tauri/src/managers/meeting.rs` | Each session gets unique UUID |
-| Database CRUD operations | `src-tauri/src/managers/meeting.rs` | Create, read, update meeting sessions in SQLite |
+| Session ID uniqueness            | `src-tauri/src/managers/meeting.rs` | Each session gets unique UUID                                                    |
+| Database CRUD operations         | `src-tauri/src/managers/meeting.rs` | Create, read, update meeting sessions in SQLite                                  |
 
 ### Integration Tests
-| Test | Services | What to Verify |
-|------|----------|----------------|
-| Start → Stop → Transcribe flow | MeetingSessionManager ↔ TranscriptionManager | Audio recorded, saved, transcribed successfully |
-| Frontend ↔ Backend sync | React Store ↔ Tauri Commands | State changes emit events, frontend receives them |
-| File persistence | MeetingSessionManager ↔ FileSystem | Audio and transcript files created in correct directories |
+
+| Test                           | Services                                     | What to Verify                                            |
+| ------------------------------ | -------------------------------------------- | --------------------------------------------------------- |
+| Start → Stop → Transcribe flow | MeetingSessionManager ↔ TranscriptionManager | Audio recorded, saved, transcribed successfully           |
+| Frontend ↔ Backend sync        | React Store ↔ Tauri Commands                 | State changes emit events, frontend receives them         |
+| File persistence               | MeetingSessionManager ↔ FileSystem           | Audio and transcript files created in correct directories |
 
 ### End-to-End Tests
-| Flow | Steps | Expected Outcome |
-|------|-------|------------------|
+
+| Flow                       | Steps                                                                                          | Expected Outcome                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------- |
 | Complete meeting recording | 1. Switch to Meeting Mode 2. Click Start 3. Speak for 30s 4. Click Stop 5. Wait for processing | Meeting saved with audio + transcript |
-| Dictation unaffected | 1. Use dictation mode 2. Switch to Meeting Mode 3. Switch back to dictation 4. Use dictation | Dictation works exactly as before |
-| Error recovery | 1. Start meeting 2. Remove microphone 3. Check error handling | Error shown, partial audio saved |
+| Dictation unaffected       | 1. Use dictation mode 2. Switch to Meeting Mode 3. Switch back to dictation 4. Use dictation   | Dictation works exactly as before     |
+| Error recovery             | 1. Start meeting 2. Remove microphone 3. Check error handling                                  | Error shown, partial audio saved      |
 
 ### Browser Verification (Frontend)
-| Page/Component | URL | Checks |
-|----------------|-----|--------|
-| Meeting Mode UI | `http://localhost:3000` (Meeting tab) | Start/Stop buttons render, timer displays correctly |
-| Mode Toggle | `http://localhost:3000` | Toggle switches modes, UI updates accordingly |
-| State Indicators | `http://localhost:3000` | Recording indicator (red dot), Processing spinner visible |
-| Error States | `http://localhost:3000` | Error messages display for microphone/transcription failures |
+
+| Page/Component   | URL                                   | Checks                                                       |
+| ---------------- | ------------------------------------- | ------------------------------------------------------------ |
+| Meeting Mode UI  | `http://localhost:3000` (Meeting tab) | Start/Stop buttons render, timer displays correctly          |
+| Mode Toggle      | `http://localhost:3000`               | Toggle switches modes, UI updates accordingly                |
+| State Indicators | `http://localhost:3000`               | Recording indicator (red dot), Processing spinner visible    |
+| Error States     | `http://localhost:3000`               | Error messages display for microphone/transcription failures |
 
 ### Database Verification
-| Check | Query/Command | Expected |
-|-------|---------------|----------|
-| Table created | `sqlite3 history.db ".schema meeting_sessions"` | Schema matches spec |
-| Session saved | `SELECT * FROM meeting_sessions` | Session record with correct fields |
+
+| Check          | Query/Command                                      | Expected                            |
+| -------------- | -------------------------------------------------- | ----------------------------------- |
+| Table created  | `sqlite3 history.db ".schema meeting_sessions"`    | Schema matches spec                 |
+| Session saved  | `SELECT * FROM meeting_sessions`                   | Session record with correct fields  |
 | Status updates | `SELECT status FROM meeting_sessions WHERE id = ?` | Status progresses through lifecycle |
 
 ### File System Verification
-| Check | Path | Expected |
-|-------|------|----------|
-| Meetings directory | `{app_data}/meetings/` | Directory exists |
-| Session folder | `{app_data}/meetings/{session-id}/` | Folder created per session |
-| Audio file | `{session-folder}/audio.wav` | Valid WAV file, playable |
-| Transcript file | `{session-folder}/transcript.txt` | Text file with transcription content |
+
+| Check              | Path                                | Expected                             |
+| ------------------ | ----------------------------------- | ------------------------------------ |
+| Meetings directory | `{app_data}/meetings/`              | Directory exists                     |
+| Session folder     | `{app_data}/meetings/{session-id}/` | Folder created per session           |
+| Audio file         | `{session-folder}/audio.wav`        | Valid WAV file, playable             |
+| Transcript file    | `{session-folder}/transcript.txt`   | Text file with transcription content |
 
 ### QA Sign-off Requirements
+
 - [ ] All unit tests pass
 - [ ] All integration tests pass
 - [ ] All E2E tests pass
@@ -542,4 +562,4 @@ The task is complete when:
 
 ---
 
-*End of Specification*
+_End of Specification_
