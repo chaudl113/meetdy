@@ -27,3 +27,6 @@ dist-ssr
 /target/
 recording_*
 .crush/
+
+# Auto Claude data directory
+.auto-claude/
