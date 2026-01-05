@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Handy",
+  "productName": "Meetdy",
   "version": "0.6.9",
-  "identifier": "com.pais.handy",
+  "identifier": "com.meetdy.app",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Handy",
+        "title": "Meetdy",
         "width": 680,
         "height": 570,
         "minWidth": 680,

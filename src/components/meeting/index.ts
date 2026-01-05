@@ -6,5 +6,8 @@
 
 export { MeetingMode } from "./MeetingMode";
 export { MeetingControls } from "./MeetingControls";
+export { MeetingDetailView } from "./MeetingDetailView";
+export { MeetingHistory } from "./MeetingHistory";
 export { MeetingStatusIndicator } from "./MeetingStatusIndicator";
 export { MeetingTitleEditor } from "./MeetingTitleEditor";
+export { MeetingTranscriptDisplay } from "./MeetingTranscriptDisplay";

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { MeetingSession, MeetingStatus } from "@/bindings";
+import type { AudioSourceType, MeetingSession, MeetingStatus } from "@/bindings";
 import { commands } from "@/bindings";
 
 /**
@@ -23,21 +23,24 @@ interface MeetingStore {
   // State
   sessionStatus: MeetingStatus;
   currentSession: MeetingSession | null;
+  sessions: MeetingSession[];
   recordingDuration: number;
   isLoading: boolean;
   error: string | null;
 
   // Actions
-  startMeeting: () => Promise<void>;
+  startMeeting: (audioSource?: AudioSourceType) => Promise<void>;
   stopMeeting: () => Promise<void>;
   retryTranscription: () => Promise<void>;
   updateTitle: (title: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
+  fetchSessions: () => Promise<void>;
   clearError: () => void;
 
   // Internal setters
   setSessionStatus: (status: MeetingStatus) => void;
   setCurrentSession: (session: MeetingSession | null) => void;
+  setSessions: (sessions: MeetingSession[]) => void;
   setRecordingDuration: (duration: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -59,6 +62,7 @@ export const useMeetingStore = create<MeetingStore>()(
     // Initial state
     sessionStatus: "idle",
     currentSession: null,
+    sessions: [],
     recordingDuration: 0,
     isLoading: false,
     error: null,
@@ -69,6 +73,7 @@ export const useMeetingStore = create<MeetingStore>()(
     // Internal setters
     setSessionStatus: (sessionStatus) => set({ sessionStatus }),
     setCurrentSession: (currentSession) => set({ currentSession }),
+    setSessions: (sessions) => set({ sessions }),
     setRecordingDuration: (recordingDuration) => set({ recordingDuration }),
     setLoading: (isLoading) => set({ isLoading }),
     setError: (error) => set({ error }),
@@ -105,7 +110,7 @@ export const useMeetingStore = create<MeetingStore>()(
     },
 
     // Start a new meeting session
-    startMeeting: async () => {
+    startMeeting: async (audioSource?: AudioSourceType) => {
       const {
         setLoading,
         setError,
@@ -118,7 +123,7 @@ export const useMeetingStore = create<MeetingStore>()(
       setError(null);
 
       try {
-        const result = await commands.startMeetingSession();
+        const result = await commands.startMeetingSession(audioSource ?? null);
         if (result.status === "ok") {
           const session = result.data as MeetingSession;
           setCurrentSession(session);
@@ -257,6 +262,24 @@ export const useMeetingStore = create<MeetingStore>()(
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to update title";
+        setError(errorMessage);
+      }
+    },
+
+    // Fetch all meeting sessions from backend
+    fetchSessions: async () => {
+      const { setSessions, setError } = get();
+
+      try {
+        const result = await commands.listMeetingSessions();
+        if (result.status === "ok") {
+          setSessions(result.data);
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to fetch sessions";
         setError(errorMessage);
       }
     },

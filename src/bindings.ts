@@ -596,27 +596,43 @@ async updateRecordingRetentionPeriod(period: string) : Promise<Result<null, stri
 }
 },
 /**
- * Checks if the Mac is a laptop by detecting battery presence
+ * Starts a new meeting session recording.
  * 
- * This uses pmset to check for battery information.
- * Returns true if a battery is detected (laptop), false otherwise (desktop)
+ * This command:
+ * 1. Validates no active recording is in progress
+ * 2. Creates a new meeting session with UUID and folder
+ * 3. Starts audio capture with the specified source
+ * 4. Updates session status to Recording
+ * 
+ * # Arguments
+ * * `audio_source` - The audio source configuration (microphone_only, system_only, or mixed)
+ * 
+ * # Returns
+ * * `Ok(MeetingSession)` - The newly created and active session
+ * * `Err(String)` - If state guard fails or recording initialization fails
  */
-async isLaptop() : Promise<Result<boolean, string>> {
+async startMeetingSession(audioSource: AudioSourceType | null) : Promise<Result<MeetingSession, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("is_laptop") };
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting_session", { audioSource }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async startMeetingSession() : Promise<Result<MeetingSession, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("start_meeting_session") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
+/**
+ * Stops the current meeting session recording.
+ * 
+ * This command:
+ * 1. Validates current session is in Recording state
+ * 2. Stops audio capture
+ * 3. Finalizes WAV file
+ * 4. Updates session status to Processing
+ * 5. Spawns background transcription task
+ * 
+ * # Returns
+ * * `Ok(String)` - The relative path to the audio file (e.g., "{session-id}/audio.wav")
+ * * `Err(String)` - If no recording is active or stopping fails
+ */
 async stopMeetingSession() : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stop_meeting_session") };
@@ -625,9 +641,28 @@ async stopMeetingSession() : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Gets the current meeting status.
+ * 
+ * Returns the status of the currently active session, if any.
+ * 
+ * # Returns
+ * * `Some(MeetingStatus)` - The current session status if a session exists
+ * * `None` - If no active session
+ */
 async getMeetingStatus() : Promise<MeetingStatus | null> {
     return await TAURI_INVOKE("get_meeting_status");
 },
+/**
+ * Gets the current active meeting session.
+ * 
+ * Returns full details of the currently active session, if any.
+ * 
+ * # Returns
+ * * `Ok(Some(MeetingSession))` - The current session if active
+ * * `Ok(None)` - If no active session
+ * * `Err(String)` - If database query fails
+ */
 async getCurrentMeeting() : Promise<Result<MeetingSession | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_current_meeting") };
@@ -636,6 +671,20 @@ async getCurrentMeeting() : Promise<Result<MeetingSession | null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Updates the title of a meeting session.
+ * 
+ * Updates the title in the database. The title can be edited at any time
+ * after the session is created.
+ * 
+ * # Arguments
+ * * `session_id` - The unique ID of the session to update
+ * * `title` - The new title for the session
+ * 
+ * # Returns
+ * * `Ok(())` - If the title was updated successfully
+ * * `Err(String)` - If session not found or database update fails
+ */
 async updateMeetingTitle(sessionId: string, title: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_meeting_title", { sessionId, title }) };
@@ -644,9 +693,115 @@ async updateMeetingTitle(sessionId: string, title: string) : Promise<Result<null
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Retries transcription for a failed meeting session.
+ * 
+ * This command:
+ * 1. Validates the session exists and is in Failed status
+ * 2. Updates status to Processing
+ * 3. Spawns background transcription task
+ * 
+ * # Arguments
+ * * `session_id` - The unique ID of the session to retry
+ * 
+ * # Returns
+ * * `Ok(())` - If retry was initiated successfully
+ * * `Err(String)` - If session not found, not in Failed status, or retry fails
+ */
 async retryTranscription(sessionId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("retry_transcription", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Gets the transcript text content for a completed meeting session.
+ * 
+ * Reads the transcript file from disk and returns its content.
+ * 
+ * # Arguments
+ * * `session_id` - The unique ID of the session to get transcript for
+ * 
+ * # Returns
+ * * `Ok(Some(String))` - The transcript text if available
+ * * `Ok(None)` - If no transcript exists for this session
+ * * `Err(String)` - If session not found or file read fails
+ */
+async getMeetingTranscript(sessionId: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_transcript", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Lists all meeting sessions.
+ * 
+ * Returns all meeting sessions from the database, ordered by creation time
+ * (newest first).
+ * 
+ * # Returns
+ * * `Ok(Vec<MeetingSession>)` - All meeting sessions
+ * * `Err(String)` - If database query fails
+ */
+async listMeetingSessions() : Promise<Result<MeetingSession[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_meeting_sessions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Gets the path to the meetings directory.
+ * 
+ * # Returns
+ * * `Ok(String)` - The absolute path to the meetings directory
+ * * `Err(String)` - If getting the path fails
+ */
+async getMeetingsDirectory() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meetings_directory") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Deletes a meeting session and its associated files.
+ * 
+ * This command:
+ * 1. Validates the session exists
+ * 2. Deletes the session folder (audio, transcript files)
+ * 3. Removes the session from the database
+ * 
+ * # Arguments
+ * * `session_id` - The unique ID of the session to delete
+ * 
+ * # Returns
+ * * `Ok(())` - If the session was deleted successfully
+ * * `Err(String)` - If session not found or deletion fails
+ */
+async deleteMeetingSession(sessionId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_meeting_session", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Checks if the Mac is a laptop by detecting battery presence
+ * 
+ * This uses pmset to check for battery information.
+ * Returns true if a battery is detected (laptop), false otherwise (desktop)
+ */
+async isLaptop() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("is_laptop") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -666,6 +821,22 @@ async retryTranscription(sessionId: string) : Promise<Result<null, string>> {
 
 export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; audio_feedback: boolean; audio_feedback_volume?: number; sound_theme?: SoundTheme; start_hidden?: boolean; autostart_enabled?: boolean; update_checks_enabled?: boolean; selected_model?: string; always_on_microphone?: boolean; selected_microphone?: string | null; clamshell_microphone?: string | null; selected_output_device?: string | null; translate_to_english?: boolean; selected_language?: string; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: Partial<{ [key in string]: string }>; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
+/**
+ * Audio source configuration for meeting recording
+ */
+export type AudioSourceType = 
+/**
+ * Only capture microphone input (default)
+ */
+"microphone_only" | 
+/**
+ * Only capture system audio (YouTube, Zoom, etc.) - macOS 13.0+ only
+ */
+"system_only" | 
+/**
+ * Capture both microphone and system audio mixed together - macOS 13.0+ only
+ */
+"mixed"
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
@@ -673,6 +844,89 @@ export type EngineType = "Whisper" | "Parakeet"
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null }
 export type LLMPrompt = { id: string; name: string; prompt: string }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
+/**
+ * Represents a meeting session with its metadata and file references.
+ * 
+ * Each meeting session has a unique ID and is stored in a dedicated folder
+ * under the app's data directory: `{app_data}/meetings/{session-id}/`
+ */
+export type MeetingSession = { 
+/**
+ * Unique identifier for the session (UUID format)
+ */
+id: string; 
+/**
+ * User-editable title, defaults to timestamp format like
+ * "Meeting - January 15, 2025 3:30 PM"
+ */
+title: string; 
+/**
+ * Unix timestamp (seconds) when the meeting was created/started
+ */
+created_at: number; 
+/**
+ * Duration of the recording in seconds (set after recording stops)
+ */
+duration: number | null; 
+/**
+ * Current status of the meeting session
+ */
+status: MeetingStatus; 
+/**
+ * Relative path to the audio file within the meetings directory
+ * e.g., "{session-id}/audio.wav"
+ */
+audio_path: string | null; 
+/**
+ * Relative path to the transcript file within the meetings directory
+ * e.g., "{session-id}/transcript.txt"
+ */
+transcript_path: string | null; 
+/**
+ * Error message if the meeting failed
+ */
+error_message: string | null; 
+/**
+ * Audio source configuration for this meeting
+ */
+audio_source: AudioSourceType }
+/**
+ * Represents the lifecycle status of a meeting session.
+ * 
+ * The state machine follows this flow:
+ * - Idle -> Recording (start meeting)
+ * - Recording -> Processing (stop meeting, begin transcription)
+ * - Recording -> Interrupted (app closed during recording)
+ * - Processing -> Completed (transcription success)
+ * - Processing -> Failed (transcription failure)
+ * - Failed -> Processing (retry transcription)
+ * - Interrupted -> Processing (resume transcription on next launch)
+ */
+export type MeetingStatus = 
+/**
+ * No active meeting session
+ */
+"idle" | 
+/**
+ * Meeting is currently being recorded
+ */
+"recording" | 
+/**
+ * Recording stopped, transcription in progress
+ */
+"processing" | 
+/**
+ * Meeting completed successfully with transcript
+ */
+"completed" | 
+/**
+ * Meeting failed (e.g., transcription error), audio preserved
+ */
+"failed" | 
+/**
+ * Meeting was interrupted (app closed during recording), audio preserved
+ */
+"interrupted"
 export type ModelInfo = { id: string; name: string; description: string; filename: string; url: string | null; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 export type ModelUnloadTimeout = "never" | "immediately" | "min_2" | "min_5" | "min_10" | "min_15" | "hour_1" | "sec_5"
@@ -682,8 +936,6 @@ export type PostProcessProvider = { id: string; label: string; base_url: string 
 export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "weeks_2" | "months_3"
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
 export type SoundTheme = "marimba" | "pop" | "custom"
-export type MeetingStatus = "idle" | "recording" | "processing" | "completed" | "failed"
-export type MeetingSession = { id: string; title: string; created_at: number; duration: number | null; status: MeetingStatus; audio_path: string | null; transcript_path: string | null; error_message: string | null }
 
 /** tauri-specta globals **/
 

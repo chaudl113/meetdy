@@ -7,6 +7,7 @@
   },
   "sidebar": {
     "general": "通用",
+    "meeting": "会议",
     "advanced": "高级",
     "postProcessing": "后处理",
     "history": "历史记录",

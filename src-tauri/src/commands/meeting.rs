@@ -1,16 +1,18 @@
-use crate::managers::meeting::{MeetingSession, MeetingSessionManager, MeetingStatus};
+use crate::managers::meeting::{AudioSourceType, MeetingSession, MeetingSessionManager, MeetingStatus};
 use log::info;
-use rusqlite::params;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Starts a new meeting session recording.
 ///
 /// This command:
 /// 1. Validates no active recording is in progress
 /// 2. Creates a new meeting session with UUID and folder
-/// 3. Starts audio capture and incremental WAV writing
+/// 3. Starts audio capture with the specified source
 /// 4. Updates session status to Recording
+///
+/// # Arguments
+/// * `audio_source` - The audio source configuration (microphone_only, system_only, or mixed)
 ///
 /// # Returns
 /// * `Ok(MeetingSession)` - The newly created and active session
@@ -19,12 +21,14 @@ use tauri::{AppHandle, Manager};
 #[specta::specta]
 pub fn start_meeting_session(
     app: AppHandle,
+    audio_source: Option<AudioSourceType>,
 ) -> Result<MeetingSession, String> {
-    info!("start_meeting_session command called");
+    let source = audio_source.unwrap_or_default();
+    info!("start_meeting_session command called with audio_source: {:?}", source);
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
     manager
-        .start_recording()
+        .start_recording(source)
         .map_err(|e| format!("Failed to start meeting session: {}", e))
 }
 
@@ -82,11 +86,8 @@ pub fn get_current_meeting(app: AppHandle) -> Result<Option<MeetingSession>, Str
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
 
-    // Get current session ID from in-memory state
-    let current_session = {
-        let state = manager.state.lock().unwrap();
-        state.current_session.clone()
-    };
+    // Get current session from in-memory state
+    let current_session = manager.get_current_session();
 
     // If no current session, return None
     let session_id = match current_session {
@@ -131,40 +132,10 @@ pub fn update_meeting_title(
         return Err("Title cannot be empty".to_string());
     }
 
-    // Update title in database
-    let conn = manager
-        .get_connection()
-        .map_err(|e| format!("Failed to connect to database: {}", e))?;
-
-    let rows_affected = conn
-        .execute(
-            "UPDATE meeting_sessions SET title = ?1 WHERE id = ?2",
-            params![title, session_id],
-        )
-        .map_err(|e| format!("Failed to update meeting title: {}", e))?;
-
-    if rows_affected == 0 {
-        return Err(format!("Session not found: {}", session_id));
-    }
-
-    // Update in-memory state if this is the current session
-    {
-        let mut state = manager.state.lock().unwrap();
-        if let Some(mut session) = state.current_session.as_ref() {
-            if session.id == session_id {
-                let mut updated_session = session.clone();
-                updated_session.title = title.clone();
-                state.current_session = Some(updated_session);
-            }
-        }
-    }
-
-    info!(
-        "Updated meeting title for session {}: {}",
-        session_id, title
-    );
-
-    Ok(())
+    // Update title using the manager's public method
+    manager
+        .update_session_title(&session_id, &title)
+        .map_err(|e| format!("Failed to update meeting title: {}", e))
 }
 
 /// Retries transcription for a failed meeting session.
@@ -196,40 +167,23 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
         .map_err(|e| format!("Failed to get session: {}", e))?
         .ok_or_else(|| format!("Session not found: {}", session_id))?;
 
-    // Validate session is in Failed status
-    if session.status != MeetingStatus::Failed {
-        return Err(format!(
-            "Cannot retry transcription: session is in {:?} status, expected Failed",
-            session.status
-        ));
-    }
-
-    // Get audio path
-    let audio_path = session
-        .audio_path
-        .ok_or("Session has no audio file to transcribe")?;
-
-    // Update status to Processing
-    manager
-        .update_session_status(&session_id, MeetingStatus::Processing)
-        .map_err(|e| format!("Failed to update session status: {}", e))?;
-
-    // Update in-memory state
-    {
-        let mut state = manager.state.lock().unwrap();
-        if let Some(ref mut current_session) = state.current_session {
-            if current_session.id == session_id {
-                current_session.status = MeetingStatus::Processing;
-                current_session.error_message = None;
-            }
-        } else {
-            // Set this as current session if none active
-            let mut updated_session = session.clone();
-            updated_session.status = MeetingStatus::Processing;
-            updated_session.error_message = None;
-            state.current_session = Some(updated_session);
+    // Validate session is in a retryable status (Failed, Interrupted, or Completed)
+    match session.status {
+        MeetingStatus::Failed | MeetingStatus::Interrupted | MeetingStatus::Completed => {
+            // OK to retry
+        }
+        _ => {
+            return Err(format!(
+                "Cannot retry transcription: session is in {:?} status, expected Failed, Interrupted, or Completed",
+                session.status
+            ));
         }
     }
+
+    // Use the manager's retry method to prepare for transcription
+    let audio_path = manager
+        .retry_transcription_for_session(&session_id)
+        .map_err(|e| format!("Failed to prepare retry: {}", e))?;
 
     // Emit processing event
     let _ = app.emit("meeting_processing", &session);
@@ -244,32 +198,29 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
         match manager_clone.process_transcription(&audio_path_clone) {
             Ok(transcript) => {
                 // Save transcript and update status to Completed
-                if let Err(e) =
-                    manager_clone.save_transcript_and_update_status(&session_id_clone, &transcript)
-                {
+                if let Err(e) = manager_clone.save_transcript(&session_id_clone, &transcript) {
                     // Failed to save transcript
                     let error_msg = format!("Failed to save transcript: {}", e);
-                    let _ = manager_clone
-                        .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg);
+                    let _ = manager_clone.update_session_status_with_error(
+                        &session_id_clone,
+                        MeetingStatus::Failed,
+                        &error_msg,
+                    );
 
                     // Update in-memory state
-                    {
-                        let mut state = manager_clone.state.lock().unwrap();
-                        if let Some(ref mut session) = state.current_session {
-                            if session.id == session_id_clone {
-                                session.status = MeetingStatus::Failed;
-                                session.error_message = Some(error_msg.clone());
-                            }
-                        }
-                    }
+                    manager_clone.set_session_error(&session_id_clone, &error_msg);
 
                     // Emit failed event
-                    if let Some(updated_session) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                    if let Some(updated_session) =
+                        manager_clone.get_session(&session_id_clone).ok().flatten()
+                    {
                         let _ = app_clone.emit("meeting_failed", &updated_session);
                     }
                 } else {
                     // Success - emit completed event
-                    if let Some(updated_session) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                    if let Some(updated_session) =
+                        manager_clone.get_session(&session_id_clone).ok().flatten()
+                    {
                         let _ = app_clone.emit("meeting_completed", &updated_session);
                     }
                 }
@@ -277,22 +228,19 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
             Err(e) => {
                 // Transcription failed
                 let error_msg = format!("Transcription failed: {}", e);
-                let _ = manager_clone
-                    .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg);
+                let _ = manager_clone.update_session_status_with_error(
+                    &session_id_clone,
+                    MeetingStatus::Failed,
+                    &error_msg,
+                );
 
                 // Update in-memory state
-                {
-                    let mut state = manager_clone.state.lock().unwrap();
-                    if let Some(ref mut session) = state.current_session {
-                        if session.id == session_id_clone {
-                            session.status = MeetingStatus::Failed;
-                            session.error_message = Some(error_msg.clone());
-                        }
-                    }
-                }
+                manager_clone.set_session_error(&session_id_clone, &error_msg);
 
                 // Emit failed event
-                if let Some(updated_session) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                if let Some(updated_session) =
+                    manager_clone.get_session(&session_id_clone).ok().flatten()
+                {
                     let _ = app_clone.emit("meeting_failed", &updated_session);
                 }
             }
@@ -302,4 +250,108 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
     info!("Retry transcription initiated for session: {}", session_id);
 
     Ok(())
+}
+
+/// Gets the transcript text content for a completed meeting session.
+///
+/// Reads the transcript file from disk and returns its content.
+///
+/// # Arguments
+/// * `session_id` - The unique ID of the session to get transcript for
+///
+/// # Returns
+/// * `Ok(Some(String))` - The transcript text if available
+/// * `Ok(None)` - If no transcript exists for this session
+/// * `Err(String)` - If session not found or file read fails
+#[tauri::command]
+#[specta::specta]
+pub fn get_meeting_transcript(app: AppHandle, session_id: String) -> Result<Option<String>, String> {
+    info!(
+        "get_meeting_transcript command called for session: {}",
+        session_id
+    );
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+
+    // Get session from database
+    let session = manager
+        .get_session(&session_id)
+        .map_err(|e| format!("Failed to get session: {}", e))?
+        .ok_or_else(|| format!("Session not found: {}", session_id))?;
+
+    // Check if transcript path exists
+    let transcript_path = match session.transcript_path {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+
+    // Read transcript file
+    let meetings_dir = manager.get_meetings_dir();
+    let full_path = meetings_dir.join(&transcript_path);
+
+    if !full_path.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(&full_path)
+        .map_err(|e| format!("Failed to read transcript file: {}", e))?;
+
+    Ok(Some(content))
+}
+
+/// Lists all meeting sessions.
+///
+/// Returns all meeting sessions from the database, ordered by creation time
+/// (newest first).
+///
+/// # Returns
+/// * `Ok(Vec<MeetingSession>)` - All meeting sessions
+/// * `Err(String)` - If database query fails
+#[tauri::command]
+#[specta::specta]
+pub fn list_meeting_sessions(app: AppHandle) -> Result<Vec<MeetingSession>, String> {
+    info!("list_meeting_sessions command called");
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+    manager
+        .list_sessions()
+        .map_err(|e| format!("Failed to list meeting sessions: {}", e))
+}
+
+/// Gets the path to the meetings directory.
+///
+/// # Returns
+/// * `Ok(String)` - The absolute path to the meetings directory
+/// * `Err(String)` - If getting the path fails
+#[tauri::command]
+#[specta::specta]
+pub fn get_meetings_directory(app: AppHandle) -> Result<String, String> {
+    info!("get_meetings_directory command called");
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+    Ok(manager.get_meetings_dir().to_string_lossy().to_string())
+}
+
+/// Deletes a meeting session and its associated files.
+///
+/// This command:
+/// 1. Validates the session exists
+/// 2. Deletes the session folder (audio, transcript files)
+/// 3. Removes the session from the database
+///
+/// # Arguments
+/// * `session_id` - The unique ID of the session to delete
+///
+/// # Returns
+/// * `Ok(())` - If the session was deleted successfully
+/// * `Err(String)` - If session not found or deletion fails
+#[tauri::command]
+#[specta::specta]
+pub fn delete_meeting_session(app: AppHandle, session_id: String) -> Result<(), String> {
+    info!("delete_meeting_session command called for session: {}", session_id);
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+    manager
+        .delete_session(&session_id)
+        .map_err(|e| format!("Failed to delete meeting session: {}", e))
 }

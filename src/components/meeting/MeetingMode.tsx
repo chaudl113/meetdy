@@ -6,6 +6,7 @@ import { SettingsGroup } from "../ui/SettingsGroup";
 import { MeetingControls } from "./MeetingControls";
 import { MeetingStatusIndicator } from "./MeetingStatusIndicator";
 import { MeetingTitleEditor } from "./MeetingTitleEditor";
+import { MeetingTranscriptDisplay } from "./MeetingTranscriptDisplay";
 
 /**
  * MeetingMode - Main container component for Meeting Mode functionality.
@@ -223,6 +224,9 @@ export const MeetingMode: React.FC = () => {
 
           {/* Meeting Controls - Start/Stop button and timer */}
           <MeetingControls />
+
+          {/* Transcript Display - shown when completed */}
+          <MeetingTranscriptDisplay />
         </div>
       </SettingsGroup>
     </div>

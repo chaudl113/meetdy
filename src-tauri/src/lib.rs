@@ -325,6 +325,10 @@ pub fn run() {
         commands::meeting::get_current_meeting,
         commands::meeting::update_meeting_title,
         commands::meeting::retry_transcription,
+        commands::meeting::get_meeting_transcript,
+        commands::meeting::list_meeting_sessions,
+        commands::meeting::get_meetings_directory,
+        commands::meeting::delete_meeting_session,
         helpers::clamshell::is_laptop,
     ]);
 
@@ -350,7 +354,7 @@ pub fn run() {
                 }),
                 // File logs respect the user's settings (stored in FILE_LOG_LEVEL atomic)
                 Target::new(TargetKind::LogDir {
-                    file_name: Some("handy".into()),
+                    file_name: Some("meetdy".into()),
                 })
                 .filter(|metadata| {
                     let file_level = FILE_LOG_LEVEL.load(Ordering::Relaxed);

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Microphone outline for tray icon -->
+  <rect x="11" y="6" width="10" height="12" rx="5" ry="5" fill="none" stroke="#6366F1" stroke-width="2"/>
+  
+  <!-- Stand arc -->
+  <path d="M 8 14 Q 8 22 16 22 Q 24 22 24 14" 
+        stroke="#6366F1" stroke-width="2" fill="none" stroke-linecap="round"/>
+  
+  <!-- Stand -->
+  <line x1="16" y1="22" x2="16" y2="26" stroke="#6366F1" stroke-width="2" stroke-linecap="round"/>
+  
+  <!-- Base -->
+  <line x1="12" y1="26" x2="20" y2="26" stroke="#6366F1" stroke-width="2" stroke-linecap="round"/>
+</svg>
