@@ -5,11 +5,11 @@ import {
   FlaskConical,
   History,
   Info,
+  Mic,
   Sparkles,
   Video,
 } from "lucide-react";
 import HandyTextLogo from "./icons/HandyTextLogo";
-import HandyHand from "./icons/HandyHand";
 import { useSettings } from "../hooks/useSettings";
 import {
   GeneralSettings,
@@ -41,7 +41,7 @@ interface SectionConfig {
 export const SECTIONS_CONFIG = {
   general: {
     labelKey: "sidebar.general",
-    icon: HandyHand,
+    icon: Mic,
     component: GeneralSettings,
     enabled: () => true,
   },

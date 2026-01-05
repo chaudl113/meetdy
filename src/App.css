@@ -3,8 +3,8 @@
 @theme {
   --color-text: #0f0f0f;
   --color-background: #fbfbfb;
-  --color-background-ui: #da5893;
-  --color-logo-primary: #faa2ca;
+  --color-background-ui: #7c3aed;
+  --color-logo-primary: #8b5cf6;
   --color-logo-stroke: #382731;
   --color-text-stroke: #f6f6f6;
   --color-mid-gray: #808080;
@@ -49,7 +49,7 @@
     /* Colors - Dark Theme */
     --color-text: #fbfbfb;
     --color-background: #2c2b29;
-    --color-logo-primary: #f28cbb;
+    --color-logo-primary: #a78bfa;
     --color-logo-stroke: #fad1ed;
   }
 }

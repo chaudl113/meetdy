@@ -188,6 +188,7 @@ impl MeetingSession {
     /// Creates a new meeting session with a unique ID and default title.
     ///
     /// The title is generated from the current timestamp in a human-readable format.
+    #[allow(dead_code)]
     pub fn new(id: String, title: String, created_at: i64) -> Self {
         Self {
             id,
@@ -336,6 +337,7 @@ impl MeetingSessionManager {
     }
 
     /// Returns the path to the database file.
+    #[allow(dead_code)]
     pub fn get_db_path(&self) -> &PathBuf {
         &self.db_path
     }
@@ -508,6 +510,7 @@ impl MeetingSessionManager {
     /// # Returns
     /// * `Ok(MeetingSession)` - The newly created session
     /// * `Err` - If folder creation or database insertion fails
+    #[allow(dead_code)]
     pub fn create_session(&self) -> Result<MeetingSession> {
         self.create_session_with_audio_source(AudioSourceType::default())
     }
@@ -687,8 +690,8 @@ impl MeetingSessionManager {
     pub fn delete_session(&self, session_id: &str) -> Result<()> {
         info!("Deleting meeting session: {}", session_id);
 
-        // Get session to find folder path
-        let session = self
+        // Verify session exists before deleting
+        let _session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
 
@@ -1299,6 +1302,7 @@ impl MeetingSessionManager {
     ///
     /// # Arguments
     /// * `error_message` - Description of the error that occurred
+    #[allow(dead_code)]
     pub fn handle_mic_disconnect(&self, error_message: &str) {
         error!("Microphone disconnect detected: {}", error_message);
 
