@@ -794,6 +794,52 @@ async deleteMeetingSession(sessionId: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Generates an AI summary for a meeting session.
+ * 
+ * This command:
+ * 1. Validates the session exists and has a transcript
+ * 2. Reads the transcript content
+ * 3. Sends it to the configured LLM provider for summarization
+ * 4. Saves the summary to a markdown file
+ * 5. Updates the session with the summary path
+ * 
+ * # Arguments
+ * * `session_id` - The unique ID of the session to summarize
+ * 
+ * # Returns
+ * * `Ok(String)` - The generated summary text
+ * * `Err(String)` - If session not found, no transcript, or LLM call fails
+ */
+async generateMeetingSummary(sessionId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("generate_meeting_summary", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Gets the summary text content for a meeting session.
+ * 
+ * Reads the summary file from disk and returns its content.
+ * 
+ * # Arguments
+ * * `session_id` - The unique ID of the session to get summary for
+ * 
+ * # Returns
+ * * `Ok(Some(String))` - The summary text if available
+ * * `Ok(None)` - If no summary exists for this session
+ * * `Err(String)` - If session not found or file read fails
+ */
+async getMeetingSummary(sessionId: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_summary", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Checks if the Mac is a laptop by detecting battery presence
  * 
  * This uses pmset to check for battery information.
@@ -889,7 +935,12 @@ error_message: string | null;
 /**
  * Audio source configuration for this meeting
  */
-audio_source: AudioSourceType }
+audio_source: AudioSourceType; 
+/**
+ * Relative path to the AI-generated summary file within the meetings directory
+ * e.g., "{session-id}/summary.md"
+ */
+summary_path: string | null }
 /**
  * Represents the lifecycle status of a meeting session.
  * 

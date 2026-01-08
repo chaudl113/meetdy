@@ -43,6 +43,9 @@ static MIGRATIONS: &[M] = &[
     M::up(
         "ALTER TABLE meeting_sessions ADD COLUMN audio_source TEXT NOT NULL DEFAULT 'microphone_only';",
     ),
+    M::up(
+        "ALTER TABLE meeting_sessions ADD COLUMN summary_path TEXT;",
+    ),
 ];
 
 /// Initialize the meeting sessions database and run any pending migrations.
@@ -182,6 +185,10 @@ pub struct MeetingSession {
 
     /// Audio source configuration for this meeting
     pub audio_source: AudioSourceType,
+
+    /// Relative path to the AI-generated summary file within the meetings directory
+    /// e.g., "{session-id}/summary.md"
+    pub summary_path: Option<String>,
 }
 
 impl MeetingSession {
@@ -200,6 +207,7 @@ impl MeetingSession {
             transcript_path: None,
             error_message: None,
             audio_source: AudioSourceType::default(),
+            summary_path: None,
         }
     }
 
@@ -220,6 +228,7 @@ impl MeetingSession {
             transcript_path: None,
             error_message: None,
             audio_source,
+            summary_path: None,
         }
     }
 }
@@ -393,6 +402,40 @@ impl MeetingSessionManager {
         }
 
         info!("Updated meeting title for session {}: {}", session_id, title);
+        Ok(())
+    }
+
+    /// Updates the summary path for a meeting session.
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session to update
+    /// * `summary_path` - The relative path to the summary file
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the summary path was updated successfully
+    /// * `Err` - If session not found or database update fails
+    pub fn update_session_summary_path(&self, session_id: &str, summary_path: &str) -> Result<()> {
+        let conn = self.get_connection()?;
+        let rows_affected = conn.execute(
+            "UPDATE meeting_sessions SET summary_path = ?1 WHERE id = ?2",
+            params![summary_path, session_id],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+
+        // Update in-memory state if this is the current session
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(session) = state.current_session.as_mut() {
+                if session.id == session_id {
+                    session.summary_path = Some(summary_path.to_string());
+                }
+            }
+        }
+
+        info!("Updated summary path for session {}: {}", session_id, summary_path);
         Ok(())
     }
 
@@ -574,7 +617,7 @@ impl MeetingSessionManager {
         let conn = self.get_connection()?;
         let session = conn
             .query_row(
-                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
                  FROM meeting_sessions WHERE id = ?1",
                 params![session_id],
                 |row| self.row_to_session(row),
@@ -659,7 +702,7 @@ impl MeetingSessionManager {
     pub fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
              FROM meeting_sessions ORDER BY created_at DESC",
         )?;
 
@@ -786,6 +829,7 @@ impl MeetingSessionManager {
     fn row_to_session(&self, row: &rusqlite::Row) -> rusqlite::Result<MeetingSession> {
         let status_str: String = row.get("status")?;
         let audio_source_str: String = row.get("audio_source").unwrap_or_else(|_| "microphone_only".to_string());
+        let summary_path: Option<String> = row.get("summary_path")?;
         Ok(MeetingSession {
             id: row.get("id")?,
             title: row.get("title")?,
@@ -796,6 +840,7 @@ impl MeetingSessionManager {
             transcript_path: row.get("transcript_path")?,
             error_message: row.get("error_message")?,
             audio_source: self.string_to_audio_source(&audio_source_str),
+            summary_path,
         })
     }
 
@@ -1824,7 +1869,7 @@ impl MeetingSessionManager {
 
         // Query for all interrupted sessions
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
              FROM meeting_sessions WHERE status = ?1 ORDER BY created_at DESC",
         )?;
 
@@ -2045,6 +2090,7 @@ mod tests {
                 transcript_path: row.get("transcript_path")?,
                 error_message: row.get("error_message")?,
                 audio_source: self.string_to_audio_source(&audio_source_str),
+                summary_path: row.get("summary_path").unwrap_or(None),
             })
         }
 
@@ -2323,11 +2369,11 @@ mod tests {
         let session1 = manager
             .create_session()
             .expect("Failed to create session 1");
-        std::thread::sleep(std::time::Duration::from_millis(10)); // Ensure different timestamps
+        std::thread::sleep(std::time::Duration::from_secs(1)); // Ensure different timestamps (uses seconds)
         let session2 = manager
             .create_session()
             .expect("Failed to create session 2");
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_secs(1));
         let session3 = manager
             .create_session()
             .expect("Failed to create session 3");
