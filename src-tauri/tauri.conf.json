@@ -72,7 +72,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE1MTMxMTZENDczNjg0MDYKUldRR2hEWkhiUkVURlJvd09NQUFacWJsUEtESEx1QlRMcVVYV2d6QlZGSEgwaGRPNTU3SWI3NHUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE0NjZCQzQxMUJDREFCRDkKUldUWnE4MGJRYnhtcEJvaHYzN2IzYlpNQTAvNWVQMlIzcUVaOUxJeUxRUFQvL3ZUYzdkNlpKMUQK",
       "endpoints": [
         "https://github.com/chaudl113/meetdy/releases/latest/download/latest.json"
       ]
