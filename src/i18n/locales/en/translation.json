@@ -258,7 +258,49 @@
         "createPrompt": "Create Prompt",
         "cancel": "Cancel",
         "selectToEdit": "Select a prompt above to view and edit its details.",
-        "createFirst": "Click 'Create New Prompt' above to create your first post-processing prompt."
+        "createFirst": "Click 'Create New Prompt' above to create your first post-processing prompt.",
+        "useTemplate": "Use Template",
+        "templateList": "Template list",
+        "fromTemplate": "From template",
+        "saveAsCustom": "Save as Custom",
+        "editAndSave": "Edit and save as custom prompt",
+        "outputPlaceholderTip": "Use ${output} to insert the transcribed text in your prompt.",
+        "usingTemplate": "Using template: <strong>{{name}}</strong>",
+        "categories": {
+          "meeting": "Meeting",
+          "language": "Language",
+          "writing": "Writing"
+        },
+        "templates": {
+          "meetingSummary": {
+            "name": "Meeting Summary",
+            "description": "Generate a concise summary of meeting discussions"
+          },
+          "actionItems": {
+            "name": "Extract Action Items",
+            "description": "Identify tasks and assignments from the transcript"
+          },
+          "keyPoints": {
+            "name": "Key Points",
+            "description": "Extract main ideas as a bullet list"
+          },
+          "translateVi": {
+            "name": "Translate to Vietnamese",
+            "description": "Translate text to Vietnamese with technical term handling"
+          },
+          "grammarClarity": {
+            "name": "Grammar & Clarity",
+            "description": "Improve grammar, spelling, and readability"
+          },
+          "emailDraft": {
+            "name": "Convert to Email",
+            "description": "Format as a professional email"
+          },
+          "technicalNotes": {
+            "name": "Technical Documentation",
+            "description": "Format as structured technical documentation"
+          }
+        }
       }
     },
     "history": {
@@ -392,6 +434,7 @@
     "update": "Update",
     "close": "Close",
     "open": "Open",
+    "clear": "Clear",
     "default": "Default",
     "enabled": "Enabled",
     "disabled": "Disabled",
@@ -399,7 +442,23 @@
     "off": "Off",
     "yes": "Yes",
     "no": "No",
-    "noOptionsFound": "No options found"
+    "noOptionsFound": "No options found",
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "meeting": {
+    "summary": {
+      "title": "AI Summary",
+      "generate": "Generate Summary",
+      "regenerate": "Regenerate",
+      "generating": "Generating summary...",
+      "noSummary": "No summary yet. Generate an AI summary of this meeting.",
+      "noTranscript": "Transcript required to generate summary.",
+      "generateError": "Failed to generate summary"
+    },
+    "detail": {
+      "audio": "Audio Recording"
+    }
   },
   "accessibility": {
     "permissionsRequired": "Accessibility Permissions Required",

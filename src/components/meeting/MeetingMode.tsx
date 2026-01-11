@@ -120,13 +120,15 @@ export const MeetingMode: React.FC = () => {
 
   // Initialize event listeners on mount and cleanup on unmount
   useEffect(() => {
-    initializeEventListeners();
-    refreshStatus();
+    // Initialize listeners when component mounts
+    useMeetingStore.getState().initializeEventListeners();
+    useMeetingStore.getState().refreshStatus();
 
+    // Cleanup when component unmounts
     return () => {
-      cleanupEventListeners();
+      useMeetingStore.getState().cleanupEventListeners();
     };
-  }, [initializeEventListeners, cleanupEventListeners, refreshStatus]);
+  }, []); // Empty deps - only run on mount/unmount
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">

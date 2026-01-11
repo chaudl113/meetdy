@@ -61,7 +61,7 @@ export const SECTIONS_CONFIG = {
     labelKey: "sidebar.postProcessing",
     icon: Sparkles,
     component: PostProcessingSettings,
-    enabled: (settings) => settings?.post_process_enabled ?? false,
+    enabled: () => true, // Always show for meeting summary feature
   },
   history: {
     labelKey: "sidebar.history",
@@ -98,6 +98,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const availableSections = Object.entries(SECTIONS_CONFIG)
     .filter(([_, config]) => config.enabled(settings))
     .map(([id, config]) => ({ id: id as SidebarSection, ...config }));
+
+  // Debug: Log available sections
+  console.log(
+    "Available sections:",
+    availableSections.map((s) => s.id),
+  );
 
   return (
     <div className="flex flex-col w-40 h-full border-r border-mid-gray/20 items-center px-2">

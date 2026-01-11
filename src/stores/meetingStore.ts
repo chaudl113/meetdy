@@ -1,7 +1,11 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AudioSourceType, MeetingSession, MeetingStatus } from "@/bindings";
+import type {
+  AudioSourceType,
+  MeetingSession,
+  MeetingStatus,
+} from "@/bindings";
 import { commands } from "@/bindings";
 
 /**
@@ -51,6 +55,7 @@ interface MeetingStore {
   _stopDurationTimer: () => void;
 
   // Event listener management
+  _initId: number;
   _eventUnlisteners: UnlistenFn[];
   _visibilityHandler: (() => void) | null;
   initializeEventListeners: () => Promise<void>;
@@ -69,6 +74,11 @@ export const useMeetingStore = create<MeetingStore>()(
 
     // Internal timer reference
     _durationInterval: null,
+
+    // Event listener management
+    _initId: 0,
+    _eventUnlisteners: [],
+    _visibilityHandler: null,
 
     // Internal setters
     setSessionStatus: (sessionStatus) => set({ sessionStatus }),
@@ -284,15 +294,12 @@ export const useMeetingStore = create<MeetingStore>()(
       }
     },
 
-    // Event listener management
-    _eventUnlisteners: [],
-    _visibilityHandler: null,
-
     // Initialize event listeners for meeting_* events from backend
     initializeEventListeners: async () => {
       const {
         setSessionStatus,
         setCurrentSession,
+        setRecordingDuration,
         _startDurationTimer,
         _stopDurationTimer,
         refreshStatus,
@@ -302,86 +309,161 @@ export const useMeetingStore = create<MeetingStore>()(
       // Clean up any existing listeners first
       cleanupEventListeners();
 
+      // Generate new init ID for abort pattern
+      const initId = Date.now();
+      set({ _initId: initId });
+
       const unlisteners: UnlistenFn[] = [];
 
-      // Listen for meeting_started event
-      const startedUnlisten = await listen<MeetingSession>(
-        "meeting_started",
-        (event) => {
-          const session = event.payload;
-          setCurrentSession(session);
-          setSessionStatus("recording");
-          _startDurationTimer();
-        },
-      );
-      unlisteners.push(startedUnlisten);
+      // Helper to check if this init is still valid
+      const isValid = () => get()._initId === initId;
 
-      // Listen for meeting_stopped event
-      const stoppedUnlisten = await listen<MeetingSession>(
-        "meeting_stopped",
-        (event) => {
-          const session = event.payload;
-          setCurrentSession(session);
-          _stopDurationTimer();
-          // Status will transition to processing next
-        },
-      );
-      unlisteners.push(stoppedUnlisten);
+      try {
+        // Listen for meeting_started event
+        const startedUnlisten = await listen<MeetingSession>(
+          "meeting_started",
+          (event) => {
+            if (!isValid()) return; // Abort if invalidated
+            const session = event.payload;
+            setCurrentSession(session);
+            setSessionStatus("recording");
+            _startDurationTimer();
+            // Sync duration if available
+            if (session.duration !== undefined && session.duration !== null) {
+              setRecordingDuration(session.duration);
+            }
+          },
+        );
 
-      // Listen for meeting_processing event
-      const processingUnlisten = await listen<MeetingSession>(
-        "meeting_processing",
-        (event) => {
-          const session = event.payload;
-          setCurrentSession(session);
-          setSessionStatus("processing");
-          _stopDurationTimer();
-        },
-      );
-      unlisteners.push(processingUnlisten);
-
-      // Listen for meeting_completed event
-      const completedUnlisten = await listen<MeetingSession>(
-        "meeting_completed",
-        (event) => {
-          const session = event.payload;
-          setCurrentSession(session);
-          setSessionStatus("completed");
-          _stopDurationTimer();
-        },
-      );
-      unlisteners.push(completedUnlisten);
-
-      // Listen for meeting_failed event
-      const failedUnlisten = await listen<MeetingSession>(
-        "meeting_failed",
-        (event) => {
-          const session = event.payload;
-          setCurrentSession(session);
-          setSessionStatus("failed");
-          _stopDurationTimer();
-        },
-      );
-      unlisteners.push(failedUnlisten);
-
-      // Set up visibility change handler for reconnection on app focus
-      const handleVisibilityChange = () => {
-        if (document.visibilityState === "visible") {
-          // Refresh status when app becomes visible to sync state
-          refreshStatus();
+        if (!isValid()) {
+          startedUnlisten(); // Cleanup if invalidated
+          return;
         }
-      };
-      document.addEventListener("visibilitychange", handleVisibilityChange);
+        unlisteners.push(startedUnlisten);
 
-      // Store the handler reference for cleanup
-      set({
-        _eventUnlisteners: unlisteners,
-        _visibilityHandler: handleVisibilityChange,
-      });
+        // Listen for meeting_stopped event
+        const stoppedUnlisten = await listen<MeetingSession>(
+          "meeting_stopped",
+          (event) => {
+            if (!isValid()) return;
+            const session = event.payload;
+            setCurrentSession(session);
+            _stopDurationTimer();
+            // Sync duration
+            if (session.duration !== undefined && session.duration !== null) {
+              setRecordingDuration(session.duration);
+            }
+            // Status will transition to processing next
+          },
+        );
+
+        if (!isValid()) {
+          stoppedUnlisten();
+          return;
+        }
+        unlisteners.push(stoppedUnlisten);
+
+        // Listen for meeting_processing event
+        const processingUnlisten = await listen<MeetingSession>(
+          "meeting_processing",
+          (event) => {
+            if (!isValid()) return;
+            const session = event.payload;
+            setCurrentSession(session);
+            setSessionStatus("processing");
+            _stopDurationTimer();
+            // Sync duration
+            if (session.duration !== undefined && session.duration !== null) {
+              setRecordingDuration(session.duration);
+            }
+          },
+        );
+
+        if (!isValid()) {
+          processingUnlisten();
+          return;
+        }
+        unlisteners.push(processingUnlisten);
+
+        // Listen for meeting_completed event
+        const completedUnlisten = await listen<MeetingSession>(
+          "meeting_completed",
+          (event) => {
+            if (!isValid()) return;
+            const session = event.payload;
+            setCurrentSession(session);
+            setSessionStatus("completed");
+            _stopDurationTimer();
+            // CRITICAL: Sync final duration from backend
+            if (session.duration !== undefined && session.duration !== null) {
+              setRecordingDuration(session.duration);
+            }
+          },
+        );
+
+        if (!isValid()) {
+          completedUnlisten();
+          return;
+        }
+        unlisteners.push(completedUnlisten);
+
+        // Listen for meeting_failed event
+        const failedUnlisten = await listen<MeetingSession>(
+          "meeting_failed",
+          (event) => {
+            if (!isValid()) return;
+            const session = event.payload;
+            setCurrentSession(session);
+            setSessionStatus("failed");
+            _stopDurationTimer();
+            // Sync partial duration if available
+            if (session.duration !== undefined && session.duration !== null) {
+              setRecordingDuration(session.duration);
+            }
+          },
+        );
+
+        if (!isValid()) {
+          failedUnlisten();
+          return;
+        }
+        unlisteners.push(failedUnlisten);
+
+        // Set up visibility change handler for reconnection on app focus
+        const handleVisibilityChange = () => {
+          if (document.visibilityState === "visible") {
+            // Refresh status when app becomes visible to sync state
+            refreshStatus();
+          }
+        };
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+
+        // Only commit listeners if still valid
+        if (isValid()) {
+          set({
+            _eventUnlisteners: unlisteners,
+            _visibilityHandler: handleVisibilityChange,
+          });
+        } else {
+          // Cleanup if invalidated during setup
+          unlisteners.forEach((unlisten) => unlisten());
+          document.removeEventListener(
+            "visibilitychange",
+            handleVisibilityChange,
+          );
+        }
+      } catch (error) {
+        console.error("Failed to initialize event listeners:", error);
+        // Cleanup any partially registered listeners
+        unlisteners.forEach((unlisten) => unlisten());
+      }
     },
 
     // Cleanup all event listeners
     cleanupEventListeners: () => {
+      // Invalidate all pending inits
+      set({ _initId: 0 });
+
       const { _eventUnlisteners, _visibilityHandler } = get();
 
       // Unsubscribe from all Tauri events

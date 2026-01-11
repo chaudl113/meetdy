@@ -131,7 +131,7 @@ impl MixedAudioRecorder {
                 let handle = thread::spawn(move || {
                     let mut mic_buffer: Vec<f32> = Vec::new();
                     let mut sys_buffer: Vec<f32> = Vec::new();
-                    
+
                     while *is_recording.lock().unwrap() {
                         // Collect mic samples
                         while let Ok(samples) = mic_rx.try_recv() {
@@ -147,7 +147,7 @@ impl MixedAudioRecorder {
                         if !mic_buffer.is_empty() || !sys_buffer.is_empty() {
                             let mix_len = mic_buffer.len().max(sys_buffer.len());
                             let mut mixed = Vec::with_capacity(mix_len);
-                            
+
                             for i in 0..mix_len {
                                 let mic = mic_buffer.get(i).copied().unwrap_or(0.0);
                                 let sys = sys_buffer.get(i).copied().unwrap_or(0.0);
@@ -183,7 +183,10 @@ impl MixedAudioRecorder {
     /// Non-macOS stub
     #[cfg(not(target_os = "macos"))]
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if matches!(self.config, AudioSourceConfig::SystemOnly | AudioSourceConfig::Mixed) {
+        if matches!(
+            self.config,
+            AudioSourceConfig::SystemOnly | AudioSourceConfig::Mixed
+        ) {
             return Err("System audio capture is only supported on macOS".into());
         }
 
@@ -227,7 +230,10 @@ impl MixedAudioRecorder {
         }
 
         let samples = std::mem::take(&mut *self.mixed_samples.lock().unwrap());
-        log::info!("MixedAudioRecorder stopped, collected {} samples", samples.len());
+        log::info!(
+            "MixedAudioRecorder stopped, collected {} samples",
+            samples.len()
+        );
         Ok(samples)
     }
 

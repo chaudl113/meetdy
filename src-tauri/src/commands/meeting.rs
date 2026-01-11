@@ -1,7 +1,95 @@
-use crate::managers::meeting::{AudioSourceType, MeetingSession, MeetingSessionManager, MeetingStatus};
-use log::info;
+use crate::managers::meeting::{
+    AudioSourceType, MeetingSession, MeetingSessionManager, MeetingStatus,
+};
+use crate::settings::get_settings;
+use log::{debug, info};
+use std::path::{Component, Path};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
+
+/// Maximum transcript size in bytes (1MB) to prevent OOM and LLM context overflow
+const MAX_TRANSCRIPT_SIZE: u64 = 1024 * 1024;
+
+/// Validates that a relative path is safe and doesn't escape the base directory.
+/// Prevents path traversal attacks (e.g., "../../../etc/passwd").
+///
+/// This function validates both existing and non-existing paths by checking
+/// the parent directory for non-existing files.
+fn validate_safe_path(base_dir: &Path, relative_path: &str) -> Result<std::path::PathBuf, String> {
+    let path = Path::new(relative_path);
+
+    // Reject absolute paths
+    if path.is_absolute() {
+        return Err("Absolute paths are not allowed".to_string());
+    }
+
+    // Check path components for dangerous elements
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                return Err("Path traversal (parent directory) is not allowed".to_string());
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err("Absolute path components are not allowed".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    // Build the full path
+    let full_path = base_dir.join(relative_path);
+
+    // Canonicalize base directory
+    let canonical_base = base_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize base directory: {}", e))?;
+
+    // For existing paths, verify the canonical path
+    if full_path.exists() {
+        let canonical_full = full_path
+            .canonicalize()
+            .map_err(|e| format!("Failed to canonicalize path: {}", e))?;
+
+        if !canonical_full.starts_with(&canonical_base) {
+            return Err("Path escapes the allowed directory".to_string());
+        }
+    } else {
+        // For non-existing paths, validate the parent directory
+        // This prevents symlink attacks where parent exists but points outside
+        if let Some(parent) = full_path.parent() {
+            if parent.exists() {
+                let canonical_parent = parent
+                    .canonicalize()
+                    .map_err(|e| format!("Failed to canonicalize parent directory: {}", e))?;
+
+                if !canonical_parent.starts_with(&canonical_base) {
+                    return Err("Parent directory escapes the allowed directory".to_string());
+                }
+            }
+            // If parent doesn't exist, we'll fail later when trying to write
+        }
+    }
+
+    Ok(full_path)
+}
+
+/// Validates a path for writing. Same as validate_safe_path but with additional
+/// checks to ensure the target directory exists and is writable.
+fn validate_safe_write_path(
+    base_dir: &Path,
+    relative_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let full_path = validate_safe_path(base_dir, relative_path)?;
+
+    // Ensure parent directory exists for write operations
+    if let Some(parent) = full_path.parent() {
+        if !parent.exists() {
+            return Err(format!("Parent directory does not exist: {:?}", parent));
+        }
+    }
+
+    Ok(full_path)
+}
 
 /// Starts a new meeting session recording.
 ///
@@ -24,7 +112,10 @@ pub fn start_meeting_session(
     audio_source: Option<AudioSourceType>,
 ) -> Result<MeetingSession, String> {
     let source = audio_source.unwrap_or_default();
-    info!("start_meeting_session command called with audio_source: {:?}", source);
+    info!(
+        "start_meeting_session command called with audio_source: {:?}",
+        source
+    );
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
     manager
@@ -265,7 +356,10 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
 /// * `Err(String)` - If session not found or file read fails
 #[tauri::command]
 #[specta::specta]
-pub fn get_meeting_transcript(app: AppHandle, session_id: String) -> Result<Option<String>, String> {
+pub fn get_meeting_transcript(
+    app: AppHandle,
+    session_id: String,
+) -> Result<Option<String>, String> {
     info!(
         "get_meeting_transcript command called for session: {}",
         session_id
@@ -285,9 +379,9 @@ pub fn get_meeting_transcript(app: AppHandle, session_id: String) -> Result<Opti
         None => return Ok(None),
     };
 
-    // Read transcript file
+    // Read transcript file with path validation
     let meetings_dir = manager.get_meetings_dir();
-    let full_path = meetings_dir.join(&transcript_path);
+    let full_path = validate_safe_path(&meetings_dir, &transcript_path)?;
 
     if !full_path.exists() {
         return Ok(None);
@@ -348,10 +442,234 @@ pub fn get_meetings_directory(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 #[specta::specta]
 pub fn delete_meeting_session(app: AppHandle, session_id: String) -> Result<(), String> {
-    info!("delete_meeting_session command called for session: {}", session_id);
+    info!(
+        "delete_meeting_session command called for session: {}",
+        session_id
+    );
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
     manager
         .delete_session(&session_id)
         .map_err(|e| format!("Failed to delete meeting session: {}", e))
+}
+
+/// Generates an AI summary for a meeting session.
+///
+/// This command:
+/// 1. Validates the session exists and has a transcript
+/// 2. Reads the transcript content
+/// 3. Sends it to the configured LLM provider for summarization
+/// 4. Saves the summary to a markdown file
+/// 5. Updates the session with the summary path
+///
+/// # Arguments
+/// * `session_id` - The unique ID of the session to summarize
+///
+/// # Returns
+/// * `Ok(String)` - The generated summary text
+/// * `Err(String)` - If session not found, no transcript, or LLM call fails
+#[tauri::command]
+#[specta::specta]
+pub async fn generate_meeting_summary(
+    app: AppHandle,
+    session_id: String,
+) -> Result<String, String> {
+    info!(
+        "generate_meeting_summary command called for session: {}",
+        session_id
+    );
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+
+    // Get session from database
+    let session = manager
+        .get_session(&session_id)
+        .map_err(|e| format!("Failed to get session: {}", e))?
+        .ok_or_else(|| format!("Session not found: {}", session_id))?;
+
+    // Check if transcript exists
+    let transcript_path = session
+        .transcript_path
+        .ok_or_else(|| "No transcript available for this session".to_string())?;
+
+    // Read transcript content with path validation
+    let meetings_dir = manager.get_meetings_dir();
+    let full_transcript_path = validate_safe_path(&meetings_dir, &transcript_path)?;
+
+    if !full_transcript_path.exists() {
+        return Err("Transcript file not found".to_string());
+    }
+
+    // Check file size before reading to prevent OOM
+    let metadata = std::fs::metadata(&full_transcript_path)
+        .map_err(|e| format!("Failed to get transcript metadata: {}", e))?;
+
+    if metadata.len() > MAX_TRANSCRIPT_SIZE {
+        return Err(format!(
+            "Transcript too large ({} bytes). Maximum allowed: {} bytes",
+            metadata.len(),
+            MAX_TRANSCRIPT_SIZE
+        ));
+    }
+
+    // Read transcript using blocking task to avoid blocking async runtime
+    let transcript_path_clone = full_transcript_path.clone();
+    let transcript =
+        tokio::task::spawn_blocking(move || std::fs::read_to_string(&transcript_path_clone))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?
+            .map_err(|e| format!("Failed to read transcript: {}", e))?;
+
+    if transcript.trim().is_empty() {
+        return Err("Transcript is empty".to_string());
+    }
+
+    // Get settings for LLM configuration
+    let settings = get_settings(&app);
+
+    // Get active provider
+    let provider = settings
+        .active_post_process_provider()
+        .cloned()
+        .ok_or_else(|| {
+            "No LLM provider configured. Please set up a provider in Settings.".to_string()
+        })?;
+
+    let model = settings
+        .post_process_models
+        .get(&provider.id)
+        .cloned()
+        .unwrap_or_default();
+
+    if model.trim().is_empty() {
+        return Err(format!(
+            "No model configured for provider '{}'. Please configure in Settings.",
+            provider.label
+        ));
+    }
+
+    let api_key = settings
+        .post_process_api_keys
+        .get(&provider.id)
+        .cloned()
+        .unwrap_or_default();
+
+    // Validate API key is set
+    if api_key.trim().is_empty() {
+        return Err(format!(
+            "No API key configured for provider '{}'. Please set your API key in Settings.",
+            provider.label
+        ));
+    }
+
+    // Build summary prompt
+    let summary_prompt = format!(
+        r#"Please summarize this meeting transcript concisely. Structure your response with:
+
+## Key Points
+- Main topics and discussions
+
+## Action Items
+- Tasks assigned with owners (if mentioned)
+
+## Decisions Made
+- Important decisions reached
+
+## Next Steps
+- Follow-up actions needed
+
+Transcript:
+{}
+
+Provide a clear, professional summary in markdown format."#,
+        transcript
+    );
+
+    debug!(
+        "Generating summary with provider '{}' (model: {})",
+        provider.id, model
+    );
+
+    // Call LLM API
+    let summary =
+        crate::llm_client::send_chat_completion(&provider, api_key, &model, summary_prompt)
+            .await
+            .map_err(|e| format!("LLM API call failed: {}", e))?
+            .ok_or_else(|| "LLM returned empty response".to_string())?;
+
+    // Save summary to file with path validation
+    let summary_filename = format!("{}/summary.md", session_id);
+    let summary_path = validate_safe_write_path(&meetings_dir, &summary_filename)?;
+
+    // Write using blocking task to avoid blocking async runtime
+    let summary_clone = summary.clone();
+    tokio::task::spawn_blocking(move || std::fs::write(&summary_path, &summary_clone))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| format!("Failed to save summary: {}", e))?;
+
+    // Update database with summary path
+    manager
+        .update_session_summary_path(&session_id, &summary_filename)
+        .map_err(|e| format!("Failed to update session: {}", e))?;
+
+    info!(
+        "Summary generated and saved for session {}: {} bytes",
+        session_id,
+        summary.len()
+    );
+
+    // Emit event for frontend
+    if let Some(updated_session) = manager.get_session(&session_id).ok().flatten() {
+        let _ = app.emit("meeting_summary_generated", &updated_session);
+    }
+
+    Ok(summary)
+}
+
+/// Gets the summary text content for a meeting session.
+///
+/// Reads the summary file from disk and returns its content.
+///
+/// # Arguments
+/// * `session_id` - The unique ID of the session to get summary for
+///
+/// # Returns
+/// * `Ok(Some(String))` - The summary text if available
+/// * `Ok(None)` - If no summary exists for this session
+/// * `Err(String)` - If session not found or file read fails
+#[tauri::command]
+#[specta::specta]
+pub fn get_meeting_summary(app: AppHandle, session_id: String) -> Result<Option<String>, String> {
+    info!(
+        "get_meeting_summary command called for session: {}",
+        session_id
+    );
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+
+    // Get session from database
+    let session = manager
+        .get_session(&session_id)
+        .map_err(|e| format!("Failed to get session: {}", e))?
+        .ok_or_else(|| format!("Session not found: {}", session_id))?;
+
+    // Check if summary path exists
+    let summary_path = match session.summary_path {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+
+    // Read summary file with path validation
+    let meetings_dir = manager.get_meetings_dir();
+    let full_path = validate_safe_path(&meetings_dir, &summary_path)?;
+
+    if !full_path.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(&full_path)
+        .map_err(|e| format!("Failed to read summary file: {}", e))?;
+
+    Ok(Some(content))
 }

@@ -329,6 +329,8 @@ pub fn run() {
         commands::meeting::list_meeting_sessions,
         commands::meeting::get_meetings_directory,
         commands::meeting::delete_meeting_session,
+        commands::meeting::generate_meeting_summary,
+        commands::meeting::get_meeting_summary,
         helpers::clamshell::is_laptop,
     ]);
 
@@ -343,8 +345,8 @@ pub fn run() {
     let mut builder = tauri::Builder::default().plugin(
         LogBuilder::new()
             .level(log::LevelFilter::Trace) // Set to most verbose level globally
-            .max_file_size(500_000)
-            .rotation_strategy(RotationStrategy::KeepOne)
+            .max_file_size(5_000_000) // 5MB per file (increased from 500KB)
+            .rotation_strategy(RotationStrategy::KeepAll) // Keep all rotated logs for debugging
             .clear_targets()
             .targets([
                 // Console output respects RUST_LOG environment variable
@@ -353,6 +355,7 @@ pub fn run() {
                     move |metadata| console_filter.enabled(metadata)
                 }),
                 // File logs respect the user's settings (stored in FILE_LOG_LEVEL atomic)
+                // Logs are written to: ~/Library/Logs/com.handy.app/meetdy.log (macOS)
                 Target::new(TargetKind::LogDir {
                     file_name: Some("meetdy".into()),
                 })
@@ -435,7 +438,8 @@ pub fn run() {
             if let RunEvent::Exit = event {
                 // Handle graceful shutdown for meeting sessions
                 log::info!("Application exit requested, cleaning up meeting sessions");
-                if let Some(meeting_manager) = app_handle.try_state::<Arc<MeetingSessionManager>>() {
+                if let Some(meeting_manager) = app_handle.try_state::<Arc<MeetingSessionManager>>()
+                {
                     let had_active_recording = meeting_manager.handle_app_shutdown();
                     if had_active_recording {
                         log::info!("Active recording was interrupted and saved during shutdown");

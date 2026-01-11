@@ -35,13 +35,19 @@ export const MeetingTranscriptDisplay: React.FC = () => {
 
       setIsLoading(true);
       try {
-        console.log("[MeetingTranscriptDisplay] Fetching transcript for session:", currentSession.id);
+        console.log(
+          "[MeetingTranscriptDisplay] Fetching transcript for session:",
+          currentSession.id,
+        );
         const result = await commands.getMeetingTranscript(currentSession.id);
         console.log("[MeetingTranscriptDisplay] Fetch result:", result);
         if (result.status === "ok") {
           setTranscript(result.data);
         } else {
-          console.error("[MeetingTranscriptDisplay] Fetch error:", result.error);
+          console.error(
+            "[MeetingTranscriptDisplay] Fetch error:",
+            result.error,
+          );
         }
       } catch (err) {
         console.error("Failed to fetch transcript:", err);

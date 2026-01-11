@@ -13,13 +13,18 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fs::{self, File};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 // Import audio recording components from audio_toolkit
 use crate::audio_toolkit::{AudioSourceConfig, MixedAudioRecorder};
+use crate::managers::meeting_logger::{
+    log_meeting_event, log_performance_metric, MeetingLogContext, MeetingTimer,
+};
 
 /// Database migrations for meeting sessions.
 /// Each migration is applied in order. The library tracks which migrations
@@ -42,6 +47,9 @@ static MIGRATIONS: &[M] = &[
     ),
     M::up(
         "ALTER TABLE meeting_sessions ADD COLUMN audio_source TEXT NOT NULL DEFAULT 'microphone_only';",
+    ),
+    M::up(
+        "ALTER TABLE meeting_sessions ADD COLUMN summary_path TEXT;",
     ),
 ];
 
@@ -182,6 +190,10 @@ pub struct MeetingSession {
 
     /// Audio source configuration for this meeting
     pub audio_source: AudioSourceType,
+
+    /// Relative path to the AI-generated summary file within the meetings directory
+    /// e.g., "{session-id}/summary.md"
+    pub summary_path: Option<String>,
 }
 
 impl MeetingSession {
@@ -200,6 +212,7 @@ impl MeetingSession {
             transcript_path: None,
             error_message: None,
             audio_source: AudioSourceType::default(),
+            summary_path: None,
         }
     }
 
@@ -220,6 +233,126 @@ impl MeetingSession {
             transcript_path: None,
             error_message: None,
             audio_source,
+            summary_path: None,
+        }
+    }
+}
+
+/// Thread-safe wrapper for WavWriter that supports timeout-based finalization.
+///
+/// This struct solves the race condition where `Arc::try_unwrap` fails because
+/// the audio callback thread still holds a reference to the WAV writer.
+///
+/// Key features:
+/// - Uses `AtomicBool` to signal when finalization starts
+/// - Callback checks `closed` flag before writing samples
+/// - `finalize_with_timeout` retries with exponential backoff
+struct WavWriterHandle {
+    inner: Arc<Mutex<Option<WavWriter<File>>>>,
+    closed: Arc<AtomicBool>,
+}
+
+impl WavWriterHandle {
+    fn new(writer: WavWriter<File>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Some(writer))),
+            closed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn write_samples(&self, samples: &[f32]) -> Result<()> {
+        // Check if closed - skip writes after finalize starts
+        if self.closed.load(Ordering::Relaxed) {
+            return Ok(()); // Silently ignore writes after close
+        }
+
+        if let Ok(mut guard) = self.inner.lock() {
+            if let Some(writer) = guard.as_mut() {
+                for sample in samples {
+                    let sample_i16 = (*sample * i16::MAX as f32) as i16;
+                    writer
+                        .write_sample(sample_i16)
+                        .map_err(|e| anyhow::anyhow!("Failed to write sample: {}", e))?;
+                }
+                writer
+                    .flush()
+                    .map_err(|e| anyhow::anyhow!("Failed to flush WAV writer: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn finalize_with_timeout(&self, timeout: Duration) -> Result<()> {
+        let timer = Instant::now();
+        let mut retry_count = 0;
+
+        // 1. Signal callback to stop writing
+        self.closed.store(true, Ordering::SeqCst);
+        debug!(
+            "[WAV_FINALIZE] Closed flag set, starting finalization with timeout {:?}",
+            timeout
+        );
+
+        let deadline = Instant::now() + timeout;
+
+        // 2. Retry loop with exponential backoff
+        loop {
+            if let Ok(mut guard) = self.inner.try_lock() {
+                if let Some(writer) = guard.take() {
+                    let elapsed_ms = timer.elapsed().as_millis();
+                    debug!(
+                        "[WAV_FINALIZE] Lock acquired after {} retries ({elapsed_ms}ms), finalizing...",
+                        retry_count
+                    );
+
+                    let result = writer
+                        .finalize()
+                        .map_err(|e| anyhow::anyhow!("WAV finalize failed: {}", e));
+
+                    if result.is_ok() {
+                        info!(
+                            "[WAV_FINALIZE] Success - finalized in {}ms with {} retries",
+                            elapsed_ms, retry_count
+                        );
+                    } else {
+                        error!(
+                            "[WAV_FINALIZE] Failed after {}ms with {} retries: {:?}",
+                            elapsed_ms, retry_count, result
+                        );
+                    }
+
+                    return result;
+                }
+                // Already finalized
+                debug!("[WAV_FINALIZE] Already finalized (empty Option)");
+                return Ok(());
+            }
+
+            retry_count += 1;
+
+            if Instant::now() >= deadline {
+                let elapsed_ms = timer.elapsed().as_millis();
+                error!(
+                    "[WAV_FINALIZE] Timeout after {:?} ({elapsed_ms}ms) with {} retries; partial audio saved",
+                    timeout, retry_count
+                );
+                return Err(anyhow::anyhow!(
+                    "Timeout finalizing WAV file after {:?}; partial audio saved",
+                    timeout
+                ));
+            }
+
+            // Sleep briefly before retry
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Clone for WavWriterHandle {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            closed: Arc::clone(&self.closed),
         }
     }
 }
@@ -232,8 +365,8 @@ struct MeetingManagerState {
     current_session: Option<MeetingSession>,
     /// Mixed audio recorder for capturing meeting audio (supports mic, system, or both)
     mixed_recorder: Option<MixedAudioRecorder>,
-    /// WAV file writer for incremental audio writing (wrapped in Arc<Mutex<>> for sharing with callback)
-    wav_writer: Option<Arc<Mutex<WavWriter<File>>>>,
+    /// WAV file writer handle with timeout-based finalization
+    wav_writer: Option<WavWriterHandle>,
 }
 
 impl Default for MeetingManagerState {
@@ -392,7 +525,47 @@ impl MeetingSessionManager {
             }
         }
 
-        info!("Updated meeting title for session {}: {}", session_id, title);
+        info!(
+            "Updated meeting title for session {}: {}",
+            session_id, title
+        );
+        Ok(())
+    }
+
+    /// Updates the summary path for a meeting session.
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session to update
+    /// * `summary_path` - The relative path to the summary file
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the summary path was updated successfully
+    /// * `Err` - If session not found or database update fails
+    pub fn update_session_summary_path(&self, session_id: &str, summary_path: &str) -> Result<()> {
+        let conn = self.get_connection()?;
+        let rows_affected = conn.execute(
+            "UPDATE meeting_sessions SET summary_path = ?1 WHERE id = ?2",
+            params![summary_path, session_id],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+
+        // Update in-memory state if this is the current session
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(session) = state.current_session.as_mut() {
+                if session.id == session_id {
+                    session.summary_path = Some(summary_path.to_string());
+                }
+            }
+        }
+
+        info!(
+            "Updated summary path for session {}: {}",
+            session_id, summary_path
+        );
         Ok(())
     }
 
@@ -537,8 +710,12 @@ impl MeetingSessionManager {
         debug!("Created session folder: {:?}", session_dir);
 
         // Create the session object
-        let session =
-            MeetingSession::new_with_audio_source(id.clone(), title.clone(), created_at, audio_source.clone());
+        let session = MeetingSession::new_with_audio_source(
+            id.clone(),
+            title.clone(),
+            created_at,
+            audio_source.clone(),
+        );
 
         // Insert into database
         let conn = self.get_connection()?;
@@ -574,7 +751,7 @@ impl MeetingSessionManager {
         let conn = self.get_connection()?;
         let session = conn
             .query_row(
-                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
                  FROM meeting_sessions WHERE id = ?1",
                 params![session_id],
                 |row| self.row_to_session(row),
@@ -633,11 +810,7 @@ impl MeetingSessionManager {
         let conn = self.get_connection()?;
         let rows_affected = conn.execute(
             "UPDATE meeting_sessions SET status = ?1, error_message = ?2 WHERE id = ?3",
-            params![
-                self.status_to_string(&status),
-                error_message,
-                session_id
-            ],
+            params![self.status_to_string(&status), error_message, session_id],
         )?;
 
         if rows_affected == 0 {
@@ -659,7 +832,7 @@ impl MeetingSessionManager {
     pub fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
              FROM meeting_sessions ORDER BY created_at DESC",
         )?;
 
@@ -710,7 +883,10 @@ impl MeetingSessionManager {
         )?;
 
         if rows_affected == 0 {
-            return Err(anyhow::anyhow!("Session not found in database: {}", session_id));
+            return Err(anyhow::anyhow!(
+                "Session not found in database: {}",
+                session_id
+            ));
         }
 
         info!("Deleted meeting session from database: {}", session_id);
@@ -785,7 +961,10 @@ impl MeetingSessionManager {
     /// Converts a database row to a MeetingSession struct.
     fn row_to_session(&self, row: &rusqlite::Row) -> rusqlite::Result<MeetingSession> {
         let status_str: String = row.get("status")?;
-        let audio_source_str: String = row.get("audio_source").unwrap_or_else(|_| "microphone_only".to_string());
+        let audio_source_str: String = row
+            .get("audio_source")
+            .unwrap_or_else(|_| "microphone_only".to_string());
+        let summary_path: Option<String> = row.get("summary_path")?;
         Ok(MeetingSession {
             id: row.get("id")?,
             title: row.get("title")?,
@@ -796,6 +975,7 @@ impl MeetingSessionManager {
             transcript_path: row.get("transcript_path")?,
             error_message: row.get("error_message")?,
             audio_source: self.string_to_audio_source(&audio_source_str),
+            summary_path,
         })
     }
 
@@ -835,6 +1015,8 @@ impl MeetingSessionManager {
     /// * `Ok(MeetingSession)` - The newly created and active session
     /// * `Err` - If state guard fails, session creation, recorder initialization, or audio capture fails
     pub fn start_recording(&self, audio_source: AudioSourceType) -> Result<MeetingSession> {
+        let timer = MeetingTimer::start();
+
         // State machine guard: validate transition from Idle -> Recording
         // Cannot start recording if already recording or processing
         let current_status = {
@@ -845,17 +1027,23 @@ impl MeetingSessionManager {
         if let Some(status) = current_status {
             match status {
                 MeetingStatus::Recording => {
+                    error!("[MEETING_START] Rejected: already recording");
                     return Err(anyhow::anyhow!(
                         "Cannot start recording: already recording an active session"
                     ));
                 }
                 MeetingStatus::Processing => {
+                    error!("[MEETING_START] Rejected: session being processed");
                     return Err(anyhow::anyhow!(
                         "Cannot start recording: another session is currently being processed"
                     ));
                 }
                 _ => {
                     // Completed, Failed, or Idle status - can start new recording
+                    debug!(
+                        "[MEETING_START] Previous session status: {:?}, proceeding",
+                        status
+                    );
                 }
             }
         }
@@ -867,12 +1055,22 @@ impl MeetingSessionManager {
             AudioSourceType::Mixed => AudioSourceConfig::Mixed,
         };
 
+        info!(
+            "[MEETING_START] Creating session with audio source: {:?}",
+            audio_source
+        );
+
         // Create a new session with the specified audio source
         let session = self.create_session_with_audio_source(audio_source.clone())?;
+
+        let log_ctx = MeetingLogContext::new(&session.id, "start_recording");
+        log_ctx.log_start();
 
         // Create audio file path: {session-id}/audio.wav
         let audio_filename = format!("{}/audio.wav", session.id);
         let audio_path = self.meetings_dir.join(&audio_filename);
+
+        log_ctx.log_file_op(&audio_path.display().to_string(), None);
 
         // Initialize WAV writer for incremental writing
         let spec = WavSpec {
@@ -882,42 +1080,54 @@ impl MeetingSessionManager {
             sample_format: hound::SampleFormat::Int,
         };
 
-        let audio_file = File::create(&audio_path)
-            .map_err(|e| anyhow::anyhow!("Failed to create audio file: {}", e))?;
+        debug!(
+            "[MEETING_START] [{}] WAV spec: {}Hz, {} channel(s), {}bit",
+            session.id, spec.sample_rate, spec.channels, spec.bits_per_sample
+        );
 
-        let wav_writer = WavWriter::new(audio_file, spec)
-            .map_err(|e| anyhow::anyhow!("Failed to create WAV writer: {}", e))?;
+        let audio_file = File::create(&audio_path).map_err(|e| {
+            log_ctx.log_error(&format!("Failed to create audio file: {}", e));
+            anyhow::anyhow!("Failed to create audio file: {}", e)
+        })?;
 
-        // Wrap wav_writer in Arc<Mutex<>> for sharing with callback
-        let wav_writer = Arc::new(Mutex::new(wav_writer));
+        let wav_writer = WavWriter::new(audio_file, spec).map_err(|e| {
+            log_ctx.log_error(&format!("Failed to create WAV writer: {}", e));
+            anyhow::anyhow!("Failed to create WAV writer: {}", e)
+        })?;
+
+        // Wrap in WavWriterHandle for timeout-based finalization
+        let wav_handle = WavWriterHandle::new(wav_writer);
 
         // Add sample callback for incremental WAV writing
-        let wav_writer_clone = Arc::clone(&wav_writer);
+        let wav_handle_clone = wav_handle.clone();
         let sample_callback = move |samples: Vec<f32>| {
-            let mut writer = wav_writer_clone.lock().unwrap();
-            // Convert f32 samples to i16 and write incrementally
-            for sample in &samples {
-                let sample_i16 = (sample * i16::MAX as f32) as i16;
-                if let Err(e) = writer.write_sample(sample_i16) {
-                    error!("Failed to write audio sample: {}", e);
-                }
-            }
-            // Flush periodically for crash resilience
-            if let Err(e) = writer.flush() {
-                error!("Failed to flush WAV file: {}", e);
+            if let Err(e) = wav_handle_clone.write_samples(&samples) {
+                error!("Failed to write audio samples: {}", e);
             }
         };
 
+        debug!(
+            "[MEETING_START] [{}] Initializing MixedAudioRecorder with {:?}",
+            session.id, audio_config
+        );
+
         // Initialize MixedAudioRecorder with the configured audio source
-        let mut mixed_recorder = MixedAudioRecorder::new(audio_config.clone())
-            .map_err(|e| anyhow::anyhow!("Failed to create mixed audio recorder: {}", e))?;
+        let mut mixed_recorder = MixedAudioRecorder::new(audio_config.clone()).map_err(|e| {
+            log_ctx.log_error(&format!("Failed to create recorder: {}", e));
+            anyhow::anyhow!("Failed to create mixed audio recorder: {}", e)
+        })?;
 
         mixed_recorder = mixed_recorder.with_sample_callback(sample_callback);
 
+        let recorder_timer = MeetingTimer::start();
+
         // Start audio capture
-        mixed_recorder
-            .start()
-            .map_err(|e| anyhow::anyhow!("Failed to start audio capture: {}", e))?;
+        mixed_recorder.start().map_err(|e| {
+            log_ctx.log_error(&format!("Failed to start audio capture: {}", e));
+            anyhow::anyhow!("Failed to start audio capture: {}", e)
+        })?;
+
+        log_ctx.log_timing("recorder_start", recorder_timer.elapsed_ms());
 
         // Update session with audio path
         let mut session_with_audio = session.clone();
@@ -930,13 +1140,15 @@ impl MeetingSessionManager {
             params![audio_filename, session.id],
         )?;
 
-        // Update state with mixed_recorder, wav_writer, and session
+        // Update state with mixed_recorder, wav_handle, and session
         {
             let mut state = self.state.lock().unwrap();
             state.mixed_recorder = Some(mixed_recorder);
-            state.wav_writer = Some(wav_writer);
+            state.wav_writer = Some(wav_handle);
             state.current_session = Some(session_with_audio.clone());
         }
+
+        log_ctx.log_state_transition("Idle", "Recording");
 
         // Update session status to Recording in database
         self.update_session_status(&session.id, MeetingStatus::Recording)?;
@@ -947,9 +1159,9 @@ impl MeetingSessionManager {
             .app_handle
             .emit("meeting_started", session_clone.clone())
         {
-            error!("Failed to emit meeting_started event: {}", e);
+            log_ctx.log_error(&format!("Failed to emit meeting_started event: {}", e));
         } else {
-            info!("Emitted meeting_started event for session {}", session.id);
+            log_ctx.log_debug("Emitted meeting_started event");
         }
 
         // Update current session in state with Recording status
@@ -960,9 +1172,20 @@ impl MeetingSessionManager {
             state.current_session = Some(recording_session);
         }
 
-        info!(
-            "Started recording for meeting session: {} - {} (audio source: {:?}, path: {:?})",
-            session.id, session.title, audio_source, audio_path
+        let total_time = timer.elapsed_ms();
+        log_ctx.log_success_with_duration(
+            total_time,
+            &format!(
+                "Session started - audio: {:?}, path: {}",
+                audio_source,
+                audio_path.display()
+            ),
+        );
+
+        log_meeting_event(
+            &session.id,
+            "session_started",
+            &format!("source={:?} path={}", audio_source, audio_filename),
         );
 
         Ok(session_with_audio)
@@ -982,11 +1205,14 @@ impl MeetingSessionManager {
     /// * `Ok(String)` - The relative path to the audio file (e.g., "{session-id}/audio.wav")
     /// * `Err` - If no recording is active, invalid state, or if stopping/finalization fails
     pub fn stop_recording(&self) -> Result<String> {
+        let timer = MeetingTimer::start();
+
         // State machine guard: validate transition from Recording -> Processing
         // Cannot stop if no active session or not in Recording state
         let (session_id, audio_path_opt) = {
             let state = self.state.lock().unwrap();
             let session = state.current_session.as_ref().ok_or_else(|| {
+                error!("[MEETING_STOP] Rejected: no active session");
                 anyhow::anyhow!("Cannot stop recording: no active session")
             })?;
 
@@ -994,31 +1220,37 @@ impl MeetingSessionManager {
                 MeetingStatus::Recording => {
                     // Valid transition
                     let audio_path = session.audio_path.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!("Cannot stop recording: no audio path set for session {}", session.id)
+                        anyhow::anyhow!(
+                            "Cannot stop recording: no audio path set for session {}",
+                            session.id
+                        )
                     })?;
                     (session.id.clone(), audio_path.clone())
                 }
                 MeetingStatus::Idle => {
+                    error!("[MEETING_STOP] Rejected: session is Idle");
                     return Err(anyhow::anyhow!(
                         "Cannot stop recording: no recording in progress (session is Idle)"
                     ));
                 }
                 MeetingStatus::Processing => {
+                    error!("[MEETING_STOP] Rejected: session already processing");
                     return Err(anyhow::anyhow!(
                         "Cannot stop recording: session is already being processed"
                     ));
                 }
                 MeetingStatus::Completed => {
+                    error!("[MEETING_STOP] Rejected: session already completed");
                     return Err(anyhow::anyhow!(
                         "Cannot stop recording: session has already been completed"
                     ));
                 }
                 MeetingStatus::Failed => {
-                    return Err(anyhow::anyhow!(
-                        "Cannot stop recording: session has failed"
-                    ));
+                    error!("[MEETING_STOP] Rejected: session has failed");
+                    return Err(anyhow::anyhow!("Cannot stop recording: session has failed"));
                 }
                 MeetingStatus::Interrupted => {
+                    error!("[MEETING_STOP] Rejected: session was interrupted");
                     return Err(anyhow::anyhow!(
                         "Cannot stop recording: session was interrupted"
                     ));
@@ -1026,44 +1258,49 @@ impl MeetingSessionManager {
             }
         };
 
+        let log_ctx = MeetingLogContext::new(&session_id, "stop_recording");
+        log_ctx.log_start();
+
         // Stop audio capture
+        let recorder_timer = MeetingTimer::start();
         let mixed_recorder_opt = {
             let mut state = self.state.lock().unwrap();
             state.mixed_recorder.take()
         };
 
         if let Some(mut mixed_recorder) = mixed_recorder_opt {
-            mixed_recorder
-                .stop()
-                .map_err(|e| anyhow::anyhow!("Failed to stop mixed audio recorder: {}", e))?;
-            info!("Stopped audio capture for session {}", session_id);
+            mixed_recorder.stop().map_err(|e| {
+                log_ctx.log_error(&format!("Failed to stop recorder: {}", e));
+                anyhow::anyhow!("Failed to stop mixed audio recorder: {}", e)
+            })?;
+
+            log_ctx.log_timing("recorder_stop", recorder_timer.elapsed_ms());
+
             // Close recorder to release resources
-            mixed_recorder
-                .close()
-                .map_err(|e| anyhow::anyhow!("Failed to close mixed audio recorder: {}", e))?;
+            mixed_recorder.close().map_err(|e| {
+                log_ctx.log_error(&format!("Failed to close recorder: {}", e));
+                anyhow::anyhow!("Failed to close mixed audio recorder: {}", e)
+            })?;
+
+            log_ctx.log_debug("Audio capture stopped and closed");
         }
 
-        // Finalize WAV file
+        // Finalize WAV file with timeout
+        let wav_timer = MeetingTimer::start();
         let wav_writer_opt = {
             let mut state = self.state.lock().unwrap();
             state.wav_writer.take()
         };
 
-        if let Some(wav_writer_arc) = wav_writer_opt {
-            // Try to unwrap the Arc to get the WavWriter. If other references exist, wait for them.
-            match Arc::try_unwrap(wav_writer_arc) {
-                Ok(wav_writer_mutex) => {
-                    let wav_writer = wav_writer_mutex.into_inner().unwrap();
-                    wav_writer
-                        .finalize()
-                        .map_err(|e| anyhow::anyhow!("Failed to finalize WAV file: {}", e))?;
-                    info!("Finalized WAV file for session {}", session_id);
-                }
-                Err(_) => {
-                    return Err(anyhow::anyhow!(
-                        "Cannot finalize WAV file: other references still exist"
-                    ));
-                }
+        if let Some(wav_handle) = wav_writer_opt {
+            // Try to finalize with 5 second timeout
+            if let Err(e) = wav_handle.finalize_with_timeout(Duration::from_secs(5)) {
+                log_ctx.log_warning(&format!("WAV finalization failed: {}", e));
+                // Continue anyway - partial audio is saved
+                // Don't return error, just log it
+            } else {
+                log_ctx.log_timing("wav_finalize", wav_timer.elapsed_ms());
+                log_ctx.log_debug("WAV file finalized successfully");
             }
         }
 
@@ -1074,6 +1311,11 @@ impl MeetingSessionManager {
 
         let duration = chrono::Utc::now().timestamp() - current_session.created_at;
         if duration < 0 {
+            log_ctx.log_error(&format!(
+                "Invalid duration: created_at {} > now {}",
+                current_session.created_at,
+                chrono::Utc::now().timestamp()
+            ));
             return Err(anyhow::anyhow!(
                 "Invalid duration calculated for session {}: created_at {} > now {}",
                 session_id,
@@ -1082,34 +1324,53 @@ impl MeetingSessionManager {
             ));
         }
 
+        log_performance_metric(
+            &session_id,
+            "recording_duration",
+            duration as f64,
+            "seconds",
+        );
+
         // Validate state transition before updating
         {
             let state = self.state.lock().unwrap();
             if let Some(session) = &state.current_session {
                 self.validate_state_transition(&session.status, &MeetingStatus::Processing)
-                    .map_err(|e| anyhow::anyhow!("State transition validation failed: {}", e))?;
+                    .map_err(|e| {
+                        log_ctx.log_error(&format!("State transition validation failed: {}", e));
+                        anyhow::anyhow!("State transition validation failed: {}", e)
+                    })?;
             }
         }
 
+        log_ctx.log_state_transition("Recording", "Processing");
+
         // Emit meeting_stopped event with session details
         let session_for_event = self.get_session(&session_id)?.ok_or_else(|| {
-            anyhow::anyhow!("Session {} not found when emitting meeting_stopped", session_id)
+            anyhow::anyhow!(
+                "Session {} not found when emitting meeting_stopped",
+                session_id
+            )
         })?;
 
         if let Err(e) = self
             .app_handle
             .emit("meeting_stopped", session_for_event.clone())
         {
-            error!("Failed to emit meeting_stopped event: {}", e);
+            log_ctx.log_error(&format!("Failed to emit meeting_stopped event: {}", e));
         } else {
-            info!("Emitted meeting_stopped event for session {}", session_id);
+            log_ctx.log_debug("Emitted meeting_stopped event");
         }
 
         // Update database with duration and status
         let conn = self.get_connection()?;
         conn.execute(
             "UPDATE meeting_sessions SET duration = ?1, status = ?2 WHERE id = ?3",
-            params![duration, self.status_to_string(&MeetingStatus::Processing), session_id],
+            params![
+                duration,
+                self.status_to_string(&MeetingStatus::Processing),
+                session_id
+            ],
         )?;
 
         // Update in-memory state atomically
@@ -1130,14 +1391,24 @@ impl MeetingSessionManager {
             .app_handle
             .emit("meeting_processing", updated_session.clone())
         {
-            error!("Failed to emit meeting_processing event: {}", e);
+            log_ctx.log_error(&format!("Failed to emit meeting_processing event: {}", e));
         } else {
-            info!("Emitted meeting_processing event for session {}", session_id);
+            log_ctx.log_debug("Emitted meeting_processing event");
         }
 
-        info!(
-            "Stopped recording for session {}: duration={}s, status=Processing, audio={}",
-            session_id, duration, audio_path_opt
+        let total_time = timer.elapsed_ms();
+        log_ctx.log_success_with_duration(
+            total_time,
+            &format!(
+                "Recording stopped - duration={}s, audio={}",
+                duration, audio_path_opt
+            ),
+        );
+
+        log_meeting_event(
+            &session_id,
+            "recording_stopped",
+            &format!("duration={}s path={}", duration, audio_path_opt),
         );
 
         // Spawn background task for transcription to avoid blocking UI
@@ -1161,19 +1432,20 @@ impl MeetingSessionManager {
                     );
 
                     // Save transcript and update status to Completed
-                    if let Err(e) = manager_clone.save_transcript_and_update_status(
-                        &session_id_clone,
-                        &transcription_text,
-                    ) {
+                    if let Err(e) = manager_clone
+                        .save_transcript_and_update_status(&session_id_clone, &transcription_text)
+                    {
                         let error_msg = format!("Failed to save transcript: {}", e);
                         error!(
                             "Failed to save transcript for session {}: {}",
                             session_id_clone, error_msg
                         );
                         // Update status to Failed on save error with error message
-                        if let Err(update_err) = manager_clone
-                            .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg)
-                        {
+                        if let Err(update_err) = manager_clone.update_session_status_with_error(
+                            &session_id_clone,
+                            MeetingStatus::Failed,
+                            &error_msg,
+                        ) {
                             error!(
                                 "Failed to update session {} status to Failed: {}",
                                 session_id_clone, update_err
@@ -1186,10 +1458,7 @@ impl MeetingSessionManager {
                                         .app_handle
                                         .emit("meeting_failed", session_data.clone())
                                     {
-                                        error!(
-                                            "Failed to emit meeting_failed event: {}",
-                                            emit_err
-                                        );
+                                        error!("Failed to emit meeting_failed event: {}", emit_err);
                                     } else {
                                         info!(
                                             "Emitted meeting_failed event for session {}",
@@ -1222,10 +1491,7 @@ impl MeetingSessionManager {
                                     .app_handle
                                     .emit("meeting_completed", session_data.clone())
                                 {
-                                    error!(
-                                        "Failed to emit meeting_completed event: {}",
-                                        emit_err
-                                    );
+                                    error!("Failed to emit meeting_completed event: {}", emit_err);
                                 } else {
                                     info!(
                                         "Emitted meeting_completed event for session {}",
@@ -1243,9 +1509,11 @@ impl MeetingSessionManager {
                         session_id_clone, error_msg
                     );
                     // Update status to Failed on transcription error with error message
-                    if let Err(update_err) = manager_clone
-                        .update_session_status_with_error(&session_id_clone, MeetingStatus::Failed, &error_msg)
-                    {
+                    if let Err(update_err) = manager_clone.update_session_status_with_error(
+                        &session_id_clone,
+                        MeetingStatus::Failed,
+                        &error_msg,
+                    ) {
                         error!(
                             "Failed to update session {} status to Failed: {}",
                             session_id_clone, update_err
@@ -1258,10 +1526,7 @@ impl MeetingSessionManager {
                                     .app_handle
                                     .emit("meeting_failed", session_data.clone())
                                 {
-                                    error!(
-                                        "Failed to emit meeting_failed event: {}",
-                                        emit_err
-                                    );
+                                    error!("Failed to emit meeting_failed event: {}", emit_err);
                                 } else {
                                     info!(
                                         "Emitted meeting_failed event for session {}",
@@ -1304,37 +1569,41 @@ impl MeetingSessionManager {
     /// * `error_message` - Description of the error that occurred
     #[allow(dead_code)]
     pub fn handle_mic_disconnect(&self, error_message: &str) {
-        error!("Microphone disconnect detected: {}", error_message);
+        let timer = MeetingTimer::start();
+        error!("[MIC_DISCONNECT] Detected: {}", error_message);
 
         // Get current session info
         let session_info = {
             let state = self.state.lock().unwrap();
-            state.current_session.as_ref().map(|s| (s.id.clone(), s.status.clone()))
+            state
+                .current_session
+                .as_ref()
+                .map(|s| (s.id.clone(), s.status.clone()))
         };
 
         let (session_id, status) = match session_info {
             Some((id, status)) => (id, status),
             None => {
-                debug!("No active session during mic disconnect - ignoring");
+                debug!("[MIC_DISCONNECT] No active session - ignoring");
                 return;
             }
         };
 
+        let log_ctx = MeetingLogContext::new(&session_id, "handle_mic_disconnect");
+        log_ctx.log_start();
+        log_ctx.log_error(error_message);
+
         // Only handle if we're currently recording
         if status != MeetingStatus::Recording {
-            debug!(
-                "Session {} is not recording (status: {:?}) - ignoring mic disconnect",
-                session_id, status
-            );
+            log_ctx.log_debug(&format!(
+                "Session not recording (status: {:?}) - ignoring",
+                status
+            ));
             return;
         }
 
-        info!(
-            "Handling mic disconnect for recording session {}: {}",
-            session_id, error_message
-        );
-
         // Stop the recorder if it exists (don't fail if stop errors)
+        let recorder_timer = MeetingTimer::start();
         let mixed_recorder_opt = {
             let mut state = self.state.lock().unwrap();
             state.mixed_recorder.take()
@@ -1342,47 +1611,32 @@ impl MeetingSessionManager {
 
         if let Some(mut mixed_recorder) = mixed_recorder_opt {
             if let Err(e) = mixed_recorder.stop() {
-                error!("Failed to stop recorder during mic disconnect: {}", e);
+                log_ctx.log_warning(&format!("Failed to stop recorder: {}", e));
                 // Continue anyway - we want to save partial audio
+            } else {
+                log_ctx.log_timing("recorder_stop", recorder_timer.elapsed_ms());
             }
             // Close recorder to release resources
             if let Err(e) = mixed_recorder.close() {
-                error!("Failed to close recorder during mic disconnect: {}", e);
+                log_ctx.log_warning(&format!("Failed to close recorder: {}", e));
             }
         }
 
         // Finalize the WAV file to ensure partial audio is saved
+        let wav_timer = MeetingTimer::start();
         let wav_writer_opt = {
             let mut state = self.state.lock().unwrap();
             state.wav_writer.take()
         };
 
-        if let Some(wav_writer_arc) = wav_writer_opt {
-            match Arc::try_unwrap(wav_writer_arc) {
-                Ok(wav_writer_mutex) => {
-                    match wav_writer_mutex.into_inner().unwrap().finalize() {
-                        Ok(()) => {
-                            info!(
-                                "Successfully finalized partial audio for session {} after mic disconnect",
-                                session_id
-                            );
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to finalize WAV file during mic disconnect for session {}: {}",
-                                session_id, e
-                            );
-                            // Continue anyway - we still want to update status
-                        }
-                    }
-                }
-                Err(_) => {
-                    error!(
-                        "Cannot finalize WAV file for session {}: other references still exist",
-                        session_id
-                    );
-                    // Continue anyway - we still want to update status
-                }
+        if let Some(wav_handle) = wav_writer_opt {
+            // Try to finalize with 5 second timeout
+            if let Err(e) = wav_handle.finalize_with_timeout(Duration::from_secs(5)) {
+                log_ctx.log_error(&format!("Failed to finalize WAV: {}", e));
+                // Continue anyway - we still want to update status
+            } else {
+                log_ctx.log_timing("wav_finalize", wav_timer.elapsed_ms());
+                log_ctx.log_debug("Successfully finalized partial audio");
             }
         }
 
@@ -1400,6 +1654,17 @@ impl MeetingSessionManager {
                 None
             }
         };
+
+        if let Some(dur) = duration {
+            log_performance_metric(
+                &session_id,
+                "partial_recording_duration",
+                dur as f64,
+                "seconds",
+            );
+        }
+
+        log_ctx.log_state_transition("Recording", "Failed");
 
         // Update database with Failed status, error message, and partial duration
         let error_msg = format!("Microphone disconnected: {}", error_message);
@@ -1426,10 +1691,7 @@ impl MeetingSessionManager {
             };
 
             if let Err(e) = update_result {
-                error!(
-                    "Failed to update session {} to Failed status: {}",
-                    session_id, e
-                );
+                log_ctx.log_error(&format!("Failed to update database: {}", e));
             }
         }
 
@@ -1449,12 +1711,9 @@ impl MeetingSessionManager {
         // Emit meeting_failed event
         if let Ok(Some(session_data)) = self.get_session(&session_id) {
             if let Err(e) = self.app_handle.emit("meeting_failed", session_data.clone()) {
-                error!("Failed to emit meeting_failed event: {}", e);
+                log_ctx.log_error(&format!("Failed to emit meeting_failed event: {}", e));
             } else {
-                info!(
-                    "Emitted meeting_failed event for session {} after mic disconnect",
-                    session_id
-                );
+                log_ctx.log_debug("Emitted meeting_failed event");
             }
         }
 
@@ -1468,18 +1727,34 @@ impl MeetingSessionManager {
 
         let disconnect_event = MicDisconnectEvent {
             session_id: session_id.clone(),
-            error_message: error_msg,
+            error_message: error_msg.clone(),
             partial_audio_saved: true, // WAV writer should have saved partial data
         };
 
         if let Err(e) = self.app_handle.emit("mic_disconnected", disconnect_event) {
-            error!("Failed to emit mic_disconnected event: {}", e);
+            log_ctx.log_error(&format!("Failed to emit mic_disconnected event: {}", e));
         } else {
-            info!(
-                "Emitted mic_disconnected event for session {}",
-                session_id
-            );
+            log_ctx.log_debug("Emitted mic_disconnected event");
         }
+
+        let total_time = timer.elapsed_ms();
+        log_ctx.log_success_with_duration(
+            total_time,
+            &format!(
+                "Mic disconnect handled - partial_duration={}s",
+                duration.unwrap_or(0)
+            ),
+        );
+
+        log_meeting_event(
+            &session_id,
+            "mic_disconnected",
+            &format!(
+                "error={} duration={}s",
+                error_message,
+                duration.unwrap_or(0)
+            ),
+        );
     }
 
     /// Saves the transcript to a file and updates the session status.
@@ -1513,7 +1788,11 @@ impl MeetingSessionManager {
 
         // Write transcript to file
         fs::write(&transcript_path, transcript_text).map_err(|e| {
-            anyhow::anyhow!("Failed to write transcript file {:?}: {}", transcript_path, e)
+            anyhow::anyhow!(
+                "Failed to write transcript file {:?}: {}",
+                transcript_path,
+                e
+            )
         })?;
 
         info!(
@@ -1616,11 +1895,17 @@ impl MeetingSessionManager {
         }
 
         // Call TranscriptionManager to process audio
-        let transcription_text = self.transcription_manager.transcribe(samples).map_err(|e| {
-            anyhow::anyhow!("Transcription failed for {:?}: {}", full_audio_path, e)
-        })?;
+        let transcription_text = self
+            .transcription_manager
+            .transcribe(samples)
+            .map_err(|e| {
+                anyhow::anyhow!("Transcription failed for {:?}: {}", full_audio_path, e)
+            })?;
 
-        debug!("Transcription completed: {} characters", transcription_text.len());
+        debug!(
+            "Transcription completed: {} characters",
+            transcription_text.len()
+        );
 
         Ok(transcription_text)
     }
@@ -1641,37 +1926,42 @@ impl MeetingSessionManager {
     /// * `true` if there was an active recording that was interrupted
     /// * `false` if no recording was in progress
     pub fn handle_app_shutdown(&self) -> bool {
-        info!("Handling app shutdown for meeting sessions");
+        let timer = MeetingTimer::start();
+        info!("[APP_SHUTDOWN] Handling app shutdown for meeting sessions");
 
         // Get current session info
         let session_info = {
             let state = self.state.lock().unwrap();
-            state.current_session.as_ref().map(|s| (s.id.clone(), s.status.clone()))
+            state
+                .current_session
+                .as_ref()
+                .map(|s| (s.id.clone(), s.status.clone()))
         };
 
         let (session_id, status) = match session_info {
             Some((id, status)) => (id, status),
             None => {
-                debug!("No active session during app shutdown");
+                debug!("[APP_SHUTDOWN] No active session");
                 return false;
             }
         };
 
+        let log_ctx = MeetingLogContext::new(&session_id, "handle_app_shutdown");
+        log_ctx.log_start();
+
         // Only handle if we're currently recording
         if status != MeetingStatus::Recording {
-            debug!(
-                "Session {} is not recording (status: {:?}) - no cleanup needed",
-                session_id, status
-            );
+            log_ctx.log_debug(&format!(
+                "Session not recording (status: {:?}) - no cleanup needed",
+                status
+            ));
             return false;
         }
 
-        info!(
-            "Interrupting active recording session {} due to app shutdown",
-            session_id
-        );
+        log_ctx.log_warning("Interrupting active recording due to app shutdown");
 
         // Stop the recorder if it exists
+        let recorder_timer = MeetingTimer::start();
         let mixed_recorder_opt = {
             let mut state = self.state.lock().unwrap();
             state.mixed_recorder.take()
@@ -1679,49 +1969,32 @@ impl MeetingSessionManager {
 
         if let Some(mut mixed_recorder) = mixed_recorder_opt {
             if let Err(e) = mixed_recorder.stop() {
-                error!("Failed to stop recorder during app shutdown: {}", e);
+                log_ctx.log_error(&format!("Failed to stop recorder: {}", e));
                 // Continue anyway - we want to save partial audio
             } else {
-                info!("Stopped audio recorder for session {}", session_id);
+                log_ctx.log_timing("recorder_stop", recorder_timer.elapsed_ms());
             }
             // Close recorder to release resources
             if let Err(e) = mixed_recorder.close() {
-                error!("Failed to close recorder during app shutdown: {}", e);
+                log_ctx.log_warning(&format!("Failed to close recorder: {}", e));
             }
         }
 
         // Finalize the WAV file to ensure partial audio is saved
+        let wav_timer = MeetingTimer::start();
         let wav_writer_opt = {
             let mut state = self.state.lock().unwrap();
             state.wav_writer.take()
         };
 
-        if let Some(wav_writer_arc) = wav_writer_opt {
-            match Arc::try_unwrap(wav_writer_arc) {
-                Ok(wav_writer_mutex) => {
-                    match wav_writer_mutex.into_inner().unwrap().finalize() {
-                        Ok(()) => {
-                            info!(
-                                "Successfully finalized partial audio for session {} during shutdown",
-                                session_id
-                            );
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to finalize WAV file during shutdown for session {}: {}",
-                                session_id, e
-                            );
-                            // Continue anyway - we still want to update status
-                        }
-                    }
-                }
-                Err(_) => {
-                    error!(
-                        "Cannot finalize WAV file for session {}: other references still exist",
-                        session_id
-                    );
-                    // Continue anyway - we still want to update status
-                }
+        if let Some(wav_handle) = wav_writer_opt {
+            // Try to finalize with 5 second timeout
+            if let Err(e) = wav_handle.finalize_with_timeout(Duration::from_secs(5)) {
+                log_ctx.log_error(&format!("Failed to finalize WAV: {}", e));
+                // Continue anyway - we still want to update status
+            } else {
+                log_ctx.log_timing("wav_finalize", wav_timer.elapsed_ms());
+                log_ctx.log_debug("Successfully finalized partial audio");
             }
         }
 
@@ -1739,6 +2012,17 @@ impl MeetingSessionManager {
                 None
             }
         };
+
+        if let Some(dur) = duration {
+            log_performance_metric(
+                &session_id,
+                "interrupted_recording_duration",
+                dur as f64,
+                "seconds",
+            );
+        }
+
+        log_ctx.log_state_transition("Recording", "Interrupted");
 
         // Update database with Interrupted status and partial duration
         if let Ok(conn) = self.get_connection() {
@@ -1764,15 +2048,12 @@ impl MeetingSessionManager {
             };
 
             if let Err(e) = update_result {
-                error!(
-                    "Failed to update session {} to Interrupted status: {}",
-                    session_id, e
-                );
+                log_ctx.log_error(&format!("Failed to update database: {}", e));
             } else {
-                info!(
-                    "Updated session {} to Interrupted status (duration: {:?}s)",
-                    session_id, duration
-                );
+                log_ctx.log_debug(&format!(
+                    "Updated session to Interrupted status (duration: {:?}s)",
+                    duration
+                ));
             }
         }
 
@@ -1783,6 +2064,21 @@ impl MeetingSessionManager {
             state.mixed_recorder = None;
             state.wav_writer = None;
         }
+
+        let total_time = timer.elapsed_ms();
+        log_ctx.log_success_with_duration(
+            total_time,
+            &format!(
+                "App shutdown handled - session interrupted, duration={}s",
+                duration.unwrap_or(0)
+            ),
+        );
+
+        log_meeting_event(
+            &session_id,
+            "app_shutdown_interrupted",
+            &format!("duration={}s", duration.unwrap_or(0)),
+        );
 
         true
     }
@@ -1824,7 +2120,7 @@ impl MeetingSessionManager {
 
         // Query for all interrupted sessions
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
              FROM meeting_sessions WHERE status = ?1 ORDER BY created_at DESC",
         )?;
 
@@ -2045,6 +2341,7 @@ mod tests {
                 transcript_path: row.get("transcript_path")?,
                 error_message: row.get("error_message")?,
                 audio_source: self.string_to_audio_source(&audio_source_str),
+                summary_path: row.get("summary_path").unwrap_or(None),
             })
         }
 
@@ -2135,7 +2432,11 @@ mod tests {
             Ok(sessions)
         }
 
-        fn validate_state_transition(&self, from: &MeetingStatus, to: &MeetingStatus) -> Result<()> {
+        fn validate_state_transition(
+            &self,
+            from: &MeetingStatus,
+            to: &MeetingStatus,
+        ) -> Result<()> {
             match (from, to) {
                 // Allowed transitions
                 (MeetingStatus::Idle, MeetingStatus::Recording) => Ok(()),
@@ -2323,11 +2624,11 @@ mod tests {
         let session1 = manager
             .create_session()
             .expect("Failed to create session 1");
-        std::thread::sleep(std::time::Duration::from_millis(10)); // Ensure different timestamps
+        std::thread::sleep(std::time::Duration::from_secs(1)); // Ensure different timestamps (uses seconds)
         let session2 = manager
             .create_session()
             .expect("Failed to create session 2");
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_secs(1));
         let session3 = manager
             .create_session()
             .expect("Failed to create session 3");
@@ -2390,38 +2691,54 @@ mod tests {
         let manager = TestMeetingManager::new(temp_dir.path());
 
         // Test valid transitions
-        let result = manager.validate_state_transition(&MeetingStatus::Idle, &MeetingStatus::Recording);
+        let result =
+            manager.validate_state_transition(&MeetingStatus::Idle, &MeetingStatus::Recording);
         assert!(result.is_ok(), "Idle -> Recording should be valid");
 
-        let result = manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Processing);
+        let result = manager
+            .validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Processing);
         assert!(result.is_ok(), "Recording -> Processing should be valid");
 
-        let result = manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Failed);
-        assert!(result.is_ok(), "Recording -> Failed (mic disconnect) should be valid");
+        let result =
+            manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Failed);
+        assert!(
+            result.is_ok(),
+            "Recording -> Failed (mic disconnect) should be valid"
+        );
 
-        let result = manager.validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Completed);
+        let result = manager
+            .validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Completed);
         assert!(result.is_ok(), "Processing -> Completed should be valid");
 
-        let result = manager.validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Failed);
+        let result =
+            manager.validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Failed);
         assert!(result.is_ok(), "Processing -> Failed should be valid");
 
-        let result = manager.validate_state_transition(&MeetingStatus::Failed, &MeetingStatus::Processing);
-        assert!(result.is_ok(), "Failed -> Processing (retry) should be valid");
+        let result =
+            manager.validate_state_transition(&MeetingStatus::Failed, &MeetingStatus::Processing);
+        assert!(
+            result.is_ok(),
+            "Failed -> Processing (retry) should be valid"
+        );
 
         // Test invalid transitions
-        let result = manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Recording);
+        let result =
+            manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Recording);
         assert!(result.is_err(), "Recording -> Recording should be invalid");
 
-        let result = manager.validate_state_transition(&MeetingStatus::Completed, &MeetingStatus::Recording);
+        let result =
+            manager.validate_state_transition(&MeetingStatus::Completed, &MeetingStatus::Recording);
         assert!(result.is_err(), "Completed -> Recording should be invalid");
 
-        let result = manager.validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Recording);
+        let result = manager
+            .validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Recording);
         assert!(result.is_err(), "Processing -> Recording should be invalid");
 
         let result = manager.validate_state_transition(&MeetingStatus::Idle, &MeetingStatus::Idle);
         assert!(result.is_err(), "Idle -> Idle should be invalid");
 
-        let result = manager.validate_state_transition(&MeetingStatus::Completed, &MeetingStatus::Processing);
+        let result = manager
+            .validate_state_transition(&MeetingStatus::Completed, &MeetingStatus::Processing);
         assert!(result.is_err(), "Completed -> Processing should be invalid");
     }
 
@@ -2431,7 +2748,9 @@ mod tests {
         let manager = TestMeetingManager::new(temp_dir.path());
 
         // Create first session and set to Recording
-        let session1 = manager.create_session().expect("Failed to create session 1");
+        let session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
         manager
             .update_session_status(&session1.id, MeetingStatus::Recording)
             .expect("Failed to set to Recording");
@@ -2596,7 +2915,9 @@ mod tests {
 
         // Final state should be valid (no corruption)
         let final_status = shared_state.lock().unwrap();
-        assert!(*final_status == MeetingStatus::Recording || *final_status == MeetingStatus::Processing,
-            "Final state should be valid, not corrupted");
+        assert!(
+            *final_status == MeetingStatus::Recording || *final_status == MeetingStatus::Processing,
+            "Final state should be valid, not corrupted"
+        );
     }
 }

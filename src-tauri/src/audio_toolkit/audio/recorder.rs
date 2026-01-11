@@ -118,26 +118,46 @@ impl AudioRecorder {
             );
 
             let stream = match config.sample_format() {
-                cpal::SampleFormat::U8 => {
-                    AudioRecorder::build_stream::<u8>(&thread_device, &config, sample_tx, channels, error_cb.clone())
-                        .unwrap()
-                }
-                cpal::SampleFormat::I8 => {
-                    AudioRecorder::build_stream::<i8>(&thread_device, &config, sample_tx, channels, error_cb.clone())
-                        .unwrap()
-                }
-                cpal::SampleFormat::I16 => {
-                    AudioRecorder::build_stream::<i16>(&thread_device, &config, sample_tx, channels, error_cb.clone())
-                        .unwrap()
-                }
-                cpal::SampleFormat::I32 => {
-                    AudioRecorder::build_stream::<i32>(&thread_device, &config, sample_tx, channels, error_cb.clone())
-                        .unwrap()
-                }
-                cpal::SampleFormat::F32 => {
-                    AudioRecorder::build_stream::<f32>(&thread_device, &config, sample_tx, channels, error_cb.clone())
-                        .unwrap()
-                }
+                cpal::SampleFormat::U8 => AudioRecorder::build_stream::<u8>(
+                    &thread_device,
+                    &config,
+                    sample_tx,
+                    channels,
+                    error_cb.clone(),
+                )
+                .unwrap(),
+                cpal::SampleFormat::I8 => AudioRecorder::build_stream::<i8>(
+                    &thread_device,
+                    &config,
+                    sample_tx,
+                    channels,
+                    error_cb.clone(),
+                )
+                .unwrap(),
+                cpal::SampleFormat::I16 => AudioRecorder::build_stream::<i16>(
+                    &thread_device,
+                    &config,
+                    sample_tx,
+                    channels,
+                    error_cb.clone(),
+                )
+                .unwrap(),
+                cpal::SampleFormat::I32 => AudioRecorder::build_stream::<i32>(
+                    &thread_device,
+                    &config,
+                    sample_tx,
+                    channels,
+                    error_cb.clone(),
+                )
+                .unwrap(),
+                cpal::SampleFormat::F32 => AudioRecorder::build_stream::<f32>(
+                    &thread_device,
+                    &config,
+                    sample_tx,
+                    channels,
+                    error_cb.clone(),
+                )
+                .unwrap(),
                 _ => panic!("unsupported sample format"),
             };
 
@@ -229,12 +249,7 @@ impl AudioRecorder {
             }
         };
 
-        device.build_input_stream(
-            &config.clone().into(),
-            stream_cb,
-            error_handler,
-            None,
-        )
+        device.build_input_stream(&config.clone().into(), stream_cb, error_handler, None)
     }
 
     fn get_preferred_config(

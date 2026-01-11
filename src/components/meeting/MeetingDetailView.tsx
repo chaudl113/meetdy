@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   X,
@@ -17,6 +17,7 @@ import { formatDuration, useMeetingStore } from "../../stores/meetingStore";
 import { AudioPlayer } from "../ui/AudioPlayer";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { MeetingSummary } from "./MeetingSummary";
 
 interface MeetingDetailViewProps {
   session: MeetingSession;
@@ -40,6 +41,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   const { t } = useTranslation();
   const { fetchSessions, retryTranscription } = useMeetingStore();
   const [transcript, setTranscript] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,65 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   const [isRetrying, setIsRetrying] = useState(false);
   const [currentSession, setCurrentSession] = useState(session);
 
-  // Load transcript and audio URL
+  // Ref for focus trap
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousActiveElement = useRef<Element | null>(null);
+
+  // Handle Escape key to close modal
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !showDeleteConfirm) {
+        onClose();
+      }
+    },
+    [onClose, showDeleteConfirm],
+  );
+
+  // Focus trap and escape key handler
+  useEffect(() => {
+    // Save the previously focused element
+    previousActiveElement.current = document.activeElement;
+
+    // Focus the modal
+    modalRef.current?.focus();
+
+    // Add escape key listener
+    document.addEventListener("keydown", handleKeyDown);
+
+    // Prevent body scroll
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+
+      // Restore focus to previous element
+      if (previousActiveElement.current instanceof HTMLElement) {
+        previousActiveElement.current.focus();
+      }
+    };
+  }, [handleKeyDown]);
+
+  // Focus trap: keep focus within modal
+  useEffect(() => {
+    const handleFocusTrap = (event: FocusEvent) => {
+      if (
+        modalRef.current &&
+        event.target instanceof Node &&
+        !modalRef.current.contains(event.target)
+      ) {
+        event.preventDefault();
+        modalRef.current.focus();
+      }
+    };
+
+    document.addEventListener("focusin", handleFocusTrap);
+    return () => {
+      document.removeEventListener("focusin", handleFocusTrap);
+    };
+  }, []);
+
+  // Load transcript, summary, and audio URL
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -62,6 +122,18 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
           }
         } catch (err) {
           console.error("Failed to load transcript:", err);
+        }
+      }
+
+      // Load summary
+      if (currentSession.summary_path) {
+        try {
+          const result = await commands.getMeetingSummary(currentSession.id);
+          if (result.status === "ok" && result.data) {
+            setSummary(result.data);
+          }
+        } catch (err) {
+          console.error("Failed to load summary:", err);
         }
       }
 
@@ -88,21 +160,27 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   // Listen for meeting events to update status
   useEffect(() => {
     const setupListeners = async () => {
-      const unlistenCompleted = await listen<MeetingSession>("meeting_completed", (event) => {
-        if (event.payload.id === currentSession.id) {
-          console.log("Meeting completed event received:", event.payload);
-          setCurrentSession(event.payload);
-          setIsRetrying(false);
-        }
-      });
+      const unlistenCompleted = await listen<MeetingSession>(
+        "meeting_completed",
+        (event) => {
+          if (event.payload.id === currentSession.id) {
+            console.log("Meeting completed event received:", event.payload);
+            setCurrentSession(event.payload);
+            setIsRetrying(false);
+          }
+        },
+      );
 
-      const unlistenFailed = await listen<MeetingSession>("meeting_failed", (event) => {
-        if (event.payload.id === currentSession.id) {
-          console.log("Meeting failed event received:", event.payload);
-          setCurrentSession(event.payload);
-          setIsRetrying(false);
-        }
-      });
+      const unlistenFailed = await listen<MeetingSession>(
+        "meeting_failed",
+        (event) => {
+          if (event.payload.id === currentSession.id) {
+            console.log("Meeting failed event received:", event.payload);
+            setCurrentSession(event.payload);
+            setIsRetrying(false);
+          }
+        },
+      );
 
       return () => {
         unlistenCompleted();
@@ -160,7 +238,11 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
       const result = await commands.retryTranscription(currentSession.id);
       if (result.status === "ok") {
         // Update local session status
-        setCurrentSession({ ...currentSession, status: "processing", error_message: null });
+        setCurrentSession({
+          ...currentSession,
+          status: "processing",
+          error_message: null,
+        });
         setTranscript(null);
         await fetchSessions();
       } else {
@@ -184,14 +266,29 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
     interrupted: "text-orange-400",
   };
 
-  const canRetry = currentSession.status === "failed" || currentSession.status === "interrupted" || currentSession.status === "completed";
+  const canRetry =
+    currentSession.status === "failed" ||
+    currentSession.status === "interrupted" ||
+    currentSession.status === "completed";
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div
+      ref={modalRef}
+      tabIndex={-1}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="meeting-detail-title"
+    >
       <div className="bg-background border border-mid-gray/30 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-mid-gray/20">
-          <h2 className="text-lg font-semibold truncate pr-4">{currentSession.title}</h2>
+          <h2
+            id="meeting-detail-title"
+            className="text-lg font-semibold truncate pr-4"
+          >
+            {currentSession.title}
+          </h2>
           <div className="flex items-center gap-2">
             {/* Retry button */}
             {canRetry && (
@@ -203,12 +300,18 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 }}
                 disabled={isRetrying}
                 className="p-1.5 hover:bg-mid-gray/20 rounded-lg transition-colors text-mid-gray hover:text-white disabled:opacity-50"
-                title={t("meeting.detail.retryTranscription", "Re-transcribe")}
+                aria-label={t(
+                  "meeting.detail.retryTranscription",
+                  "Re-transcribe",
+                )}
               >
                 {isRetrying ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <Loader2
+                    className="h-5 w-5 animate-spin"
+                    aria-hidden="true"
+                  />
                 ) : (
-                  <RotateCcw className="h-5 w-5" />
+                  <RotateCcw className="h-5 w-5" aria-hidden="true" />
                 )}
               </button>
             )}
@@ -222,12 +325,12 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
               }}
               disabled={isDeleting}
               className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors text-mid-gray hover:text-red-400 disabled:opacity-50"
-              title={t("meeting.detail.delete", "Delete")}
+              aria-label={t("meeting.detail.delete", "Delete")}
             >
               {isDeleting ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
+                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
               ) : (
-                <Trash2 className="h-5 w-5" />
+                <Trash2 className="h-5 w-5" aria-hidden="true" />
               )}
             </button>
             {/* Close button */}
@@ -238,8 +341,9 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 onClose();
               }}
               className="p-1.5 hover:bg-mid-gray/20 rounded-lg transition-colors"
+              aria-label={t("common.close", "Close")}
             >
-              <X className="h-5 w-5" />
+              <X className="h-5 w-5" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -258,7 +362,9 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 <span>{formatDuration(currentSession.duration)}</span>
               </div>
             )}
-            <div className={`flex items-center gap-1.5 ${statusColors[currentSession.status]}`}>
+            <div
+              className={`flex items-center gap-1.5 ${statusColors[currentSession.status]}`}
+            >
               <span className="capitalize">{currentSession.status}</span>
             </div>
           </div>
@@ -268,7 +374,9 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
             <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
-                <p className="text-sm text-red-400">{currentSession.error_message}</p>
+                <p className="text-sm text-red-400">
+                  {currentSession.error_message}
+                </p>
               </div>
             </div>
           )}
@@ -282,6 +390,23 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
               </h3>
               <AudioPlayer src={audioUrl} className="w-full" />
             </div>
+          )}
+
+          {/* AI Summary */}
+          {currentSession.status === "completed" && (
+            <MeetingSummary
+              sessionId={currentSession.id}
+              summary={summary}
+              hasSummary={!!currentSession.summary_path}
+              hasTranscript={!!transcript}
+              onSummaryGenerated={(newSummary) => {
+                setSummary(newSummary);
+                setCurrentSession({
+                  ...currentSession,
+                  summary_path: `${currentSession.id}/summary.md`,
+                });
+              }}
+            />
           )}
 
           {/* Transcript */}
@@ -312,7 +437,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                   )}
                 </button>
               </div>
-              <div className="bg-dark-gray/30 rounded-lg p-4 max-h-64 overflow-y-auto">
+              <div className="bg-dark-gray/30 rounded-lg p-4">
                 <p className="text-sm whitespace-pre-wrap">{transcript}</p>
               </div>
             </div>
@@ -342,7 +467,10 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
               </h3>
             </div>
             <p className="text-mid-gray mb-6">
-              {t("meeting.detail.confirmDelete", "Are you sure you want to delete this meeting? This action cannot be undone.")}
+              {t(
+                "meeting.detail.confirmDelete",
+                "Are you sure you want to delete this meeting? This action cannot be undone.",
+              )}
             </p>
             <div className="flex gap-3 justify-end">
               <button
