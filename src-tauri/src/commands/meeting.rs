@@ -10,6 +10,24 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Maximum transcript size in bytes (1MB) to prevent OOM and LLM context overflow
 const MAX_TRANSCRIPT_SIZE: u64 = 1024 * 1024;
 
+/// Interpolates a title template with current date/time placeholders.
+///
+/// Supported placeholders:
+/// - `{date}` - Replaced with current date in YYYY-MM-DD format
+/// - `{time}` - Replaced with current time in HH:MM format
+///
+/// # Arguments
+/// * `template` - The title template string
+///
+/// # Returns
+/// The interpolated title string
+fn interpolate_title_template(template: &str) -> String {
+    let now = chrono::Local::now();
+    template
+        .replace("{date}", &now.format("%Y-%m-%d").to_string())
+        .replace("{time}", &now.format("%H:%M").to_string())
+}
+
 /// Validates that a relative path is safe and doesn't escape the base directory.
 /// Prevents path traversal attacks (e.g., "../../../etc/passwd").
 ///
@@ -95,32 +113,86 @@ fn validate_safe_write_path(
 ///
 /// This command:
 /// 1. Validates no active recording is in progress
-/// 2. Creates a new meeting session with UUID and folder
-/// 3. Starts audio capture with the specified source
-/// 4. Updates session status to Recording
+/// 2. Optionally loads a template with pre-configured settings
+/// 3. Creates a new meeting session with UUID and folder
+/// 4. Starts audio capture with the specified (or template-based) source
+/// 5. Updates session status to Recording
 ///
 /// # Arguments
 /// * `audio_source` - The audio source configuration (microphone_only, system_only, or mixed)
+///                    If None and template_id is provided, uses template's audio_source
+/// * `template_id` - Optional ID of a meeting template to use for this session
 ///
 /// # Returns
 /// * `Ok(MeetingSession)` - The newly created and active session
-/// * `Err(String)` - If state guard fails or recording initialization fails
+/// * `Err(String)` - If state guard fails, template not found, or recording initialization fails
 #[tauri::command]
 #[specta::specta]
 pub fn start_meeting_session(
     app: AppHandle,
     audio_source: Option<AudioSourceType>,
+    template_id: Option<String>,
 ) -> Result<MeetingSession, String> {
-    let source = audio_source.unwrap_or_default();
     info!(
-        "start_meeting_session command called with audio_source: {:?}",
-        source
+        "start_meeting_session command called with template_id: {:?}, audio_source: {:?}",
+        template_id, audio_source
     );
 
+    // Load template if template_id is provided
+    let template = if let Some(tid) = template_id.as_ref() {
+        let settings = get_settings(&app);
+        settings
+            .meeting_templates
+            .iter()
+            .find(|t| &t.id == tid)
+            .cloned()
+    } else {
+        None
+    };
+
+    // Determine audio source: use explicit parameter, then template, then default
+    let source = audio_source.or_else(|| {
+        template.as_ref().and_then(|t| {
+            match t.audio_source.as_str() {
+                "microphone_only" => Some(AudioSourceType::MicrophoneOnly),
+                "system_only" => Some(AudioSourceType::SystemOnly),
+                "mixed" => Some(AudioSourceType::Mixed),
+                _ => None,
+            }
+        })
+    }).unwrap_or_default();
+
+    debug!("Using audio source: {:?}", source);
+
     let manager = app.state::<Arc<MeetingSessionManager>>();
-    manager
+    let mut session = manager
         .start_recording(source)
-        .map_err(|e| format!("Failed to start meeting session: {}", e))
+        .map_err(|e| format!("Failed to start meeting session: {}", e))?;
+
+    // Apply template settings if available
+    if let Some(template) = template {
+        debug!("Applying template '{}' to session {}", template.name, session.id);
+
+        // Generate title from template
+        let generated_title = interpolate_title_template(&template.title_template);
+
+        // Update session title (this will update in database)
+        manager
+            .update_session_title(&session.id, &generated_title)
+            .map_err(|e| format!("Failed to update session title: {}", e))?;
+
+        // Update the returned session object with the new title
+        session.title = generated_title;
+
+        // Store template metadata for future reference
+        // Note: prompt_id can be used for post-processing later
+        debug!(
+            "Session {} configured with template prompt_id: {:?}",
+            session.id, template.prompt_id
+        );
+    }
+
+    Ok(session)
 }
 
 /// Stops the current meeting session recording.

@@ -93,6 +93,18 @@ pub struct LLMPrompt {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct MeetingTemplate {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub title_template: String,
+    pub audio_source: String, // Serialized AudioSourceType: "microphone_only", "system_only", "mixed"
+    pub prompt_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct PostProcessProvider {
     pub id: String,
     pub label: String,
@@ -289,6 +301,8 @@ pub struct AppSettings {
     pub append_trailing_space: bool,
     #[serde(default = "default_app_language")]
     pub app_language: String,
+    #[serde(default = "default_meeting_templates")]
+    pub meeting_templates: Vec<MeetingTemplate>,
 }
 
 fn default_model() -> String {
@@ -362,6 +376,41 @@ fn default_app_language() -> String {
     tauri_plugin_os::locale()
         .and_then(|l| l.split(['-', '_']).next().map(String::from))
         .unwrap_or_else(|| "en".to_string())
+}
+
+fn default_meeting_templates() -> Vec<MeetingTemplate> {
+    vec![
+        MeetingTemplate {
+            id: "template_1on1".to_string(),
+            name: "1:1 Meeting".to_string(),
+            icon: "👥".to_string(),
+            title_template: "1:1 - {date}".to_string(),
+            audio_source: "microphone_only".to_string(),
+            prompt_id: None,
+            created_at: 0,
+            updated_at: 0,
+        },
+        MeetingTemplate {
+            id: "template_team_standup".to_string(),
+            name: "Team Standup".to_string(),
+            icon: "☕".to_string(),
+            title_template: "Standup - {date}".to_string(),
+            audio_source: "mixed".to_string(),
+            prompt_id: None,
+            created_at: 0,
+            updated_at: 0,
+        },
+        MeetingTemplate {
+            id: "template_interview".to_string(),
+            name: "Interview".to_string(),
+            icon: "🎤".to_string(),
+            title_template: "Interview - {date}".to_string(),
+            audio_source: "microphone_only".to_string(),
+            prompt_id: None,
+            created_at: 0,
+            updated_at: 0,
+        },
+    ]
 }
 
 fn default_post_process_provider_id() -> String {
@@ -559,6 +608,7 @@ pub fn get_default_settings() -> AppSettings {
         mute_while_recording: false,
         append_trailing_space: false,
         app_language: default_app_language(),
+        meeting_templates: default_meeting_templates(),
     }
 }
 

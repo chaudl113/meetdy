@@ -600,20 +600,23 @@ async updateRecordingRetentionPeriod(period: string) : Promise<Result<null, stri
  * 
  * This command:
  * 1. Validates no active recording is in progress
- * 2. Creates a new meeting session with UUID and folder
- * 3. Starts audio capture with the specified source
- * 4. Updates session status to Recording
+ * 2. Optionally loads a template with pre-configured settings
+ * 3. Creates a new meeting session with UUID and folder
+ * 4. Starts audio capture with the specified (or template-based) source
+ * 5. Updates session status to Recording
  * 
  * # Arguments
  * * `audio_source` - The audio source configuration (microphone_only, system_only, or mixed)
+ * If None and template_id is provided, uses template's audio_source
+ * * `template_id` - Optional ID of a meeting template to use for this session
  * 
  * # Returns
  * * `Ok(MeetingSession)` - The newly created and active session
- * * `Err(String)` - If state guard fails or recording initialization fails
+ * * `Err(String)` - If state guard fails, template not found, or recording initialization fails
  */
-async startMeetingSession(audioSource: AudioSourceType | null) : Promise<Result<MeetingSession, string>> {
+async startMeetingSession(audioSource: AudioSourceType | null, templateId: string | null) : Promise<Result<MeetingSession, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_meeting_session", { audioSource }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting_session", { audioSource, templateId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -839,6 +842,38 @@ async getMeetingSummary(sessionId: string) : Promise<Result<string | null, strin
     else return { status: "error", error: e  as any };
 }
 },
+async listMeetingTemplates() : Promise<Result<MeetingTemplate[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_meeting_templates") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createMeetingTemplate(name: string, icon: string, titleTemplate: string, audioSource: string, promptId: string | null) : Promise<Result<MeetingTemplate, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_meeting_template", { name, icon, titleTemplate, audioSource, promptId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateMeetingTemplate(id: string, name: string | null, icon: string | null, titleTemplate: string | null, audioSource: string | null, promptId: string | null) : Promise<Result<MeetingTemplate, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_template", { id, name, icon, titleTemplate, audioSource, promptId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteMeetingTemplate(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_meeting_template", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Checks if the Mac is a laptop by detecting battery presence
  * 
@@ -865,7 +900,7 @@ async isLaptop() : Promise<Result<boolean, string>> {
 
 /** user-defined types **/
 
-export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; audio_feedback: boolean; audio_feedback_volume?: number; sound_theme?: SoundTheme; start_hidden?: boolean; autostart_enabled?: boolean; update_checks_enabled?: boolean; selected_model?: string; always_on_microphone?: boolean; selected_microphone?: string | null; clamshell_microphone?: string | null; selected_output_device?: string | null; translate_to_english?: boolean; selected_language?: string; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: Partial<{ [key in string]: string }>; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string }
+export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; audio_feedback: boolean; audio_feedback_volume?: number; sound_theme?: SoundTheme; start_hidden?: boolean; autostart_enabled?: boolean; update_checks_enabled?: boolean; selected_model?: string; always_on_microphone?: boolean; selected_microphone?: string | null; clamshell_microphone?: string | null; selected_output_device?: string | null; translate_to_english?: boolean; selected_language?: string; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: Partial<{ [key in string]: string }>; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; meeting_templates?: MeetingTemplate[] }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 /**
  * Audio source configuration for meeting recording
@@ -978,6 +1013,7 @@ export type MeetingStatus =
  * Meeting was interrupted (app closed during recording), audio preserved
  */
 "interrupted"
+export type MeetingTemplate = { id: string; name: string; icon: string; title_template: string; audio_source: string; prompt_id: string | null; created_at: number; updated_at: number }
 export type ModelInfo = { id: string; name: string; description: string; filename: string; url: string | null; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 export type ModelUnloadTimeout = "never" | "immediately" | "min_2" | "min_5" | "min_10" | "min_15" | "hour_1" | "sec_5"

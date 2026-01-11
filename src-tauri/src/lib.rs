@@ -331,6 +331,10 @@ pub fn run() {
         commands::meeting::delete_meeting_session,
         commands::meeting::generate_meeting_summary,
         commands::meeting::get_meeting_summary,
+        commands::templates::list_meeting_templates,
+        commands::templates::create_meeting_template,
+        commands::templates::update_meeting_template,
+        commands::templates::delete_meeting_template,
         helpers::clamshell::is_laptop,
     ]);
 
