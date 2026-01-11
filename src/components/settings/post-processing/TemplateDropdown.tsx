@@ -12,24 +12,36 @@ interface TemplateDropdownProps {
 interface TemplateItemProps {
   template: PromptTemplate;
   isSelected: boolean;
+  isFocused: boolean;
   onSelect: () => void;
 }
 
 const TemplateItem: React.FC<TemplateItemProps> = ({
   template,
   isSelected,
+  isFocused,
   onSelect,
 }) => {
   const { t } = useTranslation();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // Scroll into view when focused
+  useEffect(() => {
+    if (isFocused && buttonRef.current) {
+      buttonRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [isFocused]);
 
   return (
     <button
+      ref={buttonRef}
       onClick={onSelect}
-      className={`w-full text-left px-3 py-2 rounded-md transition-colors hover:bg-primary/10 focus:outline-none focus:ring-2 focus:ring-primary ${
+      className={`w-full text-left px-3 py-2 rounded-md transition-colors hover:bg-primary/10 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${
         isSelected ? "bg-primary/20 border-l-4 border-primary" : ""
-      }`}
+      } ${isFocused ? "bg-primary/5" : ""}`}
       role="option"
       aria-selected={isSelected}
+      tabIndex={isFocused ? 0 : -1}
     >
       <div className="flex items-start gap-2">
         <span className="text-lg flex-shrink-0">{template.icon}</span>
@@ -60,6 +72,7 @@ export const TemplateDropdown: React.FC<TemplateDropdownProps> = ({
 }) => {
   const { t } = useTranslation();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [focusedIndex, setFocusedIndex] = React.useState<number>(0);
 
   // Click outside to close
   useEffect(() => {
@@ -72,20 +85,29 @@ export const TemplateDropdown: React.FC<TemplateDropdownProps> = ({
       }
     };
 
-    const handleEscape = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusedIndex((prev) => (prev + 1) % templates.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusedIndex((prev) => (prev - 1 + templates.length) % templates.length);
+      } else if (e.key === "Enter" && focusedIndex >= 0 && focusedIndex < templates.length) {
+        e.preventDefault();
+        onSelect(templates[focusedIndex]);
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleKeyDown);
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose]);
+  }, [onClose, templates, focusedIndex, onSelect]);
 
   // Group templates by category
   const groupedTemplates = templates.reduce(
@@ -117,21 +139,30 @@ export const TemplateDropdown: React.FC<TemplateDropdownProps> = ({
       className="absolute z-50 mt-2 w-full max-h-96 overflow-y-auto bg-background border border-mid-gray/20 rounded-lg shadow-lg animate-in fade-in slide-in-from-top-2 duration-200"
       role="listbox"
       aria-label={t("settings.postProcessing.prompts.templateList")}
+      aria-activedescendant={templates[focusedIndex]?.id}
     >
       {Object.entries(groupedTemplates).map(([category, categoryTemplates]) => (
         <div key={category} className="p-2">
-          <div className="px-3 py-2 text-xs font-semibold text-mid-gray uppercase">
+          <div
+            className="px-3 py-2 text-xs font-semibold text-mid-gray uppercase"
+            role="group"
+            aria-label={categoryLabels[category as TemplateCategory]}
+          >
             {categoryLabels[category as TemplateCategory]}
           </div>
           <div className="space-y-1">
-            {categoryTemplates.map((template) => (
-              <TemplateItem
-                key={template.id}
-                template={template}
-                isSelected={template.id === currentlySelected}
-                onSelect={() => onSelect(template)}
-              />
-            ))}
+            {categoryTemplates.map((template) => {
+              const globalIndex = templates.findIndex(t => t.id === template.id);
+              return (
+                <TemplateItem
+                  key={template.id}
+                  template={template}
+                  isSelected={template.id === currentlySelected}
+                  isFocused={globalIndex === focusedIndex}
+                  onSelect={() => onSelect(template)}
+                />
+              );
+            })}
           </div>
         </div>
       ))}

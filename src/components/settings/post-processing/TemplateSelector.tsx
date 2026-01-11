@@ -20,11 +20,14 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   const [selectedTemplate, setSelectedTemplate] =
     useState<PromptTemplate | null>(null);
   const [previewMode, setPreviewMode] = useState<"preview" | "edit">("preview");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSelectTemplate = (template: PromptTemplate) => {
     setSelectedTemplate(template);
     setPreviewMode("preview");
     setIsDropdownOpen(false);
+    setError(null); // Clear any previous errors
   };
 
   const handleUseTemplate = () => {
@@ -32,30 +35,73 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
       onTemplateApplied(selectedTemplate);
     }
     setSelectedTemplate(null);
+    setError(null);
   };
 
   const handleSaveAsCustom = async (name: string, prompt: string) => {
+    // Validation: Check empty name
+    if (!name || name.trim().length === 0) {
+      setError(t("settings.postProcessing.prompts.errors.emptyName"));
+      return;
+    }
+
+    // Validation: Check empty prompt
+    if (!prompt || prompt.trim().length === 0) {
+      setError(t("settings.postProcessing.prompts.errors.emptyPrompt"));
+      return;
+    }
+
+    // Validation: Check prompt contains ${output}
+    if (!prompt.includes("${output}")) {
+      setError(t("settings.postProcessing.prompts.errors.missingPlaceholder"));
+      return;
+    }
+
+    // Validation: Check maximum length (1000 chars for name, 5000 for prompt)
+    if (name.length > 1000) {
+      setError(t("settings.postProcessing.prompts.errors.nameTooLong"));
+      return;
+    }
+
+    if (prompt.length > 5000) {
+      setError(t("settings.postProcessing.prompts.errors.promptTooLong"));
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+
     try {
-      const result = await commands.addPostProcessPrompt(name, prompt);
+      const result = await commands.addPostProcessPrompt(name.trim(), prompt.trim());
       if (result.status === "ok") {
         await refreshSettings();
         setSelectedTemplate(null);
-        // Show success toast (optional - can add toast later)
-        console.log("Custom prompt saved successfully");
+        setPreviewMode("preview");
+        // Success - could add toast notification here
+      } else if (result.status === "error") {
+        setError(result.error || t("settings.postProcessing.prompts.errors.saveFailed"));
       }
     } catch (error) {
       console.error("Failed to save custom prompt:", error);
-      // Show error toast (optional)
+      setError(
+        error instanceof Error
+          ? error.message
+          : t("settings.postProcessing.prompts.errors.saveFailed")
+      );
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleCancel = () => {
     setSelectedTemplate(null);
     setPreviewMode("preview");
+    setError(null);
   };
 
   const handleEditTemplate = () => {
     setPreviewMode("edit");
+    setError(null);
   };
 
   return (
@@ -93,18 +139,29 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
       {/* Template Preview */}
       {selectedTemplate && (
         <div className="relative">
+          {/* Error message */}
+          {error && (
+            <div
+              className="mb-3 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-sm"
+              role="alert"
+            >
+              {error}
+            </div>
+          )}
+
           <TemplatePreview
             template={selectedTemplate}
             mode={previewMode}
             onUseTemplate={handleUseTemplate}
             onSaveCustom={handleSaveAsCustom}
             onCancel={handleCancel}
+            isSaving={isSaving}
           />
           {previewMode === "preview" && (
             <div className="mt-2">
               <button
                 onClick={handleEditTemplate}
-                className="text-sm text-primary hover:underline"
+                className="text-sm text-primary hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 rounded"
               >
                 {t("settings.postProcessing.prompts.editAndSave")}
               </button>

@@ -11,6 +11,7 @@ interface TemplatePreviewProps {
   onUseTemplate: () => void;
   onSaveCustom: (name: string, prompt: string) => void;
   onCancel: () => void;
+  isSaving?: boolean;
 }
 
 export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
@@ -19,6 +20,7 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
   onUseTemplate,
   onSaveCustom,
   onCancel,
+  isSaving = false,
 }) => {
   const { t } = useTranslation();
   const [editedName, setEditedName] = useState("");
@@ -138,11 +140,13 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
               onClick={handleSave}
               variant="primary"
               size="md"
-              disabled={!editedName.trim() || !editedPrompt.trim()}
+              disabled={!editedName.trim() || !editedPrompt.trim() || isSaving}
             >
-              {t("settings.postProcessing.prompts.saveAsCustom")}
+              {isSaving
+                ? t("common.saving")
+                : t("settings.postProcessing.prompts.saveAsCustom")}
             </Button>
-            <Button onClick={onCancel} variant="secondary" size="md">
+            <Button onClick={onCancel} variant="secondary" size="md" disabled={isSaving}>
               {t("common.cancel")}
             </Button>
           </div>

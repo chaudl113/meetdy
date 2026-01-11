@@ -300,6 +300,14 @@
             "name": "Technical Documentation",
             "description": "Format as structured technical documentation"
           }
+        },
+        "errors": {
+          "emptyName": "Prompt name cannot be empty",
+          "emptyPrompt": "Prompt instructions cannot be empty",
+          "missingPlaceholder": "Prompt must include ${output} placeholder",
+          "nameTooLong": "Prompt name is too long (max 1000 characters)",
+          "promptTooLong": "Prompt instructions are too long (max 5000 characters)",
+          "saveFailed": "Failed to save custom prompt"
         }
       }
     },
@@ -423,6 +431,7 @@
   },
   "common": {
     "loading": "Loading...",
+    "saving": "Saving...",
     "save": "Save",
     "cancel": "Cancel",
     "reset": "Reset",
