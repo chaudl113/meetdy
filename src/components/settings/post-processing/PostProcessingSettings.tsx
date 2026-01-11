@@ -17,6 +17,8 @@ import { ApiKeyField } from "../PostProcessingSettingsApi/ApiKeyField";
 import { ModelSelect } from "../PostProcessingSettingsApi/ModelSelect";
 import { usePostProcessProviderState } from "../PostProcessingSettingsApi/usePostProcessProviderState";
 import { useSettings } from "../../../hooks/useSettings";
+import { TemplateSelector } from "./TemplateSelector";
+import type { PromptTemplate } from "@/constants/promptTemplates";
 
 const DisabledNotice: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -172,6 +174,9 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftText, setDraftText] = useState("");
+  const [appliedTemplate, setAppliedTemplate] = useState<PromptTemplate | null>(
+    null,
+  );
 
   const enabled = getSetting("post_process_enabled") || false;
   const prompts = getSetting("post_process_prompts") || [];
@@ -180,7 +185,7 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
     prompts.find((prompt) => prompt.id === selectedPromptId) || null;
 
   useEffect(() => {
-    if (isCreating) return;
+    if (isCreating || appliedTemplate) return;
 
     if (selectedPrompt) {
       setDraftName(selectedPrompt.name);
@@ -191,6 +196,7 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
     }
   }, [
     isCreating,
+    appliedTemplate,
     selectedPromptId,
     selectedPrompt?.name,
     selectedPrompt?.prompt,
@@ -200,6 +206,20 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
     if (!promptId) return;
     updateSetting("post_process_selected_prompt_id", promptId);
     setIsCreating(false);
+    setAppliedTemplate(null);
+  };
+
+  const handleTemplateApplied = (template: PromptTemplate) => {
+    setAppliedTemplate(template);
+    setDraftName(t(template.nameKey));
+    setDraftText(template.prompt);
+    setIsCreating(false);
+  };
+
+  const handleClearTemplate = () => {
+    setAppliedTemplate(null);
+    setDraftName("");
+    setDraftText("");
   };
 
   const handleCreatePrompt = async () => {
@@ -289,6 +309,29 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
       grouped={true}
     >
       <div className="space-y-3">
+        {/* Template Selector */}
+        <TemplateSelector onTemplateApplied={handleTemplateApplied} />
+
+        {/* Applied Template Info */}
+        {appliedTemplate && (
+          <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm">
+              <span>{appliedTemplate.icon}</span>
+              <span className="text-text">
+                {t("settings.postProcessing.prompts.usingTemplate", {
+                  name: t(appliedTemplate.nameKey),
+                })}
+              </span>
+            </div>
+            <button
+              onClick={handleClearTemplate}
+              className="text-sm text-primary hover:underline"
+            >
+              {t("common.clear")}
+            </button>
+          </div>
+        )}
+
         <div className="flex gap-2">
           <Dropdown
             selectedValue={selectedPromptId || null}
@@ -317,7 +360,7 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
           </Button>
         </div>
 
-        {!isCreating && hasPrompts && selectedPrompt && (
+        {!isCreating && ((hasPrompts && selectedPrompt) || appliedTemplate) && (
           <div className="space-y-3">
             <div className="space-y-2 flex flex-col">
               <label className="text-sm font-semibold">
@@ -331,6 +374,7 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                   "settings.postProcessing.prompts.promptLabelPlaceholder",
                 )}
                 variant="compact"
+                disabled={!!appliedTemplate}
               />
             </div>
 
@@ -344,6 +388,7 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                 placeholder={t(
                   "settings.postProcessing.prompts.promptInstructionsPlaceholder",
                 )}
+                disabled={!!appliedTemplate}
               />
               <p
                 className="text-xs text-mid-gray/70"
@@ -353,28 +398,60 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
               />
             </div>
 
-            <div className="flex gap-2 pt-2">
-              <Button
-                onClick={handleUpdatePrompt}
-                variant="primary"
-                size="md"
-                disabled={!draftName.trim() || !draftText.trim() || !isDirty}
-              >
-                {t("settings.postProcessing.prompts.updatePrompt")}
-              </Button>
-              <Button
-                onClick={() => handleDeletePrompt(selectedPromptId)}
-                variant="secondary"
-                size="md"
-                disabled={!selectedPromptId || prompts.length <= 1}
-              >
-                {t("settings.postProcessing.prompts.deletePrompt")}
-              </Button>
-            </div>
+            {appliedTemplate ? (
+              <div className="flex gap-2 pt-2">
+                <Button
+                  onClick={async () => {
+                    try {
+                      const result = await commands.addPostProcessPrompt(
+                        draftName,
+                        draftText,
+                      );
+                      if (result.status === "ok") {
+                        await refreshSettings();
+                        setAppliedTemplate(null);
+                      }
+                    } catch (error) {
+                      console.error("Failed to save prompt:", error);
+                    }
+                  }}
+                  variant="primary"
+                  size="md"
+                >
+                  {t("settings.postProcessing.prompts.saveAsCustom")}
+                </Button>
+                <Button
+                  onClick={handleClearTemplate}
+                  variant="secondary"
+                  size="md"
+                >
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2 pt-2">
+                <Button
+                  onClick={handleUpdatePrompt}
+                  variant="primary"
+                  size="md"
+                  disabled={!draftName.trim() || !draftText.trim() || !isDirty}
+                >
+                  {t("settings.postProcessing.prompts.updatePrompt")}
+                </Button>
+                <Button
+                  onClick={() => handleDeletePrompt(selectedPromptId)}
+                  variant="secondary"
+                  size="md"
+                  disabled={!selectedPromptId || prompts.length <= 1}
+                >
+                  {t("settings.postProcessing.prompts.deletePrompt")}
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
-        {!isCreating && !selectedPrompt && (
+        {!isCreating && !selectedPrompt && !appliedTemplate && (
           <div className="p-3 bg-mid-gray/5 rounded border border-mid-gray/20">
             <p className="text-sm text-mid-gray">
               {hasPrompts
