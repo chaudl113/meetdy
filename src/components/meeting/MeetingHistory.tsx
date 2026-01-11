@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Clock, FileText, AlertCircle, Loader2, ChevronRight } from "lucide-react";
+import {
+  Clock,
+  FileText,
+  AlertCircle,
+  Loader2,
+  ChevronRight,
+} from "lucide-react";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { MeetingDetailView } from "./MeetingDetailView";
 import type { MeetingSession } from "@/bindings";
@@ -66,7 +72,9 @@ const StatusBadge: React.FC<{ status: MeetingSession["status"] }> = ({
 export const MeetingHistory: React.FC = () => {
   const { t } = useTranslation();
   const { sessions, fetchSessions, isLoading } = useMeetingStore();
-  const [selectedSession, setSelectedSession] = useState<MeetingSession | null>(null);
+  const [selectedSession, setSelectedSession] = useState<MeetingSession | null>(
+    null,
+  );
 
   // Fetch sessions on mount
   useEffect(() => {
@@ -110,7 +118,9 @@ export const MeetingHistory: React.FC = () => {
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <h4 className="text-sm font-medium truncate">{session.title}</h4>
+                <h4 className="text-sm font-medium truncate">
+                  {session.title}
+                </h4>
                 <StatusBadge status={session.status} />
               </div>
               <div className="flex items-center gap-3 mt-1 text-xs text-mid-gray">

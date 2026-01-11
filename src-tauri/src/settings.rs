@@ -355,7 +355,7 @@ fn default_sound_theme() -> SoundTheme {
 }
 
 fn default_post_process_enabled() -> bool {
-    false
+    true // Enable by default for meeting summary feature
 }
 
 fn default_app_language() -> String {

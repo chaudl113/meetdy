@@ -1,4 +1,6 @@
-use crate::managers::meeting::{AudioSourceType, MeetingSession, MeetingSessionManager, MeetingStatus};
+use crate::managers::meeting::{
+    AudioSourceType, MeetingSession, MeetingSessionManager, MeetingStatus,
+};
 use crate::settings::get_settings;
 use log::{debug, info};
 use std::path::{Component, Path};
@@ -38,12 +40,14 @@ fn validate_safe_path(base_dir: &Path, relative_path: &str) -> Result<std::path:
     let full_path = base_dir.join(relative_path);
 
     // Canonicalize base directory
-    let canonical_base = base_dir.canonicalize()
+    let canonical_base = base_dir
+        .canonicalize()
         .map_err(|e| format!("Failed to canonicalize base directory: {}", e))?;
 
     // For existing paths, verify the canonical path
     if full_path.exists() {
-        let canonical_full = full_path.canonicalize()
+        let canonical_full = full_path
+            .canonicalize()
             .map_err(|e| format!("Failed to canonicalize path: {}", e))?;
 
         if !canonical_full.starts_with(&canonical_base) {
@@ -54,7 +58,8 @@ fn validate_safe_path(base_dir: &Path, relative_path: &str) -> Result<std::path:
         // This prevents symlink attacks where parent exists but points outside
         if let Some(parent) = full_path.parent() {
             if parent.exists() {
-                let canonical_parent = parent.canonicalize()
+                let canonical_parent = parent
+                    .canonicalize()
                     .map_err(|e| format!("Failed to canonicalize parent directory: {}", e))?;
 
                 if !canonical_parent.starts_with(&canonical_base) {
@@ -70,7 +75,10 @@ fn validate_safe_path(base_dir: &Path, relative_path: &str) -> Result<std::path:
 
 /// Validates a path for writing. Same as validate_safe_path but with additional
 /// checks to ensure the target directory exists and is writable.
-fn validate_safe_write_path(base_dir: &Path, relative_path: &str) -> Result<std::path::PathBuf, String> {
+fn validate_safe_write_path(
+    base_dir: &Path,
+    relative_path: &str,
+) -> Result<std::path::PathBuf, String> {
     let full_path = validate_safe_path(base_dir, relative_path)?;
 
     // Ensure parent directory exists for write operations
@@ -104,7 +112,10 @@ pub fn start_meeting_session(
     audio_source: Option<AudioSourceType>,
 ) -> Result<MeetingSession, String> {
     let source = audio_source.unwrap_or_default();
-    info!("start_meeting_session command called with audio_source: {:?}", source);
+    info!(
+        "start_meeting_session command called with audio_source: {:?}",
+        source
+    );
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
     manager
@@ -345,7 +356,10 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
 /// * `Err(String)` - If session not found or file read fails
 #[tauri::command]
 #[specta::specta]
-pub fn get_meeting_transcript(app: AppHandle, session_id: String) -> Result<Option<String>, String> {
+pub fn get_meeting_transcript(
+    app: AppHandle,
+    session_id: String,
+) -> Result<Option<String>, String> {
     info!(
         "get_meeting_transcript command called for session: {}",
         session_id
@@ -428,7 +442,10 @@ pub fn get_meetings_directory(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 #[specta::specta]
 pub fn delete_meeting_session(app: AppHandle, session_id: String) -> Result<(), String> {
-    info!("delete_meeting_session command called for session: {}", session_id);
+    info!(
+        "delete_meeting_session command called for session: {}",
+        session_id
+    );
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
     manager
@@ -453,7 +470,10 @@ pub fn delete_meeting_session(app: AppHandle, session_id: String) -> Result<(), 
 /// * `Err(String)` - If session not found, no transcript, or LLM call fails
 #[tauri::command]
 #[specta::specta]
-pub async fn generate_meeting_summary(app: AppHandle, session_id: String) -> Result<String, String> {
+pub async fn generate_meeting_summary(
+    app: AppHandle,
+    session_id: String,
+) -> Result<String, String> {
     info!(
         "generate_meeting_summary command called for session: {}",
         session_id
@@ -494,12 +514,11 @@ pub async fn generate_meeting_summary(app: AppHandle, session_id: String) -> Res
 
     // Read transcript using blocking task to avoid blocking async runtime
     let transcript_path_clone = full_transcript_path.clone();
-    let transcript = tokio::task::spawn_blocking(move || {
-        std::fs::read_to_string(&transcript_path_clone)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| format!("Failed to read transcript: {}", e))?;
+    let transcript =
+        tokio::task::spawn_blocking(move || std::fs::read_to_string(&transcript_path_clone))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?
+            .map_err(|e| format!("Failed to read transcript: {}", e))?;
 
     if transcript.trim().is_empty() {
         return Err("Transcript is empty".to_string());
@@ -512,7 +531,9 @@ pub async fn generate_meeting_summary(app: AppHandle, session_id: String) -> Res
     let provider = settings
         .active_post_process_provider()
         .cloned()
-        .ok_or_else(|| "No LLM provider configured. Please set up a provider in Settings.".to_string())?;
+        .ok_or_else(|| {
+            "No LLM provider configured. Please set up a provider in Settings.".to_string()
+        })?;
 
     let model = settings
         .post_process_models
@@ -570,10 +591,11 @@ Provide a clear, professional summary in markdown format."#,
     );
 
     // Call LLM API
-    let summary = crate::llm_client::send_chat_completion(&provider, api_key, &model, summary_prompt)
-        .await
-        .map_err(|e| format!("LLM API call failed: {}", e))?
-        .ok_or_else(|| "LLM returned empty response".to_string())?;
+    let summary =
+        crate::llm_client::send_chat_completion(&provider, api_key, &model, summary_prompt)
+            .await
+            .map_err(|e| format!("LLM API call failed: {}", e))?
+            .ok_or_else(|| "LLM returned empty response".to_string())?;
 
     // Save summary to file with path validation
     let summary_filename = format!("{}/summary.md", session_id);
@@ -581,12 +603,10 @@ Provide a clear, professional summary in markdown format."#,
 
     // Write using blocking task to avoid blocking async runtime
     let summary_clone = summary.clone();
-    tokio::task::spawn_blocking(move || {
-        std::fs::write(&summary_path, &summary_clone)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| format!("Failed to save summary: {}", e))?;
+    tokio::task::spawn_blocking(move || std::fs::write(&summary_path, &summary_clone))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| format!("Failed to save summary: {}", e))?;
 
     // Update database with summary path
     manager

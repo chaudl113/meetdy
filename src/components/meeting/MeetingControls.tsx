@@ -18,6 +18,7 @@ export const MeetingControls: React.FC = () => {
 
   // Connect to meetingStore for state and actions
   const {
+    currentSession,
     sessionStatus,
     recordingDuration,
     isLoading,
@@ -146,14 +147,16 @@ export const MeetingControls: React.FC = () => {
       </div>
 
       {/* Duration display after recording stopped (non-recording states) */}
-      {!isIdle && !isRecording && recordingDuration > 0 && (
-        <div className="flex items-center justify-center text-sm text-mid-gray">
-          <span>
-            {t("meeting.recordedDuration", "Recorded")}:{" "}
-            {formatDuration(recordingDuration)}
-          </span>
-        </div>
-      )}
+      {!isIdle &&
+        !isRecording &&
+        (currentSession?.duration || recordingDuration > 0) && (
+          <div className="flex items-center justify-center text-sm text-mid-gray">
+            <span>
+              {t("meeting.recordedDuration", "Recorded")}:{" "}
+              {formatDuration(currentSession?.duration || recordingDuration)}
+            </span>
+          </div>
+        )}
     </div>
   );
 };

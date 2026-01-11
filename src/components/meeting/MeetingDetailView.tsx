@@ -61,7 +61,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
         onClose();
       }
     },
-    [onClose, showDeleteConfirm]
+    [onClose, showDeleteConfirm],
   );
 
   // Focus trap and escape key handler
@@ -160,21 +160,27 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   // Listen for meeting events to update status
   useEffect(() => {
     const setupListeners = async () => {
-      const unlistenCompleted = await listen<MeetingSession>("meeting_completed", (event) => {
-        if (event.payload.id === currentSession.id) {
-          console.log("Meeting completed event received:", event.payload);
-          setCurrentSession(event.payload);
-          setIsRetrying(false);
-        }
-      });
+      const unlistenCompleted = await listen<MeetingSession>(
+        "meeting_completed",
+        (event) => {
+          if (event.payload.id === currentSession.id) {
+            console.log("Meeting completed event received:", event.payload);
+            setCurrentSession(event.payload);
+            setIsRetrying(false);
+          }
+        },
+      );
 
-      const unlistenFailed = await listen<MeetingSession>("meeting_failed", (event) => {
-        if (event.payload.id === currentSession.id) {
-          console.log("Meeting failed event received:", event.payload);
-          setCurrentSession(event.payload);
-          setIsRetrying(false);
-        }
-      });
+      const unlistenFailed = await listen<MeetingSession>(
+        "meeting_failed",
+        (event) => {
+          if (event.payload.id === currentSession.id) {
+            console.log("Meeting failed event received:", event.payload);
+            setCurrentSession(event.payload);
+            setIsRetrying(false);
+          }
+        },
+      );
 
       return () => {
         unlistenCompleted();
@@ -232,7 +238,11 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
       const result = await commands.retryTranscription(currentSession.id);
       if (result.status === "ok") {
         // Update local session status
-        setCurrentSession({ ...currentSession, status: "processing", error_message: null });
+        setCurrentSession({
+          ...currentSession,
+          status: "processing",
+          error_message: null,
+        });
         setTranscript(null);
         await fetchSessions();
       } else {
@@ -256,7 +266,10 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
     interrupted: "text-orange-400",
   };
 
-  const canRetry = currentSession.status === "failed" || currentSession.status === "interrupted" || currentSession.status === "completed";
+  const canRetry =
+    currentSession.status === "failed" ||
+    currentSession.status === "interrupted" ||
+    currentSession.status === "completed";
 
   return (
     <div
@@ -270,7 +283,12 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
       <div className="bg-background border border-mid-gray/30 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-mid-gray/20">
-          <h2 id="meeting-detail-title" className="text-lg font-semibold truncate pr-4">{currentSession.title}</h2>
+          <h2
+            id="meeting-detail-title"
+            className="text-lg font-semibold truncate pr-4"
+          >
+            {currentSession.title}
+          </h2>
           <div className="flex items-center gap-2">
             {/* Retry button */}
             {canRetry && (
@@ -282,10 +300,16 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 }}
                 disabled={isRetrying}
                 className="p-1.5 hover:bg-mid-gray/20 rounded-lg transition-colors text-mid-gray hover:text-white disabled:opacity-50"
-                aria-label={t("meeting.detail.retryTranscription", "Re-transcribe")}
+                aria-label={t(
+                  "meeting.detail.retryTranscription",
+                  "Re-transcribe",
+                )}
               >
                 {isRetrying ? (
-                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                  <Loader2
+                    className="h-5 w-5 animate-spin"
+                    aria-hidden="true"
+                  />
                 ) : (
                   <RotateCcw className="h-5 w-5" aria-hidden="true" />
                 )}
@@ -338,7 +362,9 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 <span>{formatDuration(currentSession.duration)}</span>
               </div>
             )}
-            <div className={`flex items-center gap-1.5 ${statusColors[currentSession.status]}`}>
+            <div
+              className={`flex items-center gap-1.5 ${statusColors[currentSession.status]}`}
+            >
               <span className="capitalize">{currentSession.status}</span>
             </div>
           </div>
@@ -348,7 +374,9 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
             <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
-                <p className="text-sm text-red-400">{currentSession.error_message}</p>
+                <p className="text-sm text-red-400">
+                  {currentSession.error_message}
+                </p>
               </div>
             </div>
           )}
@@ -439,7 +467,10 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
               </h3>
             </div>
             <p className="text-mid-gray mb-6">
-              {t("meeting.detail.confirmDelete", "Are you sure you want to delete this meeting? This action cannot be undone.")}
+              {t(
+                "meeting.detail.confirmDelete",
+                "Are you sure you want to delete this meeting? This action cannot be undone.",
+              )}
             </p>
             <div className="flex gap-3 justify-end">
               <button

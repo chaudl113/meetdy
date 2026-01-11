@@ -50,7 +50,9 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
       }
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : t("meeting.summary.generateError", "Failed to generate summary")
+        err instanceof Error
+          ? err.message
+          : t("meeting.summary.generateError", "Failed to generate summary"),
       );
     } finally {
       setIsGenerating(false);
@@ -108,7 +110,9 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
               type="button"
               onClick={handleCopySummary}
               className="inline-flex items-center gap-1.5 px-2 py-1 text-xs text-mid-gray hover:text-white hover:bg-mid-gray/20 rounded transition-colors"
-              aria-label={copied ? t("common.copied", "Copied") : t("common.copy", "Copy")}
+              aria-label={
+                copied ? t("common.copied", "Copied") : t("common.copy", "Copy")
+              }
             >
               {copied ? (
                 <>
@@ -128,7 +132,10 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
 
       {/* Content */}
       {isExpanded && (
-        <div id="meeting-summary-content" className="bg-dark-gray/30 rounded-lg p-4">
+        <div
+          id="meeting-summary-content"
+          className="bg-dark-gray/30 rounded-lg p-4"
+        >
           {/* Error message */}
           {error && (
             <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-400">
@@ -152,7 +159,7 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
               <p className="text-sm text-mid-gray mb-4">
                 {t(
                   "meeting.summary.noSummary",
-                  "No summary yet. Generate an AI summary of this meeting."
+                  "No summary yet. Generate an AI summary of this meeting.",
                 )}
               </p>
               <button
@@ -170,7 +177,7 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
               <p className="text-sm text-mid-gray">
                 {t(
                   "meeting.summary.noTranscript",
-                  "Transcript required to generate summary."
+                  "Transcript required to generate summary.",
                 )}
               </p>
             </div>
