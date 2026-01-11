@@ -8,6 +8,7 @@
   "sidebar": {
     "general": "General",
     "meeting": "Meeting",
+    "templates": "Templates",
     "advanced": "Advanced",
     "postProcessing": "Post Process",
     "history": "History",
@@ -311,6 +312,30 @@
         }
       }
     },
+    "meeting": {
+      "template": {
+        "title": "Meeting Templates",
+        "description": "Create templates for different meeting types to quickly start recordings with pre-configured settings.",
+        "name": "Name",
+        "nameDescription": "A descriptive name for this template",
+        "namePlaceholder": "e.g., Team Standup",
+        "icon": "Icon",
+        "iconDescription": "Choose an emoji icon",
+        "titleTemplate": "Title Template",
+        "titleTemplateDescription": "Template for meeting title. Use {date} and {time} placeholders.",
+        "titleTemplatePlaceholder": "e.g., Standup - {date}",
+        "audioSource": "Audio Source",
+        "audioSourceDescription": "Default audio source for this template",
+        "prompt": "AI Prompt",
+        "promptDescription": "Optional AI prompt for post-processing",
+        "noPrompt": "None",
+        "default": "Default",
+        "create": "Create Template",
+        "edit": "Edit Template",
+        "createNew": "Create Template",
+        "confirmDelete": "Are you sure you want to delete this template?"
+      }
+    },
     "history": {
       "title": "History",
       "openFolder": "Open Recordings Folder",
@@ -453,9 +478,26 @@
     "no": "No",
     "noOptionsFound": "No options found",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "dismiss": "Dismiss",
+    "prompt": "Prompt",
+    "characters": "characters"
   },
   "meeting": {
+    "template": {
+      "selectTemplate": "Select a template",
+      "none": "None",
+      "noneDescription": "Start without a template",
+      "noTemplates": "No templates yet. Create one in Settings.",
+      "loading": "Loading templates...",
+      "show": "Show templates",
+      "hide": "Hide templates",
+      "audioSource": {
+        "microphoneOnly": "Microphone",
+        "systemOnly": "System Audio",
+        "mixed": "Both"
+      }
+    },
     "summary": {
       "title": "AI Summary",
       "generate": "Generate Summary",
