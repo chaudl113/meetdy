@@ -28,6 +28,7 @@ impl MeetingLogContext {
     }
 
     /// Log successful completion
+    #[allow(dead_code)]
     pub fn log_success(&self, message: impl AsRef<str>) {
         info!(
             "[MEETING] [{}] {} - Success: {}",
@@ -160,6 +161,7 @@ pub fn log_performance_metric(
 }
 
 /// Log audio statistics
+#[allow(dead_code)]
 pub fn log_audio_stats(
     session_id: impl AsRef<str>,
     sample_rate: u32,
@@ -193,6 +195,7 @@ impl MeetingTimer {
         self.start.elapsed().as_millis()
     }
 
+    #[allow(dead_code)]
     pub fn elapsed_sec(&self) -> f64 {
         self.start.elapsed().as_secs_f64()
     }
