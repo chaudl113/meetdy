@@ -1119,6 +1119,26 @@ impl MeetingSessionManager {
 
         mixed_recorder = mixed_recorder.with_sample_callback(sample_callback);
 
+        // Add error callback to detect mic disconnect
+        let manager_clone = self.clone();
+        let fired = Arc::new(AtomicBool::new(false));
+        mixed_recorder = mixed_recorder.with_error_callback({
+            let fired = Arc::clone(&fired);
+            move |error| {
+                // Only fire once (debounce)
+                if fired.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+
+                // Spawn async task to avoid blocking audio thread
+                let manager = manager_clone.clone();
+                let error_msg = error.clone();
+                tauri::async_runtime::spawn(async move {
+                    manager.handle_mic_disconnect(&error_msg);
+                });
+            }
+        });
+
         let recorder_timer = MeetingTimer::start();
 
         // Start audio capture

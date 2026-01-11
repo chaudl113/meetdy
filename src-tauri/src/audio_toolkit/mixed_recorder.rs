@@ -37,6 +37,7 @@ pub struct MixedAudioRecorder {
     system_recorder: Option<SystemAudioRecorder>,
     mixed_samples: Arc<Mutex<Vec<f32>>>,
     sample_callback: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    error_callback: Option<Arc<dyn Fn(String) + Send + Sync + 'static>>,
     is_recording: Arc<Mutex<bool>>,
     mixer_handle: Option<thread::JoinHandle<()>>,
 }
@@ -51,6 +52,7 @@ impl MixedAudioRecorder {
             system_recorder: None,
             mixed_samples: Arc::new(Mutex::new(Vec::new())),
             sample_callback: None,
+            error_callback: None,
             is_recording: Arc::new(Mutex::new(false)),
             mixer_handle: None,
         })
@@ -65,6 +67,15 @@ impl MixedAudioRecorder {
         self
     }
 
+    /// Sets a callback for receiving audio stream errors (e.g., mic disconnect)
+    pub fn with_error_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        self.error_callback = Some(Arc::new(cb));
+        self
+    }
+
     /// Starts recording from the configured audio sources
     #[cfg(target_os = "macos")]
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -73,6 +84,7 @@ impl MixedAudioRecorder {
         }
 
         let sample_callback = self.sample_callback.clone();
+        let error_callback = self.error_callback.clone();
         let mixed_samples = self.mixed_samples.clone();
 
         match &self.config {
@@ -85,6 +97,13 @@ impl MixedAudioRecorder {
                     recorder = recorder.with_sample_callback(move |s| {
                         samples.lock().unwrap().extend_from_slice(&s);
                         cb(s);
+                    });
+                }
+                // Wire error callback
+                if let Some(err_cb) = &error_callback {
+                    let err_cb = err_cb.clone();
+                    recorder = recorder.with_error_callback(move |error| {
+                        err_cb(error);
                     });
                 }
                 recorder.open(None)?;
@@ -115,6 +134,13 @@ impl MixedAudioRecorder {
                 mic_recorder = mic_recorder.with_sample_callback(move |s| {
                     let _ = mic_tx_clone.send(s);
                 });
+                // Wire error callback for mic
+                if let Some(err_cb) = &error_callback {
+                    let err_cb = err_cb.clone();
+                    mic_recorder = mic_recorder.with_error_callback(move |error| {
+                        err_cb(error);
+                    });
+                }
                 mic_recorder.open(None)?;
                 mic_recorder.start()?;
                 self.mic_recorder = Some(mic_recorder);
@@ -191,6 +217,7 @@ impl MixedAudioRecorder {
         }
 
         let sample_callback = self.sample_callback.clone();
+        let error_callback = self.error_callback.clone();
         let mixed_samples = self.mixed_samples.clone();
 
         let mut recorder = AudioRecorder::new()?;
@@ -200,6 +227,13 @@ impl MixedAudioRecorder {
             recorder = recorder.with_sample_callback(move |s| {
                 samples.lock().unwrap().extend_from_slice(&s);
                 cb(s);
+            });
+        }
+        // Wire error callback
+        if let Some(err_cb) = &error_callback {
+            let err_cb = err_cb.clone();
+            recorder = recorder.with_error_callback(move |error| {
+                err_cb(error);
             });
         }
         recorder.open(None)?;
