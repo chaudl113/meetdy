@@ -12,6 +12,7 @@ interface TemplatePreviewProps {
   onSaveCustom: (name: string, prompt: string) => void;
   onCancel: () => void;
   isSaving?: boolean;
+  onErrorClear?: () => void;
 }
 
 export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
@@ -21,6 +22,7 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
   onSaveCustom,
   onCancel,
   isSaving = false,
+  onErrorClear,
 }) => {
   const { t } = useTranslation();
   const [editedName, setEditedName] = useState("");
@@ -32,6 +34,16 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
       setEditedPrompt(template.prompt);
     }
   }, [template, mode, t]);
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEditedName(e.target.value);
+    onErrorClear?.(); // Clear error when user types
+  };
+
+  const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setEditedPrompt(e.target.value);
+    onErrorClear?.(); // Clear error when user types
+  };
 
   const handleSave = () => {
     if (editedName.trim() && editedPrompt.trim()) {
@@ -108,7 +120,7 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
               <Input
                 type="text"
                 value={editedName}
-                onChange={(e) => setEditedName(e.target.value)}
+                onChange={handleNameChange}
                 placeholder={t(
                   "settings.postProcessing.prompts.promptLabelPlaceholder",
                 )}
@@ -122,7 +134,7 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
               </label>
               <Textarea
                 value={editedPrompt}
-                onChange={(e) => setEditedPrompt(e.target.value)}
+                onChange={handlePromptChange}
                 placeholder={t(
                   "settings.postProcessing.prompts.promptInstructionsPlaceholder",
                 )}

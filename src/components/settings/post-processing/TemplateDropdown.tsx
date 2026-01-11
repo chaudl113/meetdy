@@ -28,7 +28,11 @@ const TemplateItem: React.FC<TemplateItemProps> = ({
   // Scroll into view when focused
   useEffect(() => {
     if (isFocused && buttonRef.current) {
-      buttonRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      buttonRef.current.scrollIntoView({
+        block: "nearest",
+        behavior: prefersReducedMotion ? "auto" : "smooth"
+      });
     }
   }, [isFocused]);
 
@@ -129,6 +133,15 @@ export const TemplateDropdown: React.FC<TemplateDropdownProps> = ({
     {} as Record<TemplateCategory, PromptTemplate[]>,
   );
 
+  // Precompute template id to index map for O(1) lookup
+  const templateIndexMap = React.useMemo(() => {
+    const map = new Map<string, number>();
+    templates.forEach((template, index) => {
+      map.set(template.id, index);
+    });
+    return map;
+  }, [templates]);
+
   const categoryLabels: Record<TemplateCategory, string> = {
     [TemplateCategory.Meeting]: t(
       "settings.postProcessing.prompts.categories.meeting",
@@ -144,7 +157,7 @@ export const TemplateDropdown: React.FC<TemplateDropdownProps> = ({
   return (
     <div
       ref={dropdownRef}
-      className="absolute z-50 mt-2 w-full max-h-96 overflow-y-auto bg-background border border-mid-gray/20 rounded-lg shadow-lg animate-in fade-in slide-in-from-top-2 duration-200"
+      className="absolute z-50 mt-2 w-full max-h-96 overflow-y-auto bg-background border border-mid-gray/20 rounded-lg shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200"
       role="listbox"
       aria-label={t("settings.postProcessing.prompts.templateList")}
       aria-activedescendant={templates[focusedIndex]?.id}
@@ -160,7 +173,7 @@ export const TemplateDropdown: React.FC<TemplateDropdownProps> = ({
           </div>
           <div className="space-y-1">
             {categoryTemplates.map((template) => {
-              const globalIndex = templates.findIndex(t => t.id === template.id);
+              const globalIndex = templateIndexMap.get(template.id) ?? -1;
               return (
                 <TemplateItem
                   key={template.id}

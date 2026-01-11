@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { PromptTemplate, BUILTIN_TEMPLATES } from "@/constants/promptTemplates";
 import { TemplateDropdown } from "./TemplateDropdown";
@@ -22,6 +22,14 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   const [previewMode, setPreviewMode] = useState<"preview" | "edit">("preview");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Unmount guard for async operations
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const handleSelectTemplate = (template: PromptTemplate) => {
     setSelectedTemplate(template);
@@ -39,6 +47,9 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   };
 
   const handleSaveAsCustom = async (name: string, prompt: string) => {
+    // Guard against double submit
+    if (isSaving) return;
+
     // Validation: Check empty name
     if (!name || name.trim().length === 0) {
       setError(t("settings.postProcessing.prompts.errors.emptyName"));
@@ -58,12 +69,12 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
     }
 
     // Validation: Check maximum length (1000 chars for name, 5000 for prompt)
-    if (name.length > 1000) {
+    if (name.trim().length > 1000) {
       setError(t("settings.postProcessing.prompts.errors.nameTooLong"));
       return;
     }
 
-    if (prompt.length > 5000) {
+    if (prompt.trim().length > 5000) {
       setError(t("settings.postProcessing.prompts.errors.promptTooLong"));
       return;
     }
@@ -73,8 +84,12 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
 
     try {
       const result = await commands.addPostProcessPrompt(name.trim(), prompt.trim());
+      if (!isMountedRef.current) return; // Guard against unmount
+
       if (result.status === "ok") {
         await refreshSettings();
+        if (!isMountedRef.current) return; // Guard again after async
+
         setSelectedTemplate(null);
         setPreviewMode("preview");
         // Success - could add toast notification here
@@ -82,6 +97,8 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
         setError(result.error || t("settings.postProcessing.prompts.errors.saveFailed"));
       }
     } catch (error) {
+      if (!isMountedRef.current) return; // Guard against unmount
+
       console.error("Failed to save custom prompt:", error);
       setError(
         error instanceof Error
@@ -89,7 +106,9 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
           : t("settings.postProcessing.prompts.errors.saveFailed")
       );
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -101,6 +120,10 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
 
   const handleEditTemplate = () => {
     setPreviewMode("edit");
+    setError(null);
+  };
+
+  const handleErrorClear = () => {
     setError(null);
   };
 
@@ -160,6 +183,7 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
             onSaveCustom={handleSaveAsCustom}
             onCancel={handleCancel}
             isSaving={isSaving}
+            onErrorClear={handleErrorClear}
           />
           {previewMode === "preview" && (
             <div className="mt-2">
