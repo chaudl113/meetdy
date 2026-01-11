@@ -8,6 +8,7 @@ import {
   Mic,
   Sparkles,
   Video,
+  BookTemplate,
 } from "lucide-react";
 import HandyTextLogo from "./icons/HandyTextLogo";
 import { useSettings } from "../hooks/useSettings";
@@ -18,6 +19,7 @@ import {
   DebugSettings,
   AboutSettings,
   PostProcessingSettings,
+  MeetingTemplateSettings,
 } from "./settings";
 import { MeetingMode } from "./meeting";
 
@@ -49,6 +51,12 @@ export const SECTIONS_CONFIG = {
     labelKey: "sidebar.meeting",
     icon: Video,
     component: MeetingMode,
+    enabled: () => true,
+  },
+  templates: {
+    labelKey: "sidebar.templates",
+    icon: BookTemplate,
+    component: MeetingTemplateSettings,
     enabled: () => true,
   },
   advanced: {
