@@ -142,10 +142,14 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
           {/* Error message */}
           {error && (
             <div
-              className="mb-3 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-sm"
+              className="mb-3 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-sm flex items-start gap-2"
               role="alert"
             >
-              {error}
+              {/* eslint-disable-next-line i18next/no-literal-string */}
+              <span className="text-base flex-shrink-0" aria-hidden="true">
+                ⚠️
+              </span>
+              <span className="flex-1">{error}</span>
             </div>
           )}
 

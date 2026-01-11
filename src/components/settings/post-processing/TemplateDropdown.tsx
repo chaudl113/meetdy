@@ -36,12 +36,13 @@ const TemplateItem: React.FC<TemplateItemProps> = ({
     <button
       ref={buttonRef}
       onClick={onSelect}
-      className={`w-full text-left px-3 py-2 rounded-md transition-colors hover:bg-primary/10 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${
-        isSelected ? "bg-primary/20 border-l-4 border-primary" : ""
-      } ${isFocused ? "bg-primary/5" : ""}`}
+      className={`w-full text-left px-3 py-2 min-h-[44px] rounded-md transition-colors hover:bg-primary/10 ${
+        isSelected ? "bg-primary/20 border-l-4 border-primary" : "border-l-4 border-transparent"
+      } ${isFocused ? "bg-primary/20 ring-2 ring-inset ring-primary" : ""}`}
       role="option"
+      id={template.id}
       aria-selected={isSelected}
-      tabIndex={isFocused ? 0 : -1}
+      tabIndex={-1}
     >
       <div className="flex items-start gap-2">
         <span className="text-lg flex-shrink-0">{template.icon}</span>
@@ -86,13 +87,20 @@ export const TemplateDropdown: React.FC<TemplateDropdownProps> = ({
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle keyboard events when dropdown is focused/active
+      if (!dropdownRef.current?.contains(document.activeElement)) {
+        return;
+      }
+
       if (e.key === "Escape") {
         onClose();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
+        if (templates.length === 0) return;
         setFocusedIndex((prev) => (prev + 1) % templates.length);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
+        if (templates.length === 0) return;
         setFocusedIndex((prev) => (prev - 1 + templates.length) % templates.length);
       } else if (e.key === "Enter" && focusedIndex >= 0 && focusedIndex < templates.length) {
         e.preventDefault();
