@@ -386,6 +386,20 @@ impl TranscriptionManager {
 
                     whisper_engine
                         .transcribe_samples(audio, Some(params))
+                        .or_else(|e| {
+                            // Check if this is a UTF-8 error
+                            let err_msg = e.to_string();
+                            if err_msg.contains("Invalid UTF-8") {
+                                warn!("Whisper returned invalid UTF-8, returning empty transcription: {}", err_msg);
+                                // Return empty transcription result
+                                Ok(transcribe_rs::TranscriptionResult {
+                                    text: String::new(),
+                                    segments: Some(vec![]),
+                                })
+                            } else {
+                                Err(e)
+                            }
+                        })
                         .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))?
                 }
                 LoadedEngine::Parakeet(parakeet_engine) => {
