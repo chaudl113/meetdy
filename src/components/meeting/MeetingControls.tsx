@@ -1,8 +1,10 @@
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, Square, RotateCcw } from "lucide-react";
+import { Play, Square, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { Button } from "../ui/Button";
+import { TemplatePicker } from "./TemplatePicker";
+import type { MeetingTemplate } from "@/bindings";
 
 /**
  * MeetingControls - Controls component for meeting recording.
@@ -15,6 +17,11 @@ import { Button } from "../ui/Button";
  */
 export const MeetingControls: React.FC = () => {
   const { t } = useTranslation();
+
+  // Local state for template selection
+  const [selectedTemplate, setSelectedTemplate] =
+    useState<MeetingTemplate | null>(null);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(true);
 
   // Connect to meetingStore for state and actions
   const {
@@ -36,7 +43,9 @@ export const MeetingControls: React.FC = () => {
 
   // Handle start recording
   const handleStart = async () => {
-    await startMeeting();
+    await startMeeting(undefined, selectedTemplate?.id ?? undefined);
+    // Reset template selection after starting
+    setSelectedTemplate(null);
   };
 
   // Handle stop recording
@@ -77,7 +86,40 @@ export const MeetingControls: React.FC = () => {
       )}
 
       {/* Control Buttons */}
-      <div className="flex items-center justify-center gap-3">
+      <div className="flex flex-col gap-4">
+        {/* Template Picker - shown when idle or completed */}
+        {(isIdle || isCompleted) && (
+          <div className="space-y-3">
+            {/* Toggle Template Picker */}
+            <button
+              onClick={() => setShowTemplatePicker(!showTemplatePicker)}
+              className="flex items-center gap-2 text-sm text-mid-gray hover:text-primary transition-colors"
+            >
+              {showTemplatePicker ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              )}
+              <span>
+                {showTemplatePicker
+                  ? t("meeting.template.hide", "Hide templates")
+                  : t("meeting.template.show", "Show templates")}
+              </span>
+            </button>
+
+            {/* Template Picker Component */}
+            {showTemplatePicker && (
+              <TemplatePicker
+                onSelect={setSelectedTemplate}
+                selectedTemplateId={selectedTemplate?.id}
+                showNoneOption={true}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Start/Stop Buttons */}
+        <div className="flex items-center justify-center gap-3">
         {/* Start Recording Button - shown when idle or completed */}
         {(isIdle || isCompleted) && (
           <Button
@@ -144,6 +186,7 @@ export const MeetingControls: React.FC = () => {
             <span>{t("meeting.processing_short", "Processing...")}</span>
           </Button>
         )}
+        </div>
       </div>
 
       {/* Duration display after recording stopped (non-recording states) */}

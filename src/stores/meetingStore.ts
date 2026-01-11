@@ -33,7 +33,10 @@ interface MeetingStore {
   error: string | null;
 
   // Actions
-  startMeeting: (audioSource?: AudioSourceType) => Promise<void>;
+  startMeeting: (
+    audioSource?: AudioSourceType,
+    templateId?: string,
+  ) => Promise<void>;
   stopMeeting: () => Promise<void>;
   retryTranscription: () => Promise<void>;
   updateTitle: (title: string) => Promise<void>;
@@ -120,7 +123,7 @@ export const useMeetingStore = create<MeetingStore>()(
     },
 
     // Start a new meeting session
-    startMeeting: async (audioSource?: AudioSourceType) => {
+    startMeeting: async (audioSource?: AudioSourceType, templateId?: string) => {
       const {
         setLoading,
         setError,
@@ -133,7 +136,10 @@ export const useMeetingStore = create<MeetingStore>()(
       setError(null);
 
       try {
-        const result = await commands.startMeetingSession(audioSource ?? null);
+        const result = await commands.startMeetingSession(
+          audioSource ?? null,
+          templateId ?? null,
+        );
         if (result.status === "ok") {
           const session = result.data as MeetingSession;
           setCurrentSession(session);
