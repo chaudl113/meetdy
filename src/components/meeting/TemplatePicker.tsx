@@ -1,8 +1,21 @@
 import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Check } from "lucide-react";
+import { Plus, Check, Users, Coffee, Mic, FileText } from "lucide-react";
 import { useTemplateStore } from "../../stores/templateStore";
 import type { MeetingTemplate } from "@/bindings";
+
+// Icon mapping for template icons
+const ICON_MAP: Record<string, React.ComponentType<any>> = {
+  Users,
+  Coffee,
+  Mic,
+  FileText,
+};
+
+// Helper to get icon component from string
+const getIconComponent = (iconName: string) => {
+  return ICON_MAP[iconName] || FileText;
+};
 
 interface TemplatePickerProps {
   onSelect: (template: MeetingTemplate | null) => void;
@@ -84,14 +97,7 @@ export const TemplatePicker: React.FC<TemplatePickerProps> = ({
         {showNoneOption && (
           <button
             onClick={() => handleSelect(null)}
-            className={`
-              group relative p-4 rounded-lg border-2 transition-all text-left
-              ${
-                selectedTemplateId === null
-                  ? "border-blue-500 bg-blue-500/10"
-                  : "border-gray-700 hover:border-gray-600 bg-gray-800/30"
-              }
-            `}
+            className="group relative p-4 transition-all text-left border border-gray-700 rounded-lg"
             aria-pressed={selectedTemplateId === null}
           >
             {/* Selection Indicator */}
@@ -103,7 +109,7 @@ export const TemplatePicker: React.FC<TemplatePickerProps> = ({
 
             {/* Icon */}
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-2xl">📝</span>
+              <FileText size={20} className="text-primary" />
               <span className="font-medium text-primary">
                 {t("meeting.template.none", "None")}
               </span>
@@ -124,14 +130,7 @@ export const TemplatePicker: React.FC<TemplatePickerProps> = ({
           <button
             key={template.id}
             onClick={() => handleSelect(template)}
-            className={`
-              group relative p-4 rounded-lg border-2 transition-all text-left
-              ${
-                selectedTemplateId === template.id
-                  ? "border-blue-500 bg-blue-500/10"
-                  : "border-gray-700 hover:border-gray-600 bg-gray-800/30"
-              }
-            `}
+            className="group relative p-4 transition-all text-left border border-gray-700 rounded-lg"
             aria-pressed={selectedTemplateId === template.id}
           >
             {/* Selection Indicator */}
@@ -143,7 +142,10 @@ export const TemplatePicker: React.FC<TemplatePickerProps> = ({
 
             {/* Icon and Name */}
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-2xl">{template.icon}</span>
+              {(() => {
+                const IconComponent = getIconComponent(template.icon);
+                return <IconComponent size={20} className="text-primary" />;
+              })()}
               <span className="font-medium text-primary">{template.name}</span>
             </div>
 
@@ -153,7 +155,7 @@ export const TemplatePicker: React.FC<TemplatePickerProps> = ({
             </p>
 
             {/* Audio Source Badge */}
-            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-700/50 text-mid-gray">
+            <div className="inline-flex items-center gap-1 text-xs text-mid-gray">
               <span>{getAudioSourceLabel(template.audio_source)}</span>
             </div>
           </button>

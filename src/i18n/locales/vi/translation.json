@@ -336,6 +336,34 @@
         "settings": "Cài đặt:"
       }
     },
+    "meeting": {
+      "template": {
+        "title": "Mẫu cuộc họp",
+        "description": "Tạo mẫu cho các loại cuộc họp khác nhau để nhanh chóng bắt đầu ghi âm với cài đặt đã được cấu hình sẵn.",
+        "name": "Tên",
+        "nameDescription": "Tên mô tả cho mẫu này",
+        "namePlaceholder": "ví dụ: Họp nhóm hàng ngày",
+        "icon": "Biểu tượng",
+        "iconDescription": "Chọn một biểu tượng",
+        "titleTemplate": "Mẫu tiêu đề",
+        "titleTemplateDescription": "Mẫu cho tiêu đề cuộc họp. Sử dụng {date} và {time} làm trình giữ chỗ.",
+        "titleTemplatePlaceholder": "ví dụ: Họp nhóm - {date}",
+        "audioSource": "Nguồn âm thanh",
+        "audioSourceDescription": "Nguồn âm thanh mặc định cho mẫu này",
+        "prompt": "Lời nhắc AI",
+        "promptDescription": "Lời nhắc AI tùy chọn để xử lý sau",
+        "summaryPrompt": "Lời nhắc tóm tắt",
+        "summaryPromptDescription": "Lời nhắc AI tùy chỉnh để tạo bản tóm tắt cuộc họp. Sử dụng {} làm trình giữ chỗ cho bản ghi âm.",
+        "summaryPromptPlaceholder": "Để trống để sử dụng lời nhắc mặc định, hoặc tùy chỉnh với {} cho bản ghi âm",
+        "missingPlaceholder": "Thiếu trình giữ chỗ {}",
+        "noPrompt": "Không có",
+        "default": "Mặc định",
+        "create": "Tạo mẫu",
+        "edit": "Chỉnh sửa mẫu",
+        "createNew": "Tạo mẫu",
+        "confirmDelete": "Bạn có chắc chắn muốn xóa mẫu này không?"
+      }
+    },
     "about": {
       "title": "Giới thiệu",
       "version": {
@@ -401,6 +429,26 @@
     "yes": "Có",
     "no": "Không",
     "noOptionsFound": "Không tìm thấy tùy chọn"
+  },
+  "meeting": {
+    "title": "Chế độ Cuộc họp",
+    "template": {
+      "audioSource": {
+        "microphoneOnly": "Micrô",
+        "systemOnly": "Âm thanh hệ thống",
+        "mixed": "Cả hai"
+      },
+      "icons": {
+        "Users": "Người dùng",
+        "Coffee": "Cà phê",
+        "Mic": "Micrô",
+        "Phone": "Điện thoại",
+        "Briefcase": "Cặp công việc",
+        "Target": "Mục tiêu",
+        "FileText": "Tài liệu",
+        "Calendar": "Lịch"
+      }
+    }
   },
   "accessibility": {
     "permissionsRequired": "Cần quyền truy cập",

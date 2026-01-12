@@ -385,7 +385,7 @@ fn default_meeting_templates() -> Vec<MeetingTemplate> {
         MeetingTemplate {
             id: "template_1on1".to_string(),
             name: "1:1 Meeting".to_string(),
-            icon: "👥".to_string(),
+            icon: "Users".to_string(),
             title_template: "1:1 - {date}".to_string(),
             audio_source: "microphone_only".to_string(),
             prompt_id: None,
@@ -418,7 +418,7 @@ Provide a clear, concise summary focusing on actionable items and personal devel
         MeetingTemplate {
             id: "template_team_standup".to_string(),
             name: "Team Standup".to_string(),
-            icon: "☕".to_string(),
+            icon: "Coffee".to_string(),
             title_template: "Standup - {date}".to_string(),
             audio_source: "mixed".to_string(),
             prompt_id: None,
@@ -452,7 +452,7 @@ Keep it brief and action-oriented, focusing on momentum and blockers."#.to_strin
         MeetingTemplate {
             id: "template_interview".to_string(),
             name: "Interview".to_string(),
-            icon: "🎤".to_string(),
+            icon: "Mic".to_string(),
             title_template: "Interview - {date}".to_string(),
             audio_source: "microphone_only".to_string(),
             prompt_id: None,

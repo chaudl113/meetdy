@@ -488,6 +488,7 @@
     "characters": "characters"
   },
   "meeting": {
+    "title": "Meeting Mode",
     "template": {
       "selectTemplate": "Select a template",
       "none": "None",
@@ -500,6 +501,16 @@
         "microphoneOnly": "Microphone",
         "systemOnly": "System Audio",
         "mixed": "Both"
+      },
+      "icons": {
+        "Users": "Users",
+        "Coffee": "Coffee",
+        "Mic": "Microphone",
+        "Phone": "Phone",
+        "Briefcase": "Briefcase",
+        "Target": "Target",
+        "FileText": "Document",
+        "Calendar": "Calendar"
       }
     },
     "summary": {

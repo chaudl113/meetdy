@@ -335,6 +335,34 @@
         "settings": "Configuración:"
       }
     },
+    "meeting": {
+      "template": {
+        "title": "Plantillas de reuniones",
+        "description": "Cree plantillas para diferentes tipos de reuniones para iniciar grabaciones rápidamente con configuraciones preconfiguradas.",
+        "name": "Nombre",
+        "nameDescription": "Un nombre descriptivo para esta plantilla",
+        "namePlaceholder": "ej: Standup del equipo",
+        "icon": "Icono",
+        "iconDescription": "Elija un icono",
+        "titleTemplate": "Plantilla de título",
+        "titleTemplateDescription": "Plantilla para el título de la reunión. Use marcadores de posición {date} y {time}.",
+        "titleTemplatePlaceholder": "ej: Standup - {date}",
+        "audioSource": "Fuente de audio",
+        "audioSourceDescription": "Fuente de audio predeterminada para esta plantilla",
+        "prompt": "Indicación de IA",
+        "promptDescription": "Indicación de IA opcional para el posprocesamiento",
+        "summaryPrompt": "Indicación de resumen",
+        "summaryPromptDescription": "Indicación de IA personalizada para generar resúmenes de reuniones. Use el marcador de posición {} para la transcripción.",
+        "summaryPromptPlaceholder": "Deje vacío para usar la indicación predeterminada, o personalice con {} para la transcripción",
+        "missingPlaceholder": "Falta el marcador de posición {}",
+        "noPrompt": "Ninguno",
+        "default": "Predeterminado",
+        "create": "Crear plantilla",
+        "edit": "Editar plantilla",
+        "createNew": "Crear plantilla",
+        "confirmDelete": "¿Está seguro de que desea eliminar esta plantilla?"
+      }
+    },
     "about": {
       "title": "Acerca de",
       "version": {
@@ -400,6 +428,26 @@
     "yes": "Sí",
     "no": "No",
     "noOptionsFound": "No se encontraron opciones"
+  },
+  "meeting": {
+    "title": "Modo Reunión",
+    "template": {
+      "audioSource": {
+        "microphoneOnly": "Micrófono",
+        "systemOnly": "Audio del sistema",
+        "mixed": "Ambos"
+      },
+      "icons": {
+        "Users": "Usuarios",
+        "Coffee": "Café",
+        "Mic": "Micrófono",
+        "Phone": "Teléfono",
+        "Briefcase": "Maletín",
+        "Target": "Objetivo",
+        "FileText": "Documento",
+        "Calendar": "Calendario"
+      }
+    }
   },
   "accessibility": {
     "permissionsRequired": "Se Requieren Permisos de Accesibilidad",

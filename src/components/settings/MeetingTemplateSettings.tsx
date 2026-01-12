@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Pencil, Trash2, X, Check } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Check, Users, Coffee, Mic, Phone, Briefcase, Target, FileText, Calendar } from "lucide-react";
 import { useTemplateStore } from "../../stores/templateStore";
 import { useSettings } from "../../hooks/useSettings";
 import { SettingsGroup } from "../ui/SettingsGroup";
@@ -10,16 +10,34 @@ import { Input } from "../ui/Input";
 import { Dropdown } from "../ui/Dropdown";
 import type { MeetingTemplate } from "@/bindings";
 
-const AUDIO_SOURCE_OPTIONS = [
-  { value: "microphone_only", label: "Microphone Only" },
-  { value: "system_only", label: "System Audio Only" },
-  { value: "mixed", label: "Both (Mixed)" },
-];
+// Icon mapping for template icons
+const ICON_MAP: Record<string, React.ComponentType<any>> = {
+  Users,
+  Coffee,
+  Mic,
+  Phone,
+  Briefcase,
+  Target,
+  FileText,
+  Calendar,
+};
 
-const DEFAULT_ICONS = ["👥", "☕", "🎤", "📞", "💼", "🎯", "📝", "🗓️"];
+// Helper to get icon component from string
+const getIconComponent = (iconName: string) => {
+  return ICON_MAP[iconName] || FileText;
+};
+
+const DEFAULT_ICONS = ["Users", "Coffee", "Mic", "Phone", "Briefcase", "Target", "FileText", "Calendar"];
 
 export const MeetingTemplateSettings: React.FC = () => {
   const { t } = useTranslation();
+
+  // Audio source options with i18n
+  const AUDIO_SOURCE_OPTIONS = [
+    { value: "microphone_only", label: t("meeting.template.audioSource.microphoneOnly", "Microphone Only") },
+    { value: "system_only", label: t("meeting.template.audioSource.systemOnly", "System Audio Only") },
+    { value: "mixed", label: t("meeting.template.audioSource.mixed", "Both (Mixed)") },
+  ];
   const {
     templates,
     isLoading,
@@ -38,7 +56,7 @@ export const MeetingTemplateSettings: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
-    icon: "👥",
+    icon: "Users",
     titleTemplate: "",
     audioSource: "microphone_only",
     promptId: null as string | null,
@@ -56,7 +74,7 @@ export const MeetingTemplateSettings: React.FC = () => {
     setEditingId(null);
     setFormData({
       name: "",
-      icon: "👥",
+      icon: "Users",
       titleTemplate: "",
       audioSource: "microphone_only",
       promptId: null,
@@ -181,10 +199,13 @@ export const MeetingTemplateSettings: React.FC = () => {
               return (
                 <div
                   key={template.id}
-                  className="flex items-center gap-3 p-3 bg-gray-800/30 border border-gray-700 rounded-lg"
+                  className="flex items-center gap-3 p-3 border border-gray-700 rounded-lg hover:border-gray-600 transition-colors"
                 >
                   {/* Icon */}
-                  <span className="text-2xl">{template.icon}</span>
+                  {(() => {
+                    const IconComponent = getIconComponent(template.icon);
+                    return <IconComponent size={20} className="text-primary" />;
+                  })()}
 
                   {/* Template Info */}
                   <div className="flex-1 min-w-0">
@@ -193,7 +214,7 @@ export const MeetingTemplateSettings: React.FC = () => {
                         {template.name}
                       </span>
                       {isDefault && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
+                        <span className="text-xs px-1.5 py-0.5 text-blue-400">
                           {t("settings.meeting.template.default", "Default")}
                         </span>
                       )}
@@ -202,13 +223,13 @@ export const MeetingTemplateSettings: React.FC = () => {
                       {template.title_template}
                     </p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700/50 text-mid-gray">
+                      <span className="text-xs text-mid-gray">
                         {AUDIO_SOURCE_OPTIONS.find(
                           (opt) => opt.value === template.audio_source,
                         )?.label || template.audio_source}
                       </span>
                       {template.prompt_id && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700/50 text-mid-gray">
+                        <span className="text-xs text-mid-gray">
                           {prompts.find((p) => p.id === template.prompt_id)
                             ?.name || t("common.prompt", "Prompt")}
                         </span>
@@ -243,7 +264,7 @@ export const MeetingTemplateSettings: React.FC = () => {
 
         {/* Create/Edit Form */}
         {isEditing && (
-          <div className="space-y-4 p-4 bg-gray-800/30 border border-gray-700 rounded-lg">
+          <div className="space-y-4 p-4 border border-gray-700 rounded-lg">
             <h4 className="font-medium text-primary">
               {editingId
                 ? t("settings.meeting.template.edit", "Edit Template")
@@ -283,38 +304,32 @@ export const MeetingTemplateSettings: React.FC = () => {
               title={t("settings.meeting.template.icon", "Icon")}
               description={t(
                 "settings.meeting.template.iconDescription",
-                "Choose an emoji icon",
+                "Choose an icon",
               )}
               descriptionMode="tooltip"
               layout="stacked"
               grouped={true}
             >
               <div className="flex gap-2 flex-wrap">
-                {DEFAULT_ICONS.map((icon) => (
-                  <button
-                    key={icon}
-                    onClick={() => setFormData({ ...formData, icon })}
-                    className={`
-                      text-2xl p-2 rounded transition-colors
-                      ${
-                        formData.icon === icon
-                          ? "bg-blue-500/20 ring-2 ring-blue-500"
-                          : "hover:bg-gray-700/50"
-                      }
-                    `}
-                  >
-                    {icon}
-                  </button>
-                ))}
-                <Input
-                  value={formData.icon}
-                  onChange={(e) =>
-                    setFormData({ ...formData, icon: e.target.value })
-                  }
-                  placeholder="Or type emoji"
-                  className="w-20 text-center"
-                  maxLength={2}
-                />
+                {DEFAULT_ICONS.map((iconName) => {
+                  const IconComponent = getIconComponent(iconName);
+                  return (
+                    <button
+                      key={iconName}
+                      onClick={() => setFormData({ ...formData, icon: iconName })}
+                      className={`
+                        p-2 rounded transition-colors border
+                        ${
+                          formData.icon === iconName
+                            ? "border-blue-500 ring-2 ring-blue-500"
+                            : "border-gray-700 hover:border-gray-600"
+                        }
+                      `}
+                    >
+                      <IconComponent size={20} className="text-primary" />
+                    </button>
+                  );
+                })}
               </div>
             </SettingContainer>
 
@@ -355,8 +370,8 @@ export const MeetingTemplateSettings: React.FC = () => {
             >
               <Dropdown
                 options={AUDIO_SOURCE_OPTIONS}
-                value={formData.audioSource}
-                onChange={(value) =>
+                selectedValue={formData.audioSource}
+                onSelect={(value: string) =>
                   setFormData({ ...formData, audioSource: value })
                 }
                 className="min-w-[200px]"
@@ -376,8 +391,8 @@ export const MeetingTemplateSettings: React.FC = () => {
             >
               <Dropdown
                 options={promptOptions}
-                value={formData.promptId || ""}
-                onChange={(value) =>
+                selectedValue={formData.promptId || ""}
+                onSelect={(value: string) =>
                   setFormData({ ...formData, promptId: value || null })
                 }
                 className="min-w-[200px]"
@@ -404,7 +419,7 @@ export const MeetingTemplateSettings: React.FC = () => {
                   "settings.meeting.template.summaryPromptPlaceholder",
                   "Leave empty to use default prompt, or customize with {} for transcript",
                 )}
-                className="w-full min-h-[120px] px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-primary placeholder-mid-gray focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
+                className="w-full min-h-[120px] px-3 py-2 border border-gray-700 rounded-lg text-sm text-primary placeholder-mid-gray focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
                 rows={6}
               />
               {formData.summaryPromptTemplate && (

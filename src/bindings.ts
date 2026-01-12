@@ -850,17 +850,17 @@ async listMeetingTemplates() : Promise<Result<MeetingTemplate[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async createMeetingTemplate(name: string, icon: string, titleTemplate: string, audioSource: string, promptId: string | null) : Promise<Result<MeetingTemplate, string>> {
+async createMeetingTemplate(name: string, icon: string, titleTemplate: string, audioSource: string, promptId: string | null, summaryPromptTemplate: string | null) : Promise<Result<MeetingTemplate, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_meeting_template", { name, icon, titleTemplate, audioSource, promptId }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_meeting_template", { name, icon, titleTemplate, audioSource, promptId, summaryPromptTemplate }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async updateMeetingTemplate(id: string, name: string | null, icon: string | null, titleTemplate: string | null, audioSource: string | null, promptId: string | null) : Promise<Result<MeetingTemplate, string>> {
+async updateMeetingTemplate(id: string, name: string | null, icon: string | null, titleTemplate: string | null, audioSource: string | null, promptId: string | null, summaryPromptTemplate: string | null) : Promise<Result<MeetingTemplate, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_meeting_template", { id, name, icon, titleTemplate, audioSource, promptId }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_template", { id, name, icon, titleTemplate, audioSource, promptId, summaryPromptTemplate }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -975,7 +975,11 @@ audio_source: AudioSourceType;
  * Relative path to the AI-generated summary file within the meetings directory
  * e.g., "{session-id}/summary.md"
  */
-summary_path: string | null }
+summary_path: string | null; 
+/**
+ * Template ID if this meeting was created from a template
+ */
+template_id?: string | null }
 /**
  * Represents the lifecycle status of a meeting session.
  * 
@@ -1013,7 +1017,7 @@ export type MeetingStatus =
  * Meeting was interrupted (app closed during recording), audio preserved
  */
 "interrupted"
-export type MeetingTemplate = { id: string; name: string; icon: string; title_template: string; audio_source: string; prompt_id: string | null; created_at: number; updated_at: number }
+export type MeetingTemplate = { id: string; name: string; icon: string; title_template: string; audio_source: string; prompt_id: string | null; summary_prompt_template?: string | null; created_at: number; updated_at: number }
 export type ModelInfo = { id: string; name: string; description: string; filename: string; url: string | null; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 export type ModelUnloadTimeout = "never" | "immediately" | "min_2" | "min_5" | "min_10" | "min_15" | "hour_1" | "sec_5"

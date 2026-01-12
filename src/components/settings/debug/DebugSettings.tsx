@@ -34,11 +34,11 @@ export const DebugSettings: React.FC = () => {
           description={t("settings.debug.soundTheme.description")}
         />
         <WordCorrectionThreshold descriptionMode="tooltip" grouped={true} />
-        <HistoryLimit descriptionMode="tooltip" grouped={true} />
-        <RecordingRetentionPeriodSelector
+        {/* <HistoryLimit descriptionMode="tooltip" grouped={true} /> */}
+        {/* <RecordingRetentionPeriodSelector
           descriptionMode="tooltip"
           grouped={true}
-        />
+        /> */}
         <AlwaysOnMicrophone descriptionMode="tooltip" grouped={true} />
         <ClamshellMicrophoneSelector descriptionMode="tooltip" grouped={true} />
         <PostProcessingToggle descriptionMode="tooltip" grouped={true} />

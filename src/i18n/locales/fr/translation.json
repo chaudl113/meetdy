@@ -336,6 +336,34 @@
         "settings": "Paramètres :"
       }
     },
+    "meeting": {
+      "template": {
+        "title": "Modèles de réunion",
+        "description": "Créez des modèles pour différents types de réunions afin de démarrer rapidement des enregistrements avec des paramètres préconfigurés.",
+        "name": "Nom",
+        "nameDescription": "Un nom descriptif pour ce modèle",
+        "namePlaceholder": "par ex : Standup d'équipe",
+        "icon": "Icône",
+        "iconDescription": "Choisissez une icône",
+        "titleTemplate": "Modèle de titre",
+        "titleTemplateDescription": "Modèle pour le titre de la réunion. Utilisez les espaces réservés {date} et {time}.",
+        "titleTemplatePlaceholder": "par ex : Standup - {date}",
+        "audioSource": "Source audio",
+        "audioSourceDescription": "Source audio par défaut pour ce modèle",
+        "prompt": "Invite IA",
+        "promptDescription": "Invite IA facultative pour le post-traitement",
+        "summaryPrompt": "Invite de résumé",
+        "summaryPromptDescription": "Invite IA personnalisée pour générer des résumés de réunion. Utilisez l'espace réservé {} pour la transcription.",
+        "summaryPromptPlaceholder": "Laissez vide pour utiliser l'invite par défaut, ou personnalisez avec {} pour la transcription",
+        "missingPlaceholder": "Espace réservé {} manquant",
+        "noPrompt": "Aucun",
+        "default": "Par défaut",
+        "create": "Créer un modèle",
+        "edit": "Modifier le modèle",
+        "createNew": "Créer un modèle",
+        "confirmDelete": "Êtes-vous sûr de vouloir supprimer ce modèle ?"
+      }
+    },
     "about": {
       "title": "À propos",
       "version": {
@@ -401,6 +429,26 @@
     "yes": "Oui",
     "no": "Non",
     "noOptionsFound": "Aucune option trouvée"
+  },
+  "meeting": {
+    "title": "Mode Réunion",
+    "template": {
+      "audioSource": {
+        "microphoneOnly": "Microphone",
+        "systemOnly": "Audio système",
+        "mixed": "Les deux"
+      },
+      "icons": {
+        "Users": "Utilisateurs",
+        "Coffee": "Café",
+        "Mic": "Microphone",
+        "Phone": "Téléphone",
+        "Briefcase": "Mallette",
+        "Target": "Cible",
+        "FileText": "Document",
+        "Calendar": "Calendrier"
+      }
+    }
   },
   "accessibility": {
     "permissionsRequired": "Autorisations d'accessibilité requises",
