@@ -2,7 +2,7 @@ use crate::managers::meeting::{
     AudioSourceType, MeetingSession, MeetingSessionManager, MeetingStatus,
 };
 use crate::settings::get_settings;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::path::{Component, Path};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -26,6 +26,39 @@ fn interpolate_title_template(template: &str) -> String {
     template
         .replace("{date}", &now.format("%Y-%m-%d").to_string())
         .replace("{time}", &now.format("%H:%M").to_string())
+}
+
+/// Builds the default summary prompt for meetings without a custom template.
+///
+/// This is the standard prompt used when no template-specific prompt is configured.
+///
+/// # Arguments
+/// * `transcript` - The meeting transcript to summarize
+///
+/// # Returns
+/// The formatted prompt string ready for LLM consumption
+fn build_default_summary_prompt(transcript: &str) -> String {
+    format!(
+        r#"Please summarize this meeting transcript concisely. Structure your response with:
+
+## Key Points
+- Main topics and discussions
+
+## Action Items
+- Tasks assigned with owners (if mentioned)
+
+## Decisions Made
+- Important decisions reached
+
+## Next Steps
+- Follow-up actions needed
+
+Transcript:
+{}
+
+Provide a clear, professional summary in markdown format."#,
+        transcript
+    )
 }
 
 /// Validates that a relative path is safe and doesn't escape the base directory.
@@ -181,14 +214,20 @@ pub fn start_meeting_session(
             .update_session_title(&session.id, &generated_title)
             .map_err(|e| format!("Failed to update session title: {}", e))?;
 
-        // Update the returned session object with the new title
+        // Update the returned session object with the new title and template_id
         session.title = generated_title;
+        session.template_id = Some(template.id.clone());
+
+        // Store template_id in database for summary generation later
+        manager
+            .update_session_template_id(&session.id, &template.id)
+            .map_err(|e| format!("Failed to update session template_id: {}", e))?;
 
         // Store template metadata for future reference
         // Note: prompt_id can be used for post-processing later
         debug!(
-            "Session {} configured with template prompt_id: {:?}",
-            session.id, template.prompt_id
+            "Session {} configured with template '{}' (prompt_id: {:?})",
+            session.id, template.id, template.prompt_id
         );
     }
 
@@ -634,28 +673,38 @@ pub async fn generate_meeting_summary(
         ));
     }
 
-    // Build summary prompt
-    let summary_prompt = format!(
-        r#"Please summarize this meeting transcript concisely. Structure your response with:
+    // Build summary prompt - use template-specific prompt if available
+    let summary_prompt = if let Some(template_id) = &session.template_id {
+        // Find the template to get its custom summary prompt
+        let template = settings
+            .meeting_templates
+            .iter()
+            .find(|t| &t.id == template_id);
 
-## Key Points
-- Main topics and discussions
-
-## Action Items
-- Tasks assigned with owners (if mentioned)
-
-## Decisions Made
-- Important decisions reached
-
-## Next Steps
-- Follow-up actions needed
-
-Transcript:
-{}
-
-Provide a clear, professional summary in markdown format."#,
-        transcript
-    );
+        if let Some(template) = template {
+            if let Some(ref custom_prompt) = template.summary_prompt_template {
+                debug!(
+                    "Using template-specific summary prompt for template '{}'",
+                    template.name
+                );
+                // Replace {} placeholder with transcript
+                custom_prompt.replace("{}", &transcript)
+            } else {
+                // Template exists but has no custom prompt, use default
+                build_default_summary_prompt(&transcript)
+            }
+        } else {
+            // Template ID exists but template not found (may have been deleted)
+            warn!(
+                "Template '{}' not found, using default summary prompt",
+                template_id
+            );
+            build_default_summary_prompt(&transcript)
+        }
+    } else {
+        // No template associated with this session, use default
+        build_default_summary_prompt(&transcript)
+    };
 
     debug!(
         "Generating summary with provider '{}' (model: {})",

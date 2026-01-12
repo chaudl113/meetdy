@@ -42,6 +42,7 @@ export const MeetingTemplateSettings: React.FC = () => {
     titleTemplate: "",
     audioSource: "microphone_only",
     promptId: null as string | null,
+    summaryPromptTemplate: null as string | null,
   });
 
   // Fetch templates on mount
@@ -59,6 +60,7 @@ export const MeetingTemplateSettings: React.FC = () => {
       titleTemplate: "",
       audioSource: "microphone_only",
       promptId: null,
+      summaryPromptTemplate: null,
     });
   };
 
@@ -72,6 +74,7 @@ export const MeetingTemplateSettings: React.FC = () => {
       titleTemplate: template.title_template,
       audioSource: template.audio_source,
       promptId: template.prompt_id,
+      summaryPromptTemplate: template.summary_prompt_template ?? null,
     });
   };
 
@@ -91,6 +94,7 @@ export const MeetingTemplateSettings: React.FC = () => {
           formData.titleTemplate,
           formData.audioSource,
           formData.promptId,
+          formData.summaryPromptTemplate,
         );
       } else {
         // Create new
@@ -100,6 +104,7 @@ export const MeetingTemplateSettings: React.FC = () => {
           formData.titleTemplate,
           formData.audioSource,
           formData.promptId,
+          formData.summaryPromptTemplate,
         );
       }
 
@@ -377,6 +382,41 @@ export const MeetingTemplateSettings: React.FC = () => {
                 }
                 className="min-w-[200px]"
               />
+            </SettingContainer>
+
+            {/* Summary Prompt Template */}
+            <SettingContainer
+              title={t("settings.meeting.template.summaryPrompt", "Summary Prompt")}
+              description={t(
+                "settings.meeting.template.summaryPromptDescription",
+                "Custom AI prompt for generating meeting summaries. Use {} placeholder for transcript.",
+              )}
+              descriptionMode="tooltip"
+              layout="stacked"
+              grouped={true}
+            >
+              <textarea
+                value={formData.summaryPromptTemplate || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, summaryPromptTemplate: e.target.value || null })
+                }
+                placeholder={t(
+                  "settings.meeting.template.summaryPromptPlaceholder",
+                  "Leave empty to use default prompt, or customize with {} for transcript",
+                )}
+                className="w-full min-h-[120px] px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-primary placeholder-mid-gray focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
+                rows={6}
+              />
+              {formData.summaryPromptTemplate && (
+                <p className="text-xs text-mid-gray mt-1">
+                  {formData.summaryPromptTemplate.length}/10000 {t("common.characters", "characters")}
+                  {!formData.summaryPromptTemplate.includes("{}") && (
+                    <span className="text-yellow-500 ml-2">
+                      ⚠ {t("settings.meeting.template.missingPlaceholder", "Missing {} placeholder")}
+                    </span>
+                  )}
+                </p>
+              )}
             </SettingContainer>
 
             {/* Action Buttons */}

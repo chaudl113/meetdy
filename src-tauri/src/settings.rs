@@ -100,6 +100,8 @@ pub struct MeetingTemplate {
     pub title_template: String,
     pub audio_source: String, // Serialized AudioSourceType: "microphone_only", "system_only", "mixed"
     pub prompt_id: Option<String>,
+    #[serde(default)]
+    pub summary_prompt_template: Option<String>, // Custom prompt template for AI summaries
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -387,6 +389,29 @@ fn default_meeting_templates() -> Vec<MeetingTemplate> {
             title_template: "1:1 - {date}".to_string(),
             audio_source: "microphone_only".to_string(),
             prompt_id: None,
+            summary_prompt_template: Some(
+                r#"Please summarize this 1:1 meeting transcript. Structure your response with:
+
+## Topics Discussed
+- Main discussion points and concerns raised
+
+## Action Items
+- Tasks assigned with clear owners and deadlines
+- Follow-up actions needed
+
+## Feedback & Notes
+- Key feedback shared
+- Important observations
+
+## Next Steps
+- What to prepare for next meeting
+- Scheduled follow-ups
+
+Transcript:
+{}
+
+Provide a clear, concise summary focusing on actionable items and personal development points."#.to_string()
+            ),
             created_at: 0,
             updated_at: 0,
         },
@@ -397,6 +422,30 @@ fn default_meeting_templates() -> Vec<MeetingTemplate> {
             title_template: "Standup - {date}".to_string(),
             audio_source: "mixed".to_string(),
             prompt_id: None,
+            summary_prompt_template: Some(
+                r#"Please summarize this team standup meeting. Structure your response with:
+
+## Progress Updates (Yesterday/Recently)
+- What team members completed
+- Achievements and milestones
+
+## Today's Plan
+- Current focus areas for each team member
+- Priorities for today
+
+## Blockers & Challenges
+- Impediments preventing progress
+- Help needed from team/management
+
+## Decisions & Notes
+- Quick decisions made during standup
+- Important announcements
+
+Transcript:
+{}
+
+Keep it brief and action-oriented, focusing on momentum and blockers."#.to_string()
+            ),
             created_at: 0,
             updated_at: 0,
         },
@@ -407,6 +456,38 @@ fn default_meeting_templates() -> Vec<MeetingTemplate> {
             title_template: "Interview - {date}".to_string(),
             audio_source: "microphone_only".to_string(),
             prompt_id: None,
+            summary_prompt_template: Some(
+                r#"Please summarize this candidate interview. Structure your response with:
+
+## Candidate Information
+- Name and position applied for
+- Key background highlights
+
+## Technical Skills & Experience
+- Relevant technical expertise demonstrated
+- Projects and accomplishments discussed
+
+## Key Strengths
+- Notable positive observations
+- Areas where candidate excelled
+
+## Areas of Concern
+- Potential weaknesses or gaps
+- Questions or doubts raised
+
+## Cultural Fit & Soft Skills
+- Communication style and collaboration approach
+- Team fit assessment
+
+## Recommendation
+- Clear hire/no-hire recommendation with rationale
+- Next steps if moving forward
+
+Transcript:
+{}
+
+Provide an objective, balanced assessment suitable for hiring decisions."#.to_string()
+            ),
             created_at: 0,
             updated_at: 0,
         },

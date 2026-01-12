@@ -18,6 +18,7 @@ interface TemplateStore {
     titleTemplate: string,
     audioSource: string,
     promptId: string | null,
+    summaryPromptTemplate?: string | null,
   ) => Promise<MeetingTemplate | null>;
   updateTemplate: (
     id: string,
@@ -26,6 +27,7 @@ interface TemplateStore {
     titleTemplate?: string,
     audioSource?: string,
     promptId?: string | null,
+    summaryPromptTemplate?: string | null,
   ) => Promise<MeetingTemplate | null>;
   deleteTemplate: (id: string) => Promise<boolean>;
   selectTemplate: (template: MeetingTemplate | null) => void;
@@ -90,6 +92,7 @@ export const useTemplateStore = create<TemplateStore>()(
       titleTemplate,
       audioSource,
       promptId,
+      summaryPromptTemplate,
     ) => {
       const { setError, setLoading, fetchTemplates } = get();
 
@@ -103,6 +106,7 @@ export const useTemplateStore = create<TemplateStore>()(
           titleTemplate,
           audioSource,
           promptId,
+          summaryPromptTemplate ?? null,
         );
 
         if (result.status === "ok") {
@@ -132,6 +136,7 @@ export const useTemplateStore = create<TemplateStore>()(
       titleTemplate,
       audioSource,
       promptId,
+      summaryPromptTemplate,
     ) => {
       const { setError, setLoading, fetchTemplates } = get();
 
@@ -146,6 +151,7 @@ export const useTemplateStore = create<TemplateStore>()(
           titleTemplate ?? null,
           audioSource ?? null,
           promptId ?? null,
+          summaryPromptTemplate ?? null,
         );
 
         if (result.status === "ok") {

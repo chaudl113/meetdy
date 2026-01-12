@@ -51,6 +51,9 @@ static MIGRATIONS: &[M] = &[
     M::up(
         "ALTER TABLE meeting_sessions ADD COLUMN summary_path TEXT;",
     ),
+    M::up(
+        "ALTER TABLE meeting_sessions ADD COLUMN template_id TEXT;",
+    ),
 ];
 
 /// Initialize the meeting sessions database and run any pending migrations.
@@ -194,6 +197,10 @@ pub struct MeetingSession {
     /// Relative path to the AI-generated summary file within the meetings directory
     /// e.g., "{session-id}/summary.md"
     pub summary_path: Option<String>,
+
+    /// Template ID if this meeting was created from a template
+    #[serde(default)]
+    pub template_id: Option<String>,
 }
 
 impl MeetingSession {
@@ -213,6 +220,7 @@ impl MeetingSession {
             error_message: None,
             audio_source: AudioSourceType::default(),
             summary_path: None,
+            template_id: None,
         }
     }
 
@@ -234,6 +242,30 @@ impl MeetingSession {
             error_message: None,
             audio_source,
             summary_path: None,
+            template_id: None,
+        }
+    }
+
+    /// Creates a new meeting session with audio source and template.
+    pub fn new_with_template(
+        id: String,
+        title: String,
+        created_at: i64,
+        audio_source: AudioSourceType,
+        template_id: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            title,
+            created_at,
+            duration: None,
+            status: MeetingStatus::Idle,
+            audio_path: None,
+            transcript_path: None,
+            error_message: None,
+            audio_source,
+            summary_path: None,
+            template_id,
         }
     }
 }
@@ -532,6 +564,43 @@ impl MeetingSessionManager {
         Ok(())
     }
 
+    /// Updates the template_id for a meeting session.
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session to update
+    /// * `template_id` - The template ID to associate with this session
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the template_id was updated successfully
+    /// * `Err` - If session not found or database update fails
+    pub fn update_session_template_id(&self, session_id: &str, template_id: &str) -> Result<()> {
+        let conn = self.get_connection()?;
+        let rows_affected = conn.execute(
+            "UPDATE meeting_sessions SET template_id = ?1 WHERE id = ?2",
+            params![template_id, session_id],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+
+        // Update in-memory state if this is the current session
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(session) = state.current_session.as_mut() {
+                if session.id == session_id {
+                    session.template_id = Some(template_id.to_string());
+                }
+            }
+        }
+
+        info!(
+            "Updated template_id for session {}: {}",
+            session_id, template_id
+        );
+        Ok(())
+    }
+
     /// Updates the summary path for a meeting session.
     ///
     /// # Arguments
@@ -720,13 +789,14 @@ impl MeetingSessionManager {
         // Insert into database
         let conn = self.get_connection()?;
         conn.execute(
-            "INSERT INTO meeting_sessions (id, title, created_at, status, audio_source) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO meeting_sessions (id, title, created_at, status, audio_source, template_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 session.id,
                 session.title,
                 session.created_at,
                 self.status_to_string(&session.status),
-                self.audio_source_to_string(&audio_source)
+                self.audio_source_to_string(&audio_source),
+                session.template_id
             ],
         )?;
 
@@ -751,7 +821,7 @@ impl MeetingSessionManager {
         let conn = self.get_connection()?;
         let session = conn
             .query_row(
-                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
+                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id
                  FROM meeting_sessions WHERE id = ?1",
                 params![session_id],
                 |row| self.row_to_session(row),
@@ -832,7 +902,7 @@ impl MeetingSessionManager {
     pub fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id
              FROM meeting_sessions ORDER BY created_at DESC",
         )?;
 
@@ -965,6 +1035,7 @@ impl MeetingSessionManager {
             .get("audio_source")
             .unwrap_or_else(|_| "microphone_only".to_string());
         let summary_path: Option<String> = row.get("summary_path")?;
+        let template_id: Option<String> = row.get("template_id").unwrap_or(None);
         Ok(MeetingSession {
             id: row.get("id")?,
             title: row.get("title")?,
@@ -976,6 +1047,7 @@ impl MeetingSessionManager {
             error_message: row.get("error_message")?,
             audio_source: self.string_to_audio_source(&audio_source_str),
             summary_path,
+            template_id,
         })
     }
 
@@ -2140,7 +2212,7 @@ impl MeetingSessionManager {
 
         // Query for all interrupted sessions
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path
+            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id
              FROM meeting_sessions WHERE status = ?1 ORDER BY created_at DESC",
         )?;
 

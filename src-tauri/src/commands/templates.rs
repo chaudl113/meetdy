@@ -19,6 +19,7 @@ pub fn create_meeting_template(
     title_template: String,
     audio_source: String,
     prompt_id: Option<String>,
+    summary_prompt_template: Option<String>,
 ) -> Result<MeetingTemplate, String> {
     debug!("create_meeting_template command called: name={}", name);
 
@@ -34,6 +35,16 @@ pub fn create_meeting_template(
     // Validate audio_source
     if !["microphone_only", "system_only", "mixed"].contains(&audio_source.as_str()) {
         return Err(format!("Invalid audio_source: {}", audio_source));
+    }
+
+    // Validate summary_prompt_template if provided
+    if let Some(ref spt) = summary_prompt_template {
+        if !spt.contains("{}") {
+            return Err("summary_prompt_template must contain '{}' placeholder for transcript".to_string());
+        }
+        if spt.len() > 10000 {
+            return Err("summary_prompt_template is too long (max 10000 characters)".to_string());
+        }
     }
 
     let mut settings = get_settings(&app);
@@ -55,6 +66,7 @@ pub fn create_meeting_template(
         title_template,
         audio_source,
         prompt_id,
+        summary_prompt_template,
         created_at: chrono::Utc::now().timestamp(),
         updated_at: chrono::Utc::now().timestamp(),
     };
@@ -76,6 +88,7 @@ pub fn update_meeting_template(
     title_template: Option<String>,
     audio_source: Option<String>,
     prompt_id: Option<String>,
+    summary_prompt_template: Option<String>,
 ) -> Result<MeetingTemplate, String> {
     debug!("update_meeting_template command called: id={}", id);
 
@@ -117,6 +130,19 @@ pub fn update_meeting_template(
     // Note: prompt_id can be None to clear it
     if prompt_id.is_some() {
         template.prompt_id = prompt_id;
+    }
+
+    // Handle summary_prompt_template update
+    if let Some(ref spt) = summary_prompt_template {
+        if !spt.is_empty() && !spt.contains("{}") {
+            return Err("summary_prompt_template must contain '{}' placeholder for transcript".to_string());
+        }
+        if spt.len() > 10000 {
+            return Err("summary_prompt_template is too long (max 10000 characters)".to_string());
+        }
+    }
+    if summary_prompt_template.is_some() {
+        template.summary_prompt_template = summary_prompt_template;
     }
 
     template.updated_at = chrono::Utc::now().timestamp();
