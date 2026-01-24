@@ -10,6 +10,8 @@ import {
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { MeetingDetailView } from "./MeetingDetailView";
 import type { MeetingSession } from "@/bindings";
+import { Input } from "../ui/Input";
+
 
 /**
  * Formats a Unix timestamp to a localized date/time string
