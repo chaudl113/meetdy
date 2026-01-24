@@ -1,25 +1,25 @@
 {
   "active": true,
-  "spec": "001-prd-plan-1-meeting-mode-core-foundation",
-  "state": "complete",
+  "spec": "002-add-search-filter-to-meetinghistory",
+  "state": "building",
   "subtasks": {
-    "completed": 32,
-    "total": 32,
-    "in_progress": 0,
+    "completed": 4,
+    "total": 5,
+    "in_progress": 1,
     "failed": 0
   },
   "phase": {
-    "current": "Integration & Polish",
+    "current": "Verification",
     "id": null,
-    "total": 6
+    "total": 1
   },
   "workers": {
     "active": 0,
     "max": 1
   },
   "session": {
-    "number": 32,
-    "started_at": "2025-12-29T21:22:48.927615"
+    "number": 6,
+    "started_at": "2026-01-25T01:52:55.158765"
   },
-  "last_update": "2025-12-30T00:41:03.193946"
+  "last_update": "2026-01-25T01:58:50.814364"
 }
