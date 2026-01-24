@@ -72,6 +72,7 @@ const StatusBadge: React.FC<{ status: MeetingSession["status"] }> = ({
 export const MeetingHistory: React.FC = () => {
   const { t } = useTranslation();
   const { sessions, fetchSessions, isLoading } = useMeetingStore();
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedSession, setSelectedSession] = useState<MeetingSession | null>(
     null,
   );
