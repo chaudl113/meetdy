@@ -98,10 +98,23 @@ export const MeetingHistory: React.FC = () => {
     const query = searchQuery.toLowerCase();
     const title = (session.title || "").toLowerCase();
     const date = formatDate(session.created_at).toLowerCase();
-    const status = (session.status || "").toLowerCase();
+
+    // Map status to localized labels for searching
+    const statusLabels: Record<string, string> = {
+      idle: "idle",
+      recording: t("meeting.status.recording", "Recording").toLowerCase(),
+      processing: t("meeting.status.processing", "Processing").toLowerCase(),
+      completed: t("meeting.status.completed", "Completed").toLowerCase(),
+      failed: t("meeting.status.failed", "Failed").toLowerCase(),
+      interrupted: t("meeting.status.interrupted", "Interrupted").toLowerCase(),
+    };
+
+    const statusLabel = statusLabels[session.status] || "";
 
     return (
-      title.includes(query) || date.includes(query) || status.includes(query)
+      title.includes(query) ||
+      date.includes(query) ||
+      statusLabel.includes(query)
     );
   });
 
