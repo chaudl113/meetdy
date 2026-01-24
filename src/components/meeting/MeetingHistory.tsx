@@ -6,9 +6,11 @@ import {
   AlertCircle,
   Loader2,
   ChevronRight,
+  Search,
 } from "lucide-react";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { MeetingDetailView } from "./MeetingDetailView";
+import { Input } from "../ui/Input";
 import type { MeetingSession } from "@/bindings";
 import { Input } from "../ui/Input";
 
@@ -74,6 +76,7 @@ const StatusBadge: React.FC<{ status: MeetingSession["status"] }> = ({
 export const MeetingHistory: React.FC = () => {
   const { t } = useTranslation();
   const { sessions, fetchSessions, isLoading } = useMeetingStore();
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedSession, setSelectedSession] = useState<MeetingSession | null>(
     null,
   );
@@ -90,6 +93,32 @@ export const MeetingHistory: React.FC = () => {
   const handleCloseDetail = () => {
     setSelectedSession(null);
   };
+
+  const filteredSessions = sessions.filter((session) => {
+    if (!searchQuery) return true;
+
+    const query = searchQuery.toLowerCase();
+    const title = (session.title || "").toLowerCase();
+    const date = formatDate(session.created_at).toLowerCase();
+
+    // Map status to localized labels for searching
+    const statusLabels: Record<string, string> = {
+      idle: "idle",
+      recording: t("meeting.status.recording", "Recording").toLowerCase(),
+      processing: t("meeting.status.processing", "Processing").toLowerCase(),
+      completed: t("meeting.status.completed", "Completed").toLowerCase(),
+      failed: t("meeting.status.failed", "Failed").toLowerCase(),
+      interrupted: t("meeting.status.interrupted", "Interrupted").toLowerCase(),
+    };
+
+    const statusLabel = statusLabels[session.status] || "";
+
+    return (
+      title.includes(query) ||
+      date.includes(query) ||
+      statusLabel.includes(query)
+    );
+  });
 
   if (isLoading && sessions.length === 0) {
     return (
@@ -111,39 +140,67 @@ export const MeetingHistory: React.FC = () => {
 
   return (
     <>
+      <div className="p-4 border-b border-mid-gray/20">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-mid-gray" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t(
+              "settings.history.searchPlaceholder",
+              "Search meetings by title, date, or status...",
+            )}
+            className="pl-9 w-full"
+          />
+        </div>
+      </div>
+
       <div className="divide-y divide-mid-gray/20">
-        {sessions.map((session) => (
-          <div
-            key={session.id}
-            onClick={() => handleSessionClick(session)}
-            className="flex items-center justify-between px-4 py-3 hover:bg-mid-gray/10 cursor-pointer transition-colors group"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h4 className="text-sm font-medium truncate">
-                  {session.title}
-                </h4>
-                <StatusBadge status={session.status} />
-              </div>
-              <div className="flex items-center gap-3 mt-1 text-xs text-mid-gray">
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {formatDate(session.created_at)}
-                </span>
-                {session.duration && (
-                  <span>{formatDuration(session.duration)}</span>
+        {filteredSessions.length === 0 ? (
+          <div className="text-center py-8 text-mid-gray">
+            <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p>
+              {t(
+                "settings.history.noResults",
+                "No meetings found matching your search",
+              )}
+            </p>
+          </div>
+        ) : (
+          filteredSessions.map((session) => (
+            <div
+              key={session.id}
+              onClick={() => handleSessionClick(session)}
+              className="flex items-center justify-between px-4 py-3 hover:bg-mid-gray/10 cursor-pointer transition-colors group"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-medium truncate">
+                    {session.title}
+                  </h4>
+                  <StatusBadge status={session.status} />
+                </div>
+                <div className="flex items-center gap-3 mt-1 text-xs text-mid-gray">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {formatDate(session.created_at)}
+                  </span>
+                  {session.duration && (
+                    <span>{formatDuration(session.duration)}</span>
+                  )}
+                </div>
+                {session.error_message && (
+                  <div className="flex items-center gap-1 mt-1 text-xs text-red-400">
+                    <AlertCircle className="h-3 w-3" />
+                    <span className="truncate">{session.error_message}</span>
+                  </div>
                 )}
               </div>
-              {session.error_message && (
-                <div className="flex items-center gap-1 mt-1 text-xs text-red-400">
-                  <AlertCircle className="h-3 w-3" />
-                  <span className="truncate">{session.error_message}</span>
-                </div>
-              )}
+              <ChevronRight className="h-4 w-4 text-mid-gray opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
-            <ChevronRight className="h-4 w-4 text-mid-gray opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {/* Detail Modal */}

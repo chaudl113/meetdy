@@ -345,6 +345,8 @@
       "openFolder": "Open Recordings Folder",
       "loading": "Loading history...",
       "empty": "No transcriptions yet. Start recording to build your history!",
+      "noResults": "No meetings found matching your search",
+      "searchPlaceholder": "Search meetings by title, date, or status...",
       "copyToClipboard": "Copy transcription to clipboard",
       "save": "Save transcription",
       "unsave": "Remove from saved",
