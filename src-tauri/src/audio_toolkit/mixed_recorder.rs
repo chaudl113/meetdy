@@ -79,7 +79,7 @@ impl MixedAudioRecorder {
     /// Starts recording from the configured audio sources
     #[cfg(target_os = "macos")]
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if *self.is_recording.lock().unwrap() {
+        if *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) {
             return Ok(());
         }
 
@@ -95,7 +95,7 @@ impl MixedAudioRecorder {
                     let cb = cb.clone();
                     let samples = mixed_samples.clone();
                     recorder = recorder.with_sample_callback(move |s| {
-                        samples.lock().unwrap().extend_from_slice(&s);
+                        samples.lock().unwrap_or_else(|p| p.into_inner()).extend_from_slice(&s);
                         cb(s);
                     });
                 }
@@ -118,7 +118,7 @@ impl MixedAudioRecorder {
 
                 // Start mixer thread to receive and forward system samples
                 let is_recording = self.is_recording.clone();
-                *is_recording.lock().unwrap() = true;
+                *is_recording.lock().unwrap_or_else(|p| p.into_inner()) = true;
 
                 // We need to poll the system recorder for samples
                 // Since we can't move system_recorder into thread, we'll handle differently
@@ -158,7 +158,7 @@ impl MixedAudioRecorder {
                     let mut mic_buffer: Vec<f32> = Vec::new();
                     let mut sys_buffer: Vec<f32> = Vec::new();
 
-                    while *is_recording.lock().unwrap() {
+                    while *is_recording.lock().unwrap_or_else(|p| p.into_inner()) {
                         // Collect mic samples
                         while let Ok(samples) = mic_rx.try_recv() {
                             mic_buffer.extend(samples);
@@ -182,7 +182,7 @@ impl MixedAudioRecorder {
                             }
 
                             if !mixed.is_empty() {
-                                samples_clone.lock().unwrap().extend_from_slice(&mixed);
+                                samples_clone.lock().unwrap_or_else(|p| p.into_inner()).extend_from_slice(&mixed);
                                 if let Some(ref cb) = callback {
                                     cb(mixed);
                                 }
@@ -201,7 +201,7 @@ impl MixedAudioRecorder {
             }
         }
 
-        *self.is_recording.lock().unwrap() = true;
+        *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = true;
         log::info!("MixedAudioRecorder started with config: {:?}", self.config);
         Ok(())
     }
@@ -225,7 +225,7 @@ impl MixedAudioRecorder {
             let cb = cb.clone();
             let samples = mixed_samples.clone();
             recorder = recorder.with_sample_callback(move |s| {
-                samples.lock().unwrap().extend_from_slice(&s);
+                samples.lock().unwrap_or_else(|p| p.into_inner()).extend_from_slice(&s);
                 cb(s);
             });
         }
@@ -239,13 +239,13 @@ impl MixedAudioRecorder {
         recorder.open(None)?;
         recorder.start()?;
         self.mic_recorder = Some(recorder);
-        *self.is_recording.lock().unwrap() = true;
+        *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = true;
         Ok(())
     }
 
     /// Stops recording and returns all collected samples
     pub fn stop(&mut self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-        *self.is_recording.lock().unwrap() = false;
+        *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = false;
 
         // Stop mic recorder
         if let Some(ref recorder) = self.mic_recorder {
@@ -263,7 +263,7 @@ impl MixedAudioRecorder {
             let _ = handle.join();
         }
 
-        let samples = std::mem::take(&mut *self.mixed_samples.lock().unwrap());
+        let samples = std::mem::take(&mut *self.mixed_samples.lock().unwrap_or_else(|p| p.into_inner()));
         log::info!(
             "MixedAudioRecorder stopped, collected {} samples",
             samples.len()
@@ -290,7 +290,7 @@ impl MixedAudioRecorder {
 
     /// Returns whether recording is currently active
     pub fn is_recording(&self) -> bool {
-        *self.is_recording.lock().unwrap()
+        *self.is_recording.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 

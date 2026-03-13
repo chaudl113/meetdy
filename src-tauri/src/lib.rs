@@ -9,6 +9,7 @@ mod helpers;
 mod input;
 mod llm_client;
 mod managers;
+mod ollama;
 mod overlay;
 mod settings;
 mod shortcut;
@@ -112,8 +113,21 @@ fn show_main_window(app: &AppHandle) {
 
 fn initialize_core_logic(app_handle: &AppHandle) {
     // Initialize the input state (Enigo singleton for keyboard/mouse simulation)
-    let enigo_state = input::EnigoState::new().expect("Failed to initialize input state (Enigo)");
-    app_handle.manage(enigo_state);
+    // Note: This requires Accessibility permission on macOS. If not granted,
+    // we log a warning and continue — input simulation will fail at runtime
+    // but the rest of the app will work.
+    match input::EnigoState::new() {
+        Ok(enigo_state) => {
+            app_handle.manage(enigo_state);
+        }
+        Err(e) => {
+            log::warn!(
+                "Failed to initialize input simulation (Enigo): {}. \
+                 Paste-after-transcription will not work until Accessibility permission is granted.",
+                e
+            );
+        }
+    }
 
     // Initialize the managers
     let recording_manager = Arc::new(
@@ -336,6 +350,10 @@ pub fn run() {
         commands::templates::update_meeting_template,
         commands::templates::delete_meeting_template,
         helpers::clamshell::is_laptop,
+        ollama::check_ollama_status,
+        ollama::start_ollama,
+        ollama::pull_ollama_model,
+        ollama::get_ollama_install_url,
     ]);
 
     #[cfg(debug_assertions)] // <- Only export on non-release builds
@@ -359,7 +377,7 @@ pub fn run() {
                     move |metadata| console_filter.enabled(metadata)
                 }),
                 // File logs respect the user's settings (stored in FILE_LOG_LEVEL atomic)
-                // Logs are written to: ~/Library/Logs/com.handy.app/meetdy.log (macOS)
+                // Logs are written to: ~/Library/Logs/com.meetdy.app/meetdy.log (macOS)
                 Target::new(TargetKind::LogDir {
                     file_name: Some("meetdy".into()),
                 })

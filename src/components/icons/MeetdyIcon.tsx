@@ -1,6 +1,6 @@
 import iconSrc from "../../assets/icon-32.png";
 
-const HandyHand = ({
+const MeetdyIcon = ({
   width,
   height,
 }: {
@@ -16,4 +16,4 @@ const HandyHand = ({
   />
 );
 
-export default HandyHand;
+export default MeetdyIcon;

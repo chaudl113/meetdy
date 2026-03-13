@@ -10,7 +10,7 @@ import {
   Video,
   BookTemplate,
 } from "lucide-react";
-import HandyTextLogo from "./icons/HandyTextLogo";
+import MeetdyTextLogo from "./icons/MeetdyTextLogo";
 import { useSettings } from "../hooks/useSettings";
 import {
   GeneralSettings,
@@ -107,15 +107,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     .filter(([_, config]) => config.enabled(settings))
     .map(([id, config]) => ({ id: id as SidebarSection, ...config }));
 
-  // Debug: Log available sections
-  console.log(
-    "Available sections:",
-    availableSections.map((s) => s.id),
-  );
+
 
   return (
     <div className="flex flex-col w-40 h-full border-r border-mid-gray/20 items-center px-2">
-      <HandyTextLogo width={120} className="m-4" />
+      <MeetdyTextLogo width={120} className="m-4" />
       <div className="flex flex-col w-full items-center gap-1 pt-2 border-t border-mid-gray/20">
         {availableSections.map((section) => {
           const Icon = section.icon;
@@ -124,11 +120,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <div
               key={section.id}
-              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors ${
-                isActive
+              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors ${isActive
                   ? "bg-logo-primary/80"
                   : "hover:bg-mid-gray/20 hover:opacity-100 opacity-85"
-              }`}
+                }`}
               onClick={() => onSectionChange(section.id)}
             >
               <Icon width={24} height={24} className="shrink-0" />

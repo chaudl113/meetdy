@@ -12,6 +12,7 @@ type PostProcessProviderState = {
   selectedProvider: PostProcessProvider | undefined;
   isCustomProvider: boolean;
   isAppleProvider: boolean;
+  isLocalProvider: boolean;
   baseUrl: string;
   handleBaseUrlChange: (value: string) => void;
   isBaseUrlUpdating: boolean;
@@ -84,7 +85,8 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
 
   const handleBaseUrlChange = useCallback(
     (value: string) => {
-      if (!selectedProvider || selectedProvider.id !== "custom") {
+      // Allow editing base URL for any local provider (no API key required)
+      if (!selectedProvider || selectedProvider.requires_api_key !== false) {
         return;
       }
       const trimmed = value.trim();
@@ -172,6 +174,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   );
 
   const isCustomProvider = selectedProvider?.id === "custom";
+  const isLocalProvider = selectedProvider?.requires_api_key === false;
 
   // No automatic fetching - user must click refresh button
 
@@ -182,6 +185,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     selectedProvider,
     isCustomProvider,
     isAppleProvider,
+    isLocalProvider,
     baseUrl,
     handleBaseUrlChange,
     isBaseUrlUpdating,

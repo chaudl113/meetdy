@@ -31,6 +31,17 @@ function App() {
     checkOnboardingStatus();
   }, []);
 
+  // Initialize meeting event listeners at the app level so they persist
+  // across section switches (MeetingMode unmounts when switching sections)
+  useEffect(() => {
+    useMeetingStore.getState().initializeEventListeners();
+    useMeetingStore.getState().refreshStatus();
+
+    return () => {
+      useMeetingStore.getState().cleanupEventListeners();
+    };
+  }, []);
+
   // Handle keyboard shortcuts for debug mode toggle
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

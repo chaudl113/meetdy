@@ -887,6 +887,42 @@ async isLaptop() : Promise<Result<boolean, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Check the full status of Ollama: installed? running? which models?
+ */
+async checkOllamaStatus() : Promise<OllamaStatusResponse> {
+    return await TAURI_INVOKE("check_ollama_status");
+},
+/**
+ * Start the Ollama server and wait for it to be ready.
+ * Returns true if server started successfully.
+ */
+async startOllama() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_ollama") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Pull (download) a model with progress events emitted to frontend.
+ * This is a long-running operation that streams progress updates.
+ */
+async pullOllamaModel(model: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pull_ollama_model", { model }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the install URL for Ollama based on the current platform.
+ */
+async getOllamaInstallUrl() : Promise<string> {
+    return await TAURI_INVOKE("get_ollama_install_url");
 }
 }
 
@@ -1021,9 +1057,41 @@ export type MeetingTemplate = { id: string; name: string; icon: string; title_te
 export type ModelInfo = { id: string; name: string; description: string; filename: string; url: string | null; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 export type ModelUnloadTimeout = "never" | "immediately" | "min_2" | "min_5" | "min_10" | "min_15" | "hour_1" | "sec_5"
+/**
+ * Information about a locally available Ollama model
+ */
+export type OllamaModelInfo = { name: string; size: number; modified_at: string }
+/**
+ * Status of the Ollama service
+ */
+export type OllamaStatus = 
+/**
+ * Ollama is not installed on this system
+ */
+"not_installed" | 
+/**
+ * Ollama is installed but the server is not running
+ */
+"installed" | 
+/**
+ * Ollama server is running and ready
+ */
+"running"
+/**
+ * Combined status response for the frontend
+ */
+export type OllamaStatusResponse = { status: OllamaStatus; models: OllamaModelInfo[]; version: string | null; binary_path: string | null }
 export type OverlayPosition = "none" | "top" | "bottom"
 export type PasteMethod = "ctrl_v" | "direct" | "none" | "shift_insert" | "ctrl_shift_v"
-export type PostProcessProvider = { id: string; label: string; base_url: string }
+export type PostProcessProvider = { id: string; label: string; base_url: string; 
+/**
+ * Whether this provider requires an API key. Local providers (Ollama, LM Studio) don't.
+ */
+requires_api_key?: boolean; 
+/**
+ * Default model to use if none is configured (e.g., "llama3.2" for Ollama)
+ */
+default_model?: string | null }
 export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "weeks_2" | "months_3"
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
 export type SoundTheme = "marimba" | "pop" | "custom"

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, RotateCcw, X } from "lucide-react";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
@@ -29,9 +29,6 @@ export const MeetingMode: React.FC = () => {
     recordingDuration,
     isLoading,
     error,
-    initializeEventListeners,
-    cleanupEventListeners,
-    refreshStatus,
     clearError,
     retryTranscription,
   } = useMeetingStore();
@@ -118,17 +115,8 @@ export const MeetingMode: React.FC = () => {
     await retryTranscription();
   };
 
-  // Initialize event listeners on mount and cleanup on unmount
-  useEffect(() => {
-    // Initialize listeners when component mounts
-    useMeetingStore.getState().initializeEventListeners();
-    useMeetingStore.getState().refreshStatus();
-
-    // Cleanup when component unmounts
-    return () => {
-      useMeetingStore.getState().cleanupEventListeners();
-    };
-  }, []); // Empty deps - only run on mount/unmount
+  // Event listeners are initialized at the App level (App.tsx) to persist
+  // across section switches. No need to init/cleanup here.
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">

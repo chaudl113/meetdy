@@ -74,47 +74,68 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         </SettingContainer>
       ) : (
         <>
-          {state.selectedProvider?.id === "custom" && (
+          {/* Show Base URL editor for local providers (Ollama, LM Studio, Custom) */}
+          {state.isLocalProvider && !state.isAppleProvider && (
+            <>
+              <SettingContainer
+                title={t("settings.postProcessing.api.baseUrl.title")}
+                description={t("settings.postProcessing.api.baseUrl.description")}
+                descriptionMode="tooltip"
+                layout="horizontal"
+                grouped={true}
+              >
+                <div className="flex items-center gap-2">
+                  <BaseUrlField
+                    value={state.baseUrl}
+                    onBlur={state.handleBaseUrlChange}
+                    placeholder={t(
+                      "settings.postProcessing.api.baseUrl.placeholder",
+                    )}
+                    disabled={state.isBaseUrlUpdating}
+                    className="min-w-[380px]"
+                  />
+                </div>
+              </SettingContainer>
+
+              <SettingContainer
+                title=""
+                description=""
+                layout="stacked"
+                grouped={true}
+              >
+                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                  <p className="text-sm text-green-400">
+                    ✨ {t("settings.postProcessing.api.freeProvider.notice", {
+                      defaultValue: "Free — no API key needed. Make sure the service is running locally.",
+                    })}
+                  </p>
+                </div>
+              </SettingContainer>
+            </>
+          )}
+
+          {/* Show API Key for cloud providers that require it */}
+          {!state.isLocalProvider && (
             <SettingContainer
-              title={t("settings.postProcessing.api.baseUrl.title")}
-              description={t("settings.postProcessing.api.baseUrl.description")}
+              title={t("settings.postProcessing.api.apiKey.title")}
+              description={t("settings.postProcessing.api.apiKey.description")}
               descriptionMode="tooltip"
               layout="horizontal"
               grouped={true}
             >
               <div className="flex items-center gap-2">
-                <BaseUrlField
-                  value={state.baseUrl}
-                  onBlur={state.handleBaseUrlChange}
+                <ApiKeyField
+                  value={state.apiKey}
+                  onBlur={state.handleApiKeyChange}
                   placeholder={t(
-                    "settings.postProcessing.api.baseUrl.placeholder",
+                    "settings.postProcessing.api.apiKey.placeholder",
                   )}
-                  disabled={state.isBaseUrlUpdating}
-                  className="min-w-[380px]"
+                  disabled={state.isApiKeyUpdating}
+                  className="min-w-[320px]"
                 />
               </div>
             </SettingContainer>
           )}
-
-          <SettingContainer
-            title={t("settings.postProcessing.api.apiKey.title")}
-            description={t("settings.postProcessing.api.apiKey.description")}
-            descriptionMode="tooltip"
-            layout="horizontal"
-            grouped={true}
-          >
-            <div className="flex items-center gap-2">
-              <ApiKeyField
-                value={state.apiKey}
-                onBlur={state.handleApiKeyChange}
-                placeholder={t(
-                  "settings.postProcessing.api.apiKey.placeholder",
-                )}
-                disabled={state.isApiKeyUpdating}
-                className="min-w-[320px]"
-              />
-            </div>
-          </SettingContainer>
         </>
       )}
 
@@ -123,8 +144,10 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         description={
           state.isAppleProvider
             ? t("settings.postProcessing.api.model.descriptionApple")
-            : state.isCustomProvider
-              ? t("settings.postProcessing.api.model.descriptionCustom")
+            : state.isLocalProvider
+              ? t("settings.postProcessing.api.model.descriptionLocal", {
+                defaultValue: "Select a model from your local server, or type a model name. Click refresh to list available models.",
+              })
               : t("settings.postProcessing.api.model.descriptionDefault")
         }
         descriptionMode="tooltip"
@@ -142,13 +165,13 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                 ? t("settings.postProcessing.api.model.placeholderApple")
                 : state.modelOptions.length > 0
                   ? t(
-                      "settings.postProcessing.api.model.placeholderWithOptions",
-                    )
+                    "settings.postProcessing.api.model.placeholderWithOptions",
+                  )
                   : t("settings.postProcessing.api.model.placeholderNoOptions")
             }
             onSelect={state.handleModelSelect}
             onCreate={state.handleModelCreate}
-            onBlur={() => {}}
+            onBlur={() => { }}
             className="flex-1 min-w-[380px]"
           />
           <ResetButton

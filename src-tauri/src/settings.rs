@@ -111,6 +111,16 @@ pub struct PostProcessProvider {
     pub id: String,
     pub label: String,
     pub base_url: String,
+    /// Whether this provider requires an API key. Local providers (Ollama, LM Studio) don't.
+    #[serde(default = "default_requires_api_key")]
+    pub requires_api_key: bool,
+    /// Default model to use if none is configured (e.g., "llama3.2" for Ollama)
+    #[serde(default)]
+    pub default_model: Option<String>,
+}
+
+fn default_requires_api_key() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
@@ -504,31 +514,58 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             id: "openai".to_string(),
             label: "OpenAI".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
+            requires_api_key: true,
+            default_model: None,
         },
         PostProcessProvider {
             id: "openrouter".to_string(),
             label: "OpenRouter".to_string(),
             base_url: "https://openrouter.ai/api/v1".to_string(),
+            requires_api_key: true,
+            default_model: None,
         },
         PostProcessProvider {
             id: "anthropic".to_string(),
             label: "Anthropic".to_string(),
             base_url: "https://api.anthropic.com/v1".to_string(),
+            requires_api_key: true,
+            default_model: None,
         },
         PostProcessProvider {
             id: "groq".to_string(),
             label: "Groq".to_string(),
             base_url: "https://api.groq.com/openai/v1".to_string(),
+            requires_api_key: true,
+            default_model: None,
         },
         PostProcessProvider {
             id: "cerebras".to_string(),
             label: "Cerebras".to_string(),
             base_url: "https://api.cerebras.ai/v1".to_string(),
+            requires_api_key: true,
+            default_model: None,
+        },
+        // --- Free / Local providers (no API key required) ---
+        PostProcessProvider {
+            id: "ollama".to_string(),
+            label: "Ollama (Local - Free)".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            requires_api_key: false,
+            default_model: Some("llama3.2".to_string()),
+        },
+        PostProcessProvider {
+            id: "lmstudio".to_string(),
+            label: "LM Studio (Local - Free)".to_string(),
+            base_url: "http://localhost:1234/v1".to_string(),
+            requires_api_key: false,
+            default_model: None,
         },
         PostProcessProvider {
             id: "custom".to_string(),
-            label: "Custom".to_string(),
-            base_url: "http://localhost:11434/v1".to_string(),
+            label: "Custom (OpenAI Compatible)".to_string(),
+            base_url: "http://localhost:8080/v1".to_string(),
+            requires_api_key: false,
+            default_model: None,
         },
     ];
 
@@ -539,6 +576,8 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
                 id: APPLE_INTELLIGENCE_PROVIDER_ID.to_string(),
                 label: "Apple Intelligence".to_string(),
                 base_url: "apple-intelligence://local".to_string(),
+                requires_api_key: false,
+                default_model: Some(APPLE_INTELLIGENCE_DEFAULT_MODEL_ID.to_string()),
             });
         }
     }
@@ -557,6 +596,14 @@ fn default_post_process_api_keys() -> HashMap<String, String> {
 fn default_model_for_provider(provider_id: &str) -> String {
     if provider_id == APPLE_INTELLIGENCE_PROVIDER_ID {
         return APPLE_INTELLIGENCE_DEFAULT_MODEL_ID.to_string();
+    }
+    // Check if the provider has a default model defined
+    for provider in default_post_process_providers() {
+        if provider.id == provider_id {
+            if let Some(default_model) = provider.default_model {
+                return default_model;
+            }
+        }
     }
     String::new()
 }

@@ -331,7 +331,7 @@ fn run_consumer(
         }
 
         if let Some(vad_arc) = vad {
-            let mut det = vad_arc.lock().unwrap();
+            let mut det = vad_arc.lock().unwrap_or_else(|p| p.into_inner());
             match det.push_frame(samples).unwrap_or(VadFrame::Speech(samples)) {
                 VadFrame::Speech(buf) => {
                     out_buf.extend_from_slice(buf);
@@ -377,7 +377,7 @@ fn run_consumer(
                     recording = true;
                     visualizer.reset(); // Reset visualization buffer
                     if let Some(v) = &vad {
-                        v.lock().unwrap().reset();
+                        v.lock().unwrap_or_else(|p| p.into_inner()).reset();
                     }
                 }
                 Cmd::Stop(reply_tx) => {

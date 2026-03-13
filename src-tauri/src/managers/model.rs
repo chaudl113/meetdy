@@ -202,12 +202,12 @@ impl ModelManager {
     }
 
     pub fn get_available_models(&self) -> Vec<ModelInfo> {
-        let models = self.available_models.lock().unwrap();
+        let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
         models.values().cloned().collect()
     }
 
     pub fn get_model_info(&self, model_id: &str) -> Option<ModelInfo> {
-        let models = self.available_models.lock().unwrap();
+        let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
         models.get(model_id).cloned()
     }
 
@@ -239,7 +239,7 @@ impl ModelManager {
     }
 
     fn update_download_status(&self) -> Result<()> {
-        let mut models = self.available_models.lock().unwrap();
+        let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
 
         for model in models.values_mut() {
             if model.is_directory {
@@ -292,7 +292,7 @@ impl ModelManager {
         // If no model is selected or selected model is empty
         if settings.selected_model.is_empty() {
             // Find the first available (downloaded) model
-            let models = self.available_models.lock().unwrap();
+            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(available_model) = models.values().find(|model| model.is_downloaded) {
                 info!(
                     "Auto-selecting model: {} ({})",
@@ -313,7 +313,7 @@ impl ModelManager {
 
     pub async fn download_model(&self, model_id: &str) -> Result<()> {
         let model_info = {
-            let models = self.available_models.lock().unwrap();
+            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
             models.get(model_id).cloned()
         };
 
@@ -350,7 +350,7 @@ impl ModelManager {
 
         // Mark as downloading
         {
-            let mut models = self.available_models.lock().unwrap();
+            let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(model) = models.get_mut(model_id) {
                 model.is_downloading = true;
             }
@@ -390,7 +390,7 @@ impl ModelManager {
         {
             // Mark as not downloading on error
             {
-                let mut models = self.available_models.lock().unwrap();
+                let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some(model) = models.get_mut(model_id) {
                     model.is_downloading = false;
                 }
@@ -441,7 +441,7 @@ impl ModelManager {
             let chunk = chunk.map_err(|e| {
                 // Mark as not downloading on error
                 {
-                    let mut models = self.available_models.lock().unwrap();
+                    let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
                     if let Some(model) = models.get_mut(model_id) {
                         model.is_downloading = false;
                     }
@@ -479,7 +479,7 @@ impl ModelManager {
                 // Download is incomplete/corrupted - delete partial and return error
                 let _ = fs::remove_file(&partial_path);
                 {
-                    let mut models = self.available_models.lock().unwrap();
+                    let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
                     if let Some(model) = models.get_mut(model_id) {
                         model.is_downloading = false;
                     }
@@ -568,7 +568,7 @@ impl ModelManager {
 
         // Update download status
         {
-            let mut models = self.available_models.lock().unwrap();
+            let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(model) = models.get_mut(model_id) {
                 model.is_downloading = false;
                 model.is_downloaded = true;
@@ -591,7 +591,7 @@ impl ModelManager {
         debug!("ModelManager: delete_model called for: {}", model_id);
 
         let model_info = {
-            let models = self.available_models.lock().unwrap();
+            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
             models.get(model_id).cloned()
         };
 
@@ -695,7 +695,7 @@ impl ModelManager {
         debug!("ModelManager: cancel_download called for: {}", model_id);
 
         let _model_info = {
-            let models = self.available_models.lock().unwrap();
+            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
             models.get(model_id).cloned()
         };
 
@@ -704,7 +704,7 @@ impl ModelManager {
 
         // Mark as not downloading
         {
-            let mut models = self.available_models.lock().unwrap();
+            let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(model) = models.get_mut(model_id) {
                 model.is_downloading = false;
             }

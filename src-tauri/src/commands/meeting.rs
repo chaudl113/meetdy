@@ -652,6 +652,13 @@ pub async fn generate_meeting_summary(
         .cloned()
         .unwrap_or_default();
 
+    // Fall back to provider's default model if none configured
+    let model = if model.trim().is_empty() {
+        provider.default_model.clone().unwrap_or_default()
+    } else {
+        model
+    };
+
     if model.trim().is_empty() {
         return Err(format!(
             "No model configured for provider '{}'. Please configure in Settings.",
@@ -665,8 +672,8 @@ pub async fn generate_meeting_summary(
         .cloned()
         .unwrap_or_default();
 
-    // Validate API key is set
-    if api_key.trim().is_empty() {
+    // Validate API key is set — but only if the provider requires one
+    if provider.requires_api_key && api_key.trim().is_empty() {
         return Err(format!(
             "No API key configured for provider '{}'. Please set your API key in Settings.",
             provider.label
@@ -710,6 +717,46 @@ pub async fn generate_meeting_summary(
         "Generating summary with provider '{}' (model: {})",
         provider.id, model
     );
+
+    // Auto-setup for Ollama: start server + pull model if needed
+    if provider.id == "ollama" || provider.id == "lmstudio" {
+        let status = crate::ollama::check_ollama_status().await;
+        match status.status {
+            crate::ollama::OllamaStatus::NotInstalled => {
+                return Err(format!(
+                    "Ollama is not installed. Please download from: {}",
+                    crate::ollama::get_ollama_install_url()
+                ));
+            }
+            crate::ollama::OllamaStatus::Installed => {
+                // Auto-start
+                info!("Ollama not running, starting automatically...");
+                let _ = app.emit("meeting_summary_status", "Starting Ollama server...");
+                crate::ollama::start_ollama().await.map_err(|e| {
+                    format!("Failed to auto-start Ollama: {}. Please start it manually.", e)
+                })?;
+            }
+            crate::ollama::OllamaStatus::Running => {
+                debug!("Ollama is already running");
+            }
+        }
+
+        // Check if the model is available, if not — auto-pull
+        if provider.id == "ollama" {
+            let models = crate::ollama::check_ollama_status().await;
+            let model_available = models.models.iter().any(|m| {
+                m.name == model || m.name.starts_with(&format!("{}:", model))
+            });
+
+            if !model_available {
+                info!("Model '{}' not found locally, pulling...", model);
+                let _ = app.emit("meeting_summary_status", &format!("Downloading model {}...", model));
+                crate::ollama::pull_ollama_model(app.clone(), model.clone())
+                    .await
+                    .map_err(|e| format!("Failed to download model '{}': {}", model, e))?;
+            }
+        }
+    }
 
     // Call LLM API
     let summary =

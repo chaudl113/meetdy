@@ -1,7 +1,7 @@
 import React from "react";
 import logoSrc from "../../assets/logo.png";
 
-const HandyTextLogo = ({
+const MeetdyTextLogo = ({
   width,
   height,
   className,
@@ -22,4 +22,4 @@ const HandyTextLogo = ({
   );
 };
 
-export default HandyTextLogo;
+export default MeetdyTextLogo;

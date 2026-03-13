@@ -19,7 +19,7 @@ on:
       asset-prefix:
         required: false
         type: string
-        default: "handy"
+        default: "meetdy"
       asset-name-pattern:
         required: false
         type: string
@@ -188,6 +188,12 @@ jobs:
           sudo apt update
           sudo apt install vulkan-sdk -y
           sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Download VAD model
+        shell: bash
+        run: |
+          mkdir -p src-tauri/resources/models
+          curl -L -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
 
       - name: install frontend dependencies
         if: ${{ !(contains(inputs.platform, 'windows') && contains(inputs.target, 'aarch64')) }}

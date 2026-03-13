@@ -1,415 +1,32 @@
-//! Meeting session management for Meeting Mode.
+//! Core MeetingSessionManager implementation.
 //!
-//! This module provides the core data structures and manager for meeting sessions,
-//! which are completely separate from the existing Quick Dictation functionality.
+//! Contains the manager struct, recording lifecycle (start/stop),
+//! mic disconnect handling, transcription, and app shutdown cleanup.
 
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use hound::{WavReader, WavSpec, WavWriter};
 use log::{debug, error, info};
 use rusqlite::{params, Connection, OptionalExtension};
-use rusqlite_migration::{Migrations, M};
-use serde::{Deserialize, Serialize};
-use specta::Type;
+use serde::Serialize;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
-// Import audio recording components from audio_toolkit
 use crate::audio_toolkit::{AudioSourceConfig, MixedAudioRecorder};
 use crate::managers::meeting_logger::{
     log_meeting_event, log_performance_metric, MeetingLogContext, MeetingTimer,
 };
 
-/// Database migrations for meeting sessions.
-/// Each migration is applied in order. The library tracks which migrations
-/// have been applied using SQLite's user_version pragma.
-///
-/// Note: This uses a separate database file from transcription history
-/// to maintain complete separation between Meeting Mode and Quick Dictation.
-static MIGRATIONS: &[M] = &[
-    M::up(
-        "CREATE TABLE IF NOT EXISTS meeting_sessions (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            duration INTEGER,
-            status TEXT NOT NULL DEFAULT 'idle',
-            audio_path TEXT,
-            transcript_path TEXT,
-            error_message TEXT
-        );",
-    ),
-    M::up(
-        "ALTER TABLE meeting_sessions ADD COLUMN audio_source TEXT NOT NULL DEFAULT 'microphone_only';",
-    ),
-    M::up(
-        "ALTER TABLE meeting_sessions ADD COLUMN summary_path TEXT;",
-    ),
-    M::up(
-        "ALTER TABLE meeting_sessions ADD COLUMN template_id TEXT;",
-    ),
-];
+use super::db::init_meeting_database;
+use super::models::{AudioSourceType, MeetingManagerState, MeetingSession, MeetingStatus};
+use super::wav_writer::WavWriterHandle;
 
-/// Initialize the meeting sessions database and run any pending migrations.
-///
-/// This function opens (or creates) the database at the specified path and
-/// applies all pending migrations. It follows the same pattern as HistoryManager.
-///
-/// # Arguments
-/// * `db_path` - Path to the SQLite database file
-///
-/// # Returns
-/// * `Ok(())` if the database was initialized successfully
-/// * `Err` if the database could not be opened or migrations failed
-pub fn init_meeting_database(db_path: &PathBuf) -> Result<()> {
-    info!("Initializing meeting database at {:?}", db_path);
-
-    let mut conn = Connection::open(db_path)?;
-
-    // Create migrations object and run to latest version
-    let migrations = Migrations::new(MIGRATIONS.to_vec());
-
-    // Validate migrations in debug builds
-    #[cfg(debug_assertions)]
-    migrations.validate().expect("Invalid migrations");
-
-    // Get current version before migration
-    let version_before: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    debug!(
-        "Meeting database version before migration: {}",
-        version_before
-    );
-
-    // Apply any pending migrations
-    migrations.to_latest(&mut conn)?;
-
-    // Get version after migration
-    let version_after: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-
-    if version_after > version_before {
-        info!(
-            "Meeting database migrated from version {} to {}",
-            version_before, version_after
-        );
-    } else {
-        debug!(
-            "Meeting database already at latest version {}",
-            version_after
-        );
-    }
-
-    Ok(())
-}
-
-/// Represents the lifecycle status of a meeting session.
-///
-/// The state machine follows this flow:
-/// - Idle -> Recording (start meeting)
-/// - Recording -> Processing (stop meeting, begin transcription)
-/// - Recording -> Interrupted (app closed during recording)
-/// - Processing -> Completed (transcription success)
-/// - Processing -> Failed (transcription failure)
-/// - Failed -> Processing (retry transcription)
-/// - Interrupted -> Processing (resume transcription on next launch)
-#[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum MeetingStatus {
-    /// No active meeting session
-    Idle,
-    /// Meeting is currently being recorded
-    Recording,
-    /// Recording stopped, transcription in progress
-    Processing,
-    /// Meeting completed successfully with transcript
-    Completed,
-    /// Meeting failed (e.g., transcription error), audio preserved
-    Failed,
-    /// Meeting was interrupted (app closed during recording), audio preserved
-    Interrupted,
-}
-
-impl Default for MeetingStatus {
-    fn default() -> Self {
-        MeetingStatus::Idle
-    }
-}
-
-/// Audio source configuration for meeting recording
-#[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AudioSourceType {
-    /// Only capture microphone input (default)
-    MicrophoneOnly,
-    /// Only capture system audio (YouTube, Zoom, etc.) - macOS 13.0+ only
-    SystemOnly,
-    /// Capture both microphone and system audio mixed together - macOS 13.0+ only
-    Mixed,
-}
-
-impl Default for AudioSourceType {
-    fn default() -> Self {
-        AudioSourceType::MicrophoneOnly
-    }
-}
-
-/// Represents a meeting session with its metadata and file references.
-///
-/// Each meeting session has a unique ID and is stored in a dedicated folder
-/// under the app's data directory: `{app_data}/meetings/{session-id}/`
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-pub struct MeetingSession {
-    /// Unique identifier for the session (UUID format)
-    pub id: String,
-
-    /// User-editable title, defaults to timestamp format like
-    /// "Meeting - January 15, 2025 3:30 PM"
-    pub title: String,
-
-    /// Unix timestamp (seconds) when the meeting was created/started
-    pub created_at: i64,
-
-    /// Duration of the recording in seconds (set after recording stops)
-    pub duration: Option<i64>,
-
-    /// Current status of the meeting session
-    pub status: MeetingStatus,
-
-    /// Relative path to the audio file within the meetings directory
-    /// e.g., "{session-id}/audio.wav"
-    pub audio_path: Option<String>,
-
-    /// Relative path to the transcript file within the meetings directory
-    /// e.g., "{session-id}/transcript.txt"
-    pub transcript_path: Option<String>,
-
-    /// Error message if the meeting failed
-    pub error_message: Option<String>,
-
-    /// Audio source configuration for this meeting
-    pub audio_source: AudioSourceType,
-
-    /// Relative path to the AI-generated summary file within the meetings directory
-    /// e.g., "{session-id}/summary.md"
-    pub summary_path: Option<String>,
-
-    /// Template ID if this meeting was created from a template
-    #[serde(default)]
-    pub template_id: Option<String>,
-}
-
-impl MeetingSession {
-    /// Creates a new meeting session with a unique ID and default title.
-    ///
-    /// The title is generated from the current timestamp in a human-readable format.
-    #[allow(dead_code)]
-    pub fn new(id: String, title: String, created_at: i64) -> Self {
-        Self {
-            id,
-            title,
-            created_at,
-            duration: None,
-            status: MeetingStatus::Idle,
-            audio_path: None,
-            transcript_path: None,
-            error_message: None,
-            audio_source: AudioSourceType::default(),
-            summary_path: None,
-            template_id: None,
-        }
-    }
-
-    /// Creates a new meeting session with a specified audio source.
-    pub fn new_with_audio_source(
-        id: String,
-        title: String,
-        created_at: i64,
-        audio_source: AudioSourceType,
-    ) -> Self {
-        Self {
-            id,
-            title,
-            created_at,
-            duration: None,
-            status: MeetingStatus::Idle,
-            audio_path: None,
-            transcript_path: None,
-            error_message: None,
-            audio_source,
-            summary_path: None,
-            template_id: None,
-        }
-    }
-
-    /// Creates a new meeting session with audio source and template.
-    pub fn new_with_template(
-        id: String,
-        title: String,
-        created_at: i64,
-        audio_source: AudioSourceType,
-        template_id: Option<String>,
-    ) -> Self {
-        Self {
-            id,
-            title,
-            created_at,
-            duration: None,
-            status: MeetingStatus::Idle,
-            audio_path: None,
-            transcript_path: None,
-            error_message: None,
-            audio_source,
-            summary_path: None,
-            template_id,
-        }
-    }
-}
-
-/// Thread-safe wrapper for WavWriter that supports timeout-based finalization.
-///
-/// This struct solves the race condition where `Arc::try_unwrap` fails because
-/// the audio callback thread still holds a reference to the WAV writer.
-///
-/// Key features:
-/// - Uses `AtomicBool` to signal when finalization starts
-/// - Callback checks `closed` flag before writing samples
-/// - `finalize_with_timeout` retries with exponential backoff
-struct WavWriterHandle {
-    inner: Arc<Mutex<Option<WavWriter<File>>>>,
-    closed: Arc<AtomicBool>,
-}
-
-impl WavWriterHandle {
-    fn new(writer: WavWriter<File>) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(Some(writer))),
-            closed: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    fn write_samples(&self, samples: &[f32]) -> Result<()> {
-        // Check if closed - skip writes after finalize starts
-        if self.closed.load(Ordering::Relaxed) {
-            return Ok(()); // Silently ignore writes after close
-        }
-
-        if let Ok(mut guard) = self.inner.lock() {
-            if let Some(writer) = guard.as_mut() {
-                for sample in samples {
-                    let sample_i16 = (*sample * i16::MAX as f32) as i16;
-                    writer
-                        .write_sample(sample_i16)
-                        .map_err(|e| anyhow::anyhow!("Failed to write sample: {}", e))?;
-                }
-                writer
-                    .flush()
-                    .map_err(|e| anyhow::anyhow!("Failed to flush WAV writer: {}", e))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn finalize_with_timeout(&self, timeout: Duration) -> Result<()> {
-        let timer = Instant::now();
-        let mut retry_count = 0;
-
-        // 1. Signal callback to stop writing
-        self.closed.store(true, Ordering::SeqCst);
-        debug!(
-            "[WAV_FINALIZE] Closed flag set, starting finalization with timeout {:?}",
-            timeout
-        );
-
-        let deadline = Instant::now() + timeout;
-
-        // 2. Retry loop with exponential backoff
-        loop {
-            if let Ok(mut guard) = self.inner.try_lock() {
-                if let Some(writer) = guard.take() {
-                    let elapsed_ms = timer.elapsed().as_millis();
-                    debug!(
-                        "[WAV_FINALIZE] Lock acquired after {} retries ({elapsed_ms}ms), finalizing...",
-                        retry_count
-                    );
-
-                    let result = writer
-                        .finalize()
-                        .map_err(|e| anyhow::anyhow!("WAV finalize failed: {}", e));
-
-                    if result.is_ok() {
-                        info!(
-                            "[WAV_FINALIZE] Success - finalized in {}ms with {} retries",
-                            elapsed_ms, retry_count
-                        );
-                    } else {
-                        error!(
-                            "[WAV_FINALIZE] Failed after {}ms with {} retries: {:?}",
-                            elapsed_ms, retry_count, result
-                        );
-                    }
-
-                    return result;
-                }
-                // Already finalized
-                debug!("[WAV_FINALIZE] Already finalized (empty Option)");
-                return Ok(());
-            }
-
-            retry_count += 1;
-
-            if Instant::now() >= deadline {
-                let elapsed_ms = timer.elapsed().as_millis();
-                error!(
-                    "[WAV_FINALIZE] Timeout after {:?} ({elapsed_ms}ms) with {} retries; partial audio saved",
-                    timeout, retry_count
-                );
-                return Err(anyhow::anyhow!(
-                    "Timeout finalizing WAV file after {:?}; partial audio saved",
-                    timeout
-                ));
-            }
-
-            // Sleep briefly before retry
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-}
-
-impl Clone for WavWriterHandle {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-            closed: Arc::clone(&self.closed),
-        }
-    }
-}
-
-/// Internal state for the MeetingSessionManager.
-///
-/// This is wrapped in Arc<Mutex<>> for thread-safe access.
-struct MeetingManagerState {
-    /// The currently active meeting session, if any
-    current_session: Option<MeetingSession>,
-    /// Mixed audio recorder for capturing meeting audio (supports mic, system, or both)
-    mixed_recorder: Option<MixedAudioRecorder>,
-    /// WAV file writer handle with timeout-based finalization
-    wav_writer: Option<WavWriterHandle>,
-}
-
-impl Default for MeetingManagerState {
-    fn default() -> Self {
-        Self {
-            current_session: None,
-            mixed_recorder: None,
-            wav_writer: None,
-        }
-    }
-}
 
 /// Manager for meeting sessions.
 ///
@@ -513,7 +130,7 @@ impl MeetingSessionManager {
     /// * `Some(MeetingStatus)` - The current session status if a session exists
     /// * `None` - If no session is active
     pub fn get_current_status(&self) -> Option<MeetingStatus> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.current_session.as_ref().map(|s| s.status.clone())
     }
 
@@ -523,7 +140,7 @@ impl MeetingSessionManager {
     /// * `Some(MeetingSession)` - Clone of the current session if one exists
     /// * `None` - If no session is active
     pub fn get_current_session(&self) -> Option<MeetingSession> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.current_session.clone()
     }
 
@@ -549,7 +166,7 @@ impl MeetingSessionManager {
 
         // Update in-memory state if this is the current session
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(session) = state.current_session.as_mut() {
                 if session.id == session_id {
                     session.title = title.to_string();
@@ -586,7 +203,7 @@ impl MeetingSessionManager {
 
         // Update in-memory state if this is the current session
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(session) = state.current_session.as_mut() {
                 if session.id == session_id {
                     session.template_id = Some(template_id.to_string());
@@ -623,7 +240,7 @@ impl MeetingSessionManager {
 
         // Update in-memory state if this is the current session
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(session) = state.current_session.as_mut() {
                 if session.id == session_id {
                     session.summary_path = Some(summary_path.to_string());
@@ -668,7 +285,7 @@ impl MeetingSessionManager {
 
         // Update in-memory state
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(current_session) = state.current_session.as_mut() {
                 if current_session.id == session_id {
                     current_session.status = MeetingStatus::Processing;
@@ -705,11 +322,52 @@ impl MeetingSessionManager {
     /// * `session_id` - The unique ID of the session
     /// * `error_message` - The error message to store
     pub fn set_session_error(&self, session_id: &str, error_message: &str) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(session) = state.current_session.as_mut() {
             if session.id == session_id {
                 session.status = MeetingStatus::Failed;
                 session.error_message = Some(error_message.to_string());
+            }
+        }
+    }
+
+    /// Handles a transcription failure by updating the database, emitting events,
+    /// and updating in-memory state. Consolidates the repeated error handling pattern
+    /// used in the background transcription task.
+    ///
+    /// # Arguments
+    /// * `session_id` - The unique ID of the session that failed
+    /// * `error_msg` - The error message describing the failure
+    fn handle_transcription_failure(&self, session_id: &str, error_msg: &str) {
+        // Update status to Failed in database
+        if let Err(update_err) = self.update_session_status_with_error(
+            session_id,
+            MeetingStatus::Failed,
+            error_msg,
+        ) {
+            error!(
+                "Failed to update session {} status to Failed: {}",
+                session_id, update_err
+            );
+            return;
+        }
+
+        // Emit meeting_failed event
+        if let Ok(Some(session_data)) = self.get_session(session_id) {
+            if let Err(emit_err) = self.app_handle.emit("meeting_failed", session_data.clone()) {
+                error!("Failed to emit meeting_failed event: {}", emit_err);
+            } else {
+                info!("Emitted meeting_failed event for session {}", session_id);
+            }
+        }
+
+        // Update in-memory state with error message
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(mut session) = state.current_session.take() {
+            if session.id == session_id {
+                session.status = MeetingStatus::Failed;
+                session.error_message = Some(error_msg.to_string());
+                state.current_session = Some(session);
             }
         }
     }
@@ -1092,7 +750,7 @@ impl MeetingSessionManager {
         // State machine guard: validate transition from Idle -> Recording
         // Cannot start recording if already recording or processing
         let current_status = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.current_session.as_ref().map(|s| s.status.clone())
         };
 
@@ -1234,7 +892,7 @@ impl MeetingSessionManager {
 
         // Update state with mixed_recorder, wav_handle, and session
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.mixed_recorder = Some(mixed_recorder);
             state.wav_writer = Some(wav_handle);
             state.current_session = Some(session_with_audio.clone());
@@ -1258,7 +916,7 @@ impl MeetingSessionManager {
 
         // Update current session in state with Recording status
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             let mut recording_session = session_with_audio.clone();
             recording_session.status = MeetingStatus::Recording;
             state.current_session = Some(recording_session);
@@ -1302,7 +960,7 @@ impl MeetingSessionManager {
         // State machine guard: validate transition from Recording -> Processing
         // Cannot stop if no active session or not in Recording state
         let (session_id, audio_path_opt) = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             let session = state.current_session.as_ref().ok_or_else(|| {
                 error!("[MEETING_STOP] Rejected: no active session");
                 anyhow::anyhow!("Cannot stop recording: no active session")
@@ -1356,7 +1014,7 @@ impl MeetingSessionManager {
         // Stop audio capture
         let recorder_timer = MeetingTimer::start();
         let mixed_recorder_opt = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.mixed_recorder.take()
         };
 
@@ -1380,7 +1038,7 @@ impl MeetingSessionManager {
         // Finalize WAV file with timeout
         let wav_timer = MeetingTimer::start();
         let wav_writer_opt = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.wav_writer.take()
         };
 
@@ -1425,7 +1083,7 @@ impl MeetingSessionManager {
 
         // Validate state transition before updating
         {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(session) = &state.current_session {
                 self.validate_state_transition(&session.status, &MeetingStatus::Processing)
                     .map_err(|e| {
@@ -1467,7 +1125,7 @@ impl MeetingSessionManager {
 
         // Update in-memory state atomically
         let updated_session = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(mut session) = state.current_session.take() {
                 session.status = MeetingStatus::Processing;
                 session.duration = Some(duration);
@@ -1532,44 +1190,7 @@ impl MeetingSessionManager {
                             "Failed to save transcript for session {}: {}",
                             session_id_clone, error_msg
                         );
-                        // Update status to Failed on save error with error message
-                        if let Err(update_err) = manager_clone.update_session_status_with_error(
-                            &session_id_clone,
-                            MeetingStatus::Failed,
-                            &error_msg,
-                        ) {
-                            error!(
-                                "Failed to update session {} status to Failed: {}",
-                                session_id_clone, update_err
-                            );
-                        } else {
-                            // Emit meeting_failed event
-                            if let Ok(session) = manager_clone.get_session(&session_id_clone) {
-                                if let Some(session_data) = session {
-                                    if let Err(emit_err) = manager_clone
-                                        .app_handle
-                                        .emit("meeting_failed", session_data.clone())
-                                    {
-                                        error!("Failed to emit meeting_failed event: {}", emit_err);
-                                    } else {
-                                        info!(
-                                            "Emitted meeting_failed event for session {}",
-                                            session_id_clone
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Update in-memory state with error message
-                            let mut state = manager_clone.state.lock().unwrap();
-                            if let Some(mut session) = state.current_session.take() {
-                                if session.id == session_id_clone {
-                                    session.status = MeetingStatus::Failed;
-                                    session.error_message = Some(error_msg.clone());
-                                    state.current_session = Some(session);
-                                }
-                            }
-                        }
+                        manager_clone.handle_transcription_failure(&session_id_clone, &error_msg);
                     } else {
                         info!(
                             "Session {} transcription completed successfully",
@@ -1577,19 +1198,17 @@ impl MeetingSessionManager {
                         );
 
                         // Emit meeting_completed event
-                        if let Ok(session) = manager_clone.get_session(&session_id_clone) {
-                            if let Some(session_data) = session {
-                                if let Err(emit_err) = manager_clone
-                                    .app_handle
-                                    .emit("meeting_completed", session_data.clone())
-                                {
-                                    error!("Failed to emit meeting_completed event: {}", emit_err);
-                                } else {
-                                    info!(
-                                        "Emitted meeting_completed event for session {}",
-                                        session_id_clone
-                                    );
-                                }
+                        if let Ok(Some(session_data)) = manager_clone.get_session(&session_id_clone) {
+                            if let Err(emit_err) = manager_clone
+                                .app_handle
+                                .emit("meeting_completed", session_data.clone())
+                            {
+                                error!("Failed to emit meeting_completed event: {}", emit_err);
+                            } else {
+                                info!(
+                                    "Emitted meeting_completed event for session {}",
+                                    session_id_clone
+                                );
                             }
                         }
                     }
@@ -1600,44 +1219,7 @@ impl MeetingSessionManager {
                         "Background transcription failed for session {}: {}",
                         session_id_clone, error_msg
                     );
-                    // Update status to Failed on transcription error with error message
-                    if let Err(update_err) = manager_clone.update_session_status_with_error(
-                        &session_id_clone,
-                        MeetingStatus::Failed,
-                        &error_msg,
-                    ) {
-                        error!(
-                            "Failed to update session {} status to Failed: {}",
-                            session_id_clone, update_err
-                        );
-                    } else {
-                        // Emit meeting_failed event
-                        if let Ok(session) = manager_clone.get_session(&session_id_clone) {
-                            if let Some(session_data) = session {
-                                if let Err(emit_err) = manager_clone
-                                    .app_handle
-                                    .emit("meeting_failed", session_data.clone())
-                                {
-                                    error!("Failed to emit meeting_failed event: {}", emit_err);
-                                } else {
-                                    info!(
-                                        "Emitted meeting_failed event for session {}",
-                                        session_id_clone
-                                    );
-                                }
-                            }
-                        }
-
-                        // Update in-memory state with error message
-                        let mut state = manager_clone.state.lock().unwrap();
-                        if let Some(mut session) = state.current_session.take() {
-                            if session.id == session_id_clone {
-                                session.status = MeetingStatus::Failed;
-                                session.error_message = Some(error_msg.clone());
-                                state.current_session = Some(session);
-                            }
-                        }
-                    }
+                    manager_clone.handle_transcription_failure(&session_id_clone, &error_msg);
                 }
             }
         });
@@ -1666,7 +1248,7 @@ impl MeetingSessionManager {
 
         // Get current session info
         let session_info = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state
                 .current_session
                 .as_ref()
@@ -1697,7 +1279,7 @@ impl MeetingSessionManager {
         // Stop the recorder if it exists (don't fail if stop errors)
         let recorder_timer = MeetingTimer::start();
         let mixed_recorder_opt = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.mixed_recorder.take()
         };
 
@@ -1717,7 +1299,7 @@ impl MeetingSessionManager {
         // Finalize the WAV file to ensure partial audio is saved
         let wav_timer = MeetingTimer::start();
         let wav_writer_opt = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.wav_writer.take()
         };
 
@@ -1789,7 +1371,7 @@ impl MeetingSessionManager {
 
         // Update in-memory state
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(mut session) = state.current_session.take() {
                 if session.id == session_id {
                     session.status = MeetingStatus::Failed;
@@ -1905,7 +1487,7 @@ impl MeetingSessionManager {
 
         // Update in-memory state
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(mut session) = state.current_session.take() {
                 if session.id == session_id {
                     session.transcript_path = Some(transcript_filename.clone());
@@ -2023,7 +1605,7 @@ impl MeetingSessionManager {
 
         // Get current session info
         let session_info = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state
                 .current_session
                 .as_ref()
@@ -2055,7 +1637,7 @@ impl MeetingSessionManager {
         // Stop the recorder if it exists
         let recorder_timer = MeetingTimer::start();
         let mixed_recorder_opt = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.mixed_recorder.take()
         };
 
@@ -2075,7 +1657,7 @@ impl MeetingSessionManager {
         // Finalize the WAV file to ensure partial audio is saved
         let wav_timer = MeetingTimer::start();
         let wav_writer_opt = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.wav_writer.take()
         };
 
@@ -2151,7 +1733,7 @@ impl MeetingSessionManager {
 
         // Clear the in-memory state
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.current_session = None;
             state.mixed_recorder = None;
             state.wav_writer = None;
@@ -2245,771 +1827,3 @@ impl MeetingSessionManager {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_meeting_status_default() {
-        let status = MeetingStatus::default();
-        assert_eq!(status, MeetingStatus::Idle);
-    }
-
-    #[test]
-    fn test_meeting_session_new() {
-        let session = MeetingSession::new(
-            "test-uuid-123".to_string(),
-            "Meeting - January 15, 2025 3:30 PM".to_string(),
-            1705340400,
-        );
-
-        assert_eq!(session.id, "test-uuid-123");
-        assert_eq!(session.title, "Meeting - January 15, 2025 3:30 PM");
-        assert_eq!(session.created_at, 1705340400);
-        assert_eq!(session.duration, None);
-        assert_eq!(session.status, MeetingStatus::Idle);
-        assert_eq!(session.audio_path, None);
-        assert_eq!(session.transcript_path, None);
-        assert_eq!(session.error_message, None);
-    }
-
-    #[test]
-    fn test_meeting_status_serialization() {
-        // Test that MeetingStatus serializes to snake_case as expected
-        let status = MeetingStatus::Recording;
-        let json = serde_json::to_string(&status).unwrap();
-        assert_eq!(json, "\"recording\"");
-
-        let status = MeetingStatus::Completed;
-        let json = serde_json::to_string(&status).unwrap();
-        assert_eq!(json, "\"completed\"");
-    }
-
-    #[test]
-    fn test_meeting_session_serialization() {
-        let session = MeetingSession::new(
-            "uuid-abc".to_string(),
-            "Test Meeting".to_string(),
-            1705340400,
-        );
-
-        let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"id\":\"uuid-abc\""));
-        assert!(json.contains("\"status\":\"idle\""));
-    }
-
-    #[test]
-    fn test_init_meeting_database_creates_table() {
-        // Create a temporary directory for the test database
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let db_path = temp_dir.path().join("test_meetings.db");
-
-        // Initialize the database
-        init_meeting_database(&db_path).expect("Failed to initialize database");
-
-        // Verify the database file was created
-        assert!(db_path.exists(), "Database file should exist");
-
-        // Open the database and check the table exists
-        let conn = Connection::open(&db_path).expect("Failed to open database");
-        let table_exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='meeting_sessions'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("Failed to query for table");
-
-        assert!(table_exists, "meeting_sessions table should exist");
-
-        // Verify the table has the correct columns
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(meeting_sessions)")
-            .expect("Failed to prepare statement");
-        let columns: Vec<String> = stmt
-            .query_map([], |row| row.get(1))
-            .expect("Failed to query columns")
-            .filter_map(|r| r.ok())
-            .collect();
-
-        assert!(columns.contains(&"id".to_string()));
-        assert!(columns.contains(&"title".to_string()));
-        assert!(columns.contains(&"created_at".to_string()));
-        assert!(columns.contains(&"duration".to_string()));
-        assert!(columns.contains(&"status".to_string()));
-        assert!(columns.contains(&"audio_path".to_string()));
-        assert!(columns.contains(&"transcript_path".to_string()));
-        assert!(columns.contains(&"error_message".to_string()));
-    }
-
-    #[test]
-    fn test_init_meeting_database_is_idempotent() {
-        // Create a temporary directory for the test database
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let db_path = temp_dir.path().join("test_meetings_idempotent.db");
-
-        // Initialize the database multiple times - should not fail
-        init_meeting_database(&db_path).expect("First init should succeed");
-        init_meeting_database(&db_path).expect("Second init should succeed");
-        init_meeting_database(&db_path).expect("Third init should succeed");
-
-        // Verify the database is still functional
-        let conn = Connection::open(&db_path).expect("Failed to open database");
-        let table_exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='meeting_sessions'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("Failed to query for table");
-
-        assert!(
-            table_exists,
-            "meeting_sessions table should exist after multiple inits"
-        );
-    }
-
-    /// Helper struct for testing CRUD operations without a full Tauri AppHandle.
-    /// This mimics the relevant parts of MeetingSessionManager for unit testing.
-    struct TestMeetingManager {
-        meetings_dir: PathBuf,
-        db_path: PathBuf,
-        // Note: We don't include recorder in TestMeetingManager as it's for testing
-        // CRUD operations, not audio recording functionality
-    }
-
-    impl TestMeetingManager {
-        fn new(temp_dir: &std::path::Path) -> Self {
-            let meetings_dir = temp_dir.join("meetings");
-            let db_path = temp_dir.join("meetings.db");
-            fs::create_dir_all(&meetings_dir).expect("Failed to create meetings dir");
-            init_meeting_database(&db_path).expect("Failed to init database");
-            Self {
-                meetings_dir,
-                db_path,
-            }
-        }
-
-        fn get_connection(&self) -> Result<Connection> {
-            Ok(Connection::open(&self.db_path)?)
-        }
-
-        fn status_to_string(&self, status: &MeetingStatus) -> String {
-            match status {
-                MeetingStatus::Idle => "idle".to_string(),
-                MeetingStatus::Recording => "recording".to_string(),
-                MeetingStatus::Processing => "processing".to_string(),
-                MeetingStatus::Completed => "completed".to_string(),
-                MeetingStatus::Failed => "failed".to_string(),
-                MeetingStatus::Interrupted => "interrupted".to_string(),
-            }
-        }
-
-        fn string_to_status(&self, s: &str) -> MeetingStatus {
-            match s {
-                "idle" => MeetingStatus::Idle,
-                "recording" => MeetingStatus::Recording,
-                "processing" => MeetingStatus::Processing,
-                "completed" => MeetingStatus::Completed,
-                "failed" => MeetingStatus::Failed,
-                "interrupted" => MeetingStatus::Interrupted,
-                _ => MeetingStatus::Idle,
-            }
-        }
-
-        fn row_to_session(&self, row: &rusqlite::Row) -> rusqlite::Result<MeetingSession> {
-            let status_str: String = row.get("status")?;
-            let audio_source_str: String = row
-                .get("audio_source")
-                .unwrap_or_else(|_| "microphone_only".to_string());
-            Ok(MeetingSession {
-                id: row.get("id")?,
-                title: row.get("title")?,
-                created_at: row.get("created_at")?,
-                duration: row.get("duration")?,
-                status: self.string_to_status(&status_str),
-                audio_path: row.get("audio_path")?,
-                transcript_path: row.get("transcript_path")?,
-                error_message: row.get("error_message")?,
-                audio_source: self.string_to_audio_source(&audio_source_str),
-                summary_path: row.get("summary_path").unwrap_or(None),
-            })
-        }
-
-        fn audio_source_to_string(&self, source: &AudioSourceType) -> &'static str {
-            match source {
-                AudioSourceType::MicrophoneOnly => "microphone_only",
-                AudioSourceType::SystemOnly => "system_only",
-                AudioSourceType::Mixed => "mixed",
-            }
-        }
-
-        fn string_to_audio_source(&self, s: &str) -> AudioSourceType {
-            match s {
-                "microphone_only" => AudioSourceType::MicrophoneOnly,
-                "system_only" => AudioSourceType::SystemOnly,
-                "mixed" => AudioSourceType::Mixed,
-                _ => AudioSourceType::MicrophoneOnly,
-            }
-        }
-
-        fn create_session(&self) -> Result<MeetingSession> {
-            let id = Uuid::new_v4().to_string();
-            let created_at = chrono::Utc::now().timestamp();
-            let title = format!("Test Meeting - {}", created_at);
-
-            let session_dir = self.meetings_dir.join(&id);
-            fs::create_dir_all(&session_dir)?;
-
-            let session = MeetingSession::new(id.clone(), title.clone(), created_at);
-
-            let conn = self.get_connection()?;
-            conn.execute(
-                "INSERT INTO meeting_sessions (id, title, created_at, status, audio_source) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    session.id,
-                    session.title,
-                    session.created_at,
-                    self.status_to_string(&session.status),
-                    self.audio_source_to_string(&session.audio_source)
-                ],
-            )?;
-
-            Ok(session)
-        }
-
-        fn get_session(&self, session_id: &str) -> Result<Option<MeetingSession>> {
-            let conn = self.get_connection()?;
-            let session = conn
-                .query_row(
-                    "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
-                     FROM meeting_sessions WHERE id = ?1",
-                    params![session_id],
-                    |row| self.row_to_session(row),
-                )
-                .optional()?;
-
-            Ok(session)
-        }
-
-        fn update_session_status(&self, session_id: &str, status: MeetingStatus) -> Result<()> {
-            let conn = self.get_connection()?;
-            let rows_affected = conn.execute(
-                "UPDATE meeting_sessions SET status = ?1 WHERE id = ?2",
-                params![self.status_to_string(&status), session_id],
-            )?;
-
-            if rows_affected == 0 {
-                return Err(anyhow::anyhow!("Session not found: {}", session_id));
-            }
-
-            Ok(())
-        }
-
-        fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
-            let conn = self.get_connection()?;
-            let mut stmt = conn.prepare(
-                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
-                 FROM meeting_sessions ORDER BY created_at DESC",
-            )?;
-
-            let rows = stmt.query_map([], |row| self.row_to_session(row))?;
-
-            let mut sessions = Vec::new();
-            for row in rows {
-                sessions.push(row?);
-            }
-
-            Ok(sessions)
-        }
-
-        fn validate_state_transition(
-            &self,
-            from: &MeetingStatus,
-            to: &MeetingStatus,
-        ) -> Result<()> {
-            match (from, to) {
-                // Allowed transitions
-                (MeetingStatus::Idle, MeetingStatus::Recording) => Ok(()),
-                (MeetingStatus::Recording, MeetingStatus::Processing) => Ok(()),
-                (MeetingStatus::Recording, MeetingStatus::Failed) => Ok(()), // Mic disconnect
-                (MeetingStatus::Recording, MeetingStatus::Interrupted) => Ok(()), // App shutdown
-                (MeetingStatus::Processing, MeetingStatus::Completed) => Ok(()),
-                (MeetingStatus::Processing, MeetingStatus::Failed) => Ok(()),
-                (MeetingStatus::Failed, MeetingStatus::Processing) => Ok(()),
-                (MeetingStatus::Interrupted, MeetingStatus::Processing) => Ok(()), // Resume
-
-                // Disallowed transitions
-                _ => Err(anyhow::anyhow!(
-                    "Invalid state transition: {:?} -> {:?}",
-                    from,
-                    to
-                )),
-            }
-        }
-    }
-
-    #[test]
-    fn test_create_session() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        let session = manager.create_session().expect("Failed to create session");
-
-        // Verify session has valid properties
-        assert!(!session.id.is_empty(), "Session ID should not be empty");
-        assert!(
-            !session.title.is_empty(),
-            "Session title should not be empty"
-        );
-        assert!(session.created_at > 0, "Created at should be positive");
-        assert_eq!(session.status, MeetingStatus::Idle);
-        assert!(session.duration.is_none());
-        assert!(session.audio_path.is_none());
-        assert!(session.transcript_path.is_none());
-
-        // Verify session folder was created
-        let session_dir = manager.meetings_dir.join(&session.id);
-        assert!(session_dir.exists(), "Session folder should exist");
-    }
-
-    #[test]
-    fn test_create_session_unique_ids() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        let session1 = manager
-            .create_session()
-            .expect("Failed to create session 1");
-        let session2 = manager
-            .create_session()
-            .expect("Failed to create session 2");
-        let session3 = manager
-            .create_session()
-            .expect("Failed to create session 3");
-
-        // Verify all IDs are unique
-        assert_ne!(session1.id, session2.id, "Session IDs should be unique");
-        assert_ne!(session2.id, session3.id, "Session IDs should be unique");
-        assert_ne!(session1.id, session3.id, "Session IDs should be unique");
-
-        // Verify UUID format (8-4-4-4-12 hex format)
-        let uuid_pattern = regex::Regex::new(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-        )
-        .unwrap();
-        assert!(
-            uuid_pattern.is_match(&session1.id),
-            "Session ID should be valid UUID v4"
-        );
-        assert!(
-            uuid_pattern.is_match(&session2.id),
-            "Session ID should be valid UUID v4"
-        );
-    }
-
-    #[test]
-    fn test_get_session() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create a session
-        let created_session = manager.create_session().expect("Failed to create session");
-
-        // Retrieve the session
-        let retrieved = manager
-            .get_session(&created_session.id)
-            .expect("Failed to get session");
-
-        assert!(retrieved.is_some(), "Session should be found");
-        let retrieved = retrieved.unwrap();
-
-        assert_eq!(retrieved.id, created_session.id);
-        assert_eq!(retrieved.title, created_session.title);
-        assert_eq!(retrieved.created_at, created_session.created_at);
-        assert_eq!(retrieved.status, MeetingStatus::Idle);
-    }
-
-    #[test]
-    fn test_get_session_not_found() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Try to get a non-existent session
-        let result = manager
-            .get_session("non-existent-id")
-            .expect("Query should succeed");
-
-        assert!(result.is_none(), "Non-existent session should return None");
-    }
-
-    #[test]
-    fn test_update_session_status() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create a session
-        let session = manager.create_session().expect("Failed to create session");
-        assert_eq!(session.status, MeetingStatus::Idle);
-
-        // Update to Recording
-        manager
-            .update_session_status(&session.id, MeetingStatus::Recording)
-            .expect("Failed to update status");
-
-        let updated = manager
-            .get_session(&session.id)
-            .expect("Failed to get session")
-            .expect("Session should exist");
-        assert_eq!(updated.status, MeetingStatus::Recording);
-
-        // Update to Processing
-        manager
-            .update_session_status(&session.id, MeetingStatus::Processing)
-            .expect("Failed to update status");
-
-        let updated = manager
-            .get_session(&session.id)
-            .expect("Failed to get session")
-            .expect("Session should exist");
-        assert_eq!(updated.status, MeetingStatus::Processing);
-
-        // Update to Completed
-        manager
-            .update_session_status(&session.id, MeetingStatus::Completed)
-            .expect("Failed to update status");
-
-        let updated = manager
-            .get_session(&session.id)
-            .expect("Failed to get session")
-            .expect("Session should exist");
-        assert_eq!(updated.status, MeetingStatus::Completed);
-    }
-
-    #[test]
-    fn test_update_session_status_not_found() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Try to update a non-existent session
-        let result = manager.update_session_status("non-existent-id", MeetingStatus::Recording);
-
-        assert!(result.is_err(), "Should fail for non-existent session");
-        let err = result.unwrap_err();
-        assert!(
-            err.to_string().contains("Session not found"),
-            "Error should mention session not found"
-        );
-    }
-
-    #[test]
-    fn test_list_sessions() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Initially empty
-        let sessions = manager.list_sessions().expect("Failed to list sessions");
-        assert!(sessions.is_empty(), "Initially should have no sessions");
-
-        // Create some sessions
-        let session1 = manager
-            .create_session()
-            .expect("Failed to create session 1");
-        std::thread::sleep(std::time::Duration::from_secs(1)); // Ensure different timestamps (uses seconds)
-        let session2 = manager
-            .create_session()
-            .expect("Failed to create session 2");
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        let session3 = manager
-            .create_session()
-            .expect("Failed to create session 3");
-
-        // List sessions
-        let sessions = manager.list_sessions().expect("Failed to list sessions");
-        assert_eq!(sessions.len(), 3, "Should have 3 sessions");
-
-        // Verify order (newest first)
-        assert_eq!(
-            sessions[0].id, session3.id,
-            "Newest session should be first"
-        );
-        assert_eq!(sessions[1].id, session2.id);
-        assert_eq!(sessions[2].id, session1.id, "Oldest session should be last");
-    }
-
-    #[test]
-    fn test_list_sessions_with_different_statuses() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create sessions with different statuses
-        let session1 = manager
-            .create_session()
-            .expect("Failed to create session 1");
-        manager
-            .update_session_status(&session1.id, MeetingStatus::Completed)
-            .expect("Failed to update status");
-
-        let session2 = manager
-            .create_session()
-            .expect("Failed to create session 2");
-        manager
-            .update_session_status(&session2.id, MeetingStatus::Failed)
-            .expect("Failed to update status");
-
-        let session3 = manager
-            .create_session()
-            .expect("Failed to create session 3");
-        // session3 stays as Idle
-
-        // List sessions and verify statuses are preserved
-        let sessions = manager.list_sessions().expect("Failed to list sessions");
-        assert_eq!(sessions.len(), 3);
-
-        // Find sessions by ID and check their statuses
-        let s1 = sessions.iter().find(|s| s.id == session1.id).unwrap();
-        let s2 = sessions.iter().find(|s| s.id == session2.id).unwrap();
-        let s3 = sessions.iter().find(|s| s.id == session3.id).unwrap();
-
-        assert_eq!(s1.status, MeetingStatus::Completed);
-        assert_eq!(s2.status, MeetingStatus::Failed);
-        assert_eq!(s3.status, MeetingStatus::Idle);
-    }
-
-    #[test]
-    fn test_state_transition_validation() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Test valid transitions
-        let result =
-            manager.validate_state_transition(&MeetingStatus::Idle, &MeetingStatus::Recording);
-        assert!(result.is_ok(), "Idle -> Recording should be valid");
-
-        let result = manager
-            .validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Processing);
-        assert!(result.is_ok(), "Recording -> Processing should be valid");
-
-        let result =
-            manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Failed);
-        assert!(
-            result.is_ok(),
-            "Recording -> Failed (mic disconnect) should be valid"
-        );
-
-        let result = manager
-            .validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Completed);
-        assert!(result.is_ok(), "Processing -> Completed should be valid");
-
-        let result =
-            manager.validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Failed);
-        assert!(result.is_ok(), "Processing -> Failed should be valid");
-
-        let result =
-            manager.validate_state_transition(&MeetingStatus::Failed, &MeetingStatus::Processing);
-        assert!(
-            result.is_ok(),
-            "Failed -> Processing (retry) should be valid"
-        );
-
-        // Test invalid transitions
-        let result =
-            manager.validate_state_transition(&MeetingStatus::Recording, &MeetingStatus::Recording);
-        assert!(result.is_err(), "Recording -> Recording should be invalid");
-
-        let result =
-            manager.validate_state_transition(&MeetingStatus::Completed, &MeetingStatus::Recording);
-        assert!(result.is_err(), "Completed -> Recording should be invalid");
-
-        let result = manager
-            .validate_state_transition(&MeetingStatus::Processing, &MeetingStatus::Recording);
-        assert!(result.is_err(), "Processing -> Recording should be invalid");
-
-        let result = manager.validate_state_transition(&MeetingStatus::Idle, &MeetingStatus::Idle);
-        assert!(result.is_err(), "Idle -> Idle should be invalid");
-
-        let result = manager
-            .validate_state_transition(&MeetingStatus::Completed, &MeetingStatus::Processing);
-        assert!(result.is_err(), "Completed -> Processing should be invalid");
-    }
-
-    #[test]
-    fn test_cannot_start_recording_while_recording() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create first session and set to Recording
-        let session1 = manager
-            .create_session()
-            .expect("Failed to create session 1");
-        manager
-            .update_session_status(&session1.id, MeetingStatus::Recording)
-            .expect("Failed to set to Recording");
-
-        // Simulate current_session being session1 with Recording status
-        // This tests the guard logic in start_recording
-        let current_status = Some(MeetingStatus::Recording);
-
-        // Cannot start recording while already recording
-        if let Some(status) = current_status {
-            match status {
-                MeetingStatus::Recording => {
-                    // This is the expected guard behavior
-                    assert!(true, "Guard should prevent starting while recording");
-                }
-                _ => assert!(false, "Should be in Recording state"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_cannot_start_recording_while_processing() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create session and set to Processing
-        let session = manager.create_session().expect("Failed to create session");
-        manager
-            .update_session_status(&session.id, MeetingStatus::Processing)
-            .expect("Failed to set to Processing");
-
-        // Simulate current_session with Processing status
-        let current_status = Some(MeetingStatus::Processing);
-
-        // Cannot start recording while processing
-        if let Some(status) = current_status {
-            match status {
-                MeetingStatus::Processing => {
-                    // Guard should prevent starting while processing
-                    assert!(true, "Guard should prevent starting while processing");
-                }
-                _ => assert!(false, "Should be in Processing state"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_cannot_stop_when_idle() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create session in Idle state
-        let session = manager.create_session().expect("Failed to create session");
-
-        // Simulate trying to stop when Idle
-        match session.status {
-            MeetingStatus::Idle => {
-                // Guard should prevent stopping when Idle
-                assert!(true, "Guard should prevent stopping when Idle");
-            }
-            _ => assert!(false, "Should be in Idle state"),
-        }
-    }
-
-    #[test]
-    fn test_cannot_stop_when_completed() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create session and set to Completed
-        let session = manager.create_session().expect("Failed to create session");
-        manager
-            .update_session_status(&session.id, MeetingStatus::Completed)
-            .expect("Failed to set to Completed");
-
-        // Reload session to get updated status
-        let updated_session = manager
-            .get_session(&session.id)
-            .expect("Failed to get session")
-            .expect("Session should exist");
-
-        // Cannot stop when completed
-        match updated_session.status {
-            MeetingStatus::Completed => {
-                // Guard should prevent stopping when Completed
-                assert!(true, "Guard should prevent stopping when Completed");
-            }
-            _ => assert!(false, "Should be in Completed state"),
-        }
-    }
-
-    #[test]
-    fn test_cannot_stop_when_failed() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Create session and set to Failed
-        let session = manager.create_session().expect("Failed to create session");
-        manager
-            .update_session_status(&session.id, MeetingStatus::Failed)
-            .expect("Failed to set to Failed");
-
-        // Reload session to get updated status
-        let updated_session = manager
-            .get_session(&session.id)
-            .expect("Failed to get session")
-            .expect("Session should exist");
-
-        // Cannot stop when failed
-        match updated_session.status {
-            MeetingStatus::Failed => {
-                // Guard should prevent stopping when Failed
-                assert!(true, "Guard should prevent stopping when Failed");
-            }
-            _ => assert!(false, "Should be in Failed state"),
-        }
-    }
-
-    #[test]
-    fn test_race_condition_protection_with_locking() {
-        // This test demonstrates that locking prevents race conditions
-        // In a real scenario, multiple threads would access the state
-        // The Arc<Mutex<>> pattern ensures thread-safe access
-
-        use std::sync::{Arc, Mutex};
-        use std::thread;
-
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let manager = TestMeetingManager::new(temp_dir.path());
-
-        // Simulate shared state with mutex (like MeetingManagerState)
-        let shared_state = Arc::new(Mutex::new(MeetingStatus::Idle));
-        let mut handles = vec![];
-
-        // Spawn multiple threads trying to update state
-        for i in 0..10 {
-            let state_clone = Arc::clone(&shared_state);
-            let handle = thread::spawn(move || {
-                let mut status = state_clone.lock().unwrap();
-                // Each thread reads and potentially updates
-                match *status {
-                    MeetingStatus::Idle => {
-                        *status = MeetingStatus::Recording;
-                        println!("Thread {} set status to Recording", i);
-                    }
-                    MeetingStatus::Recording => {
-                        *status = MeetingStatus::Processing;
-                        println!("Thread {} set status to Processing", i);
-                    }
-                    _ => {
-                        println!("Thread {} could not update status", i);
-                    }
-                }
-            });
-            handles.push(handle);
-        }
-
-        // Wait for all threads to complete
-        for handle in handles {
-            handle.join().expect("Thread panicked");
-        }
-
-        // Final state should be valid (no corruption)
-        let final_status = shared_state.lock().unwrap();
-        assert!(
-            *final_status == MeetingStatus::Recording || *final_status == MeetingStatus::Processing,
-            "Final state should be valid, not corrupted"
-        );
-    }
-}

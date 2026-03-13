@@ -135,7 +135,7 @@ impl SystemAudioRecorder {
     /// This captures all audio output from the system (apps, browser, etc.)
     /// Returns a receiver that provides audio samples as Vec<f32>
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if *self.is_recording.lock().unwrap() {
+        if *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) {
             return Ok(()); // Already recording
         }
 
@@ -181,7 +181,7 @@ impl SystemAudioRecorder {
 
         self.stream = Some(stream);
         self.sample_rx = Some(sample_rx);
-        *self.is_recording.lock().unwrap() = true;
+        *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = true;
 
         log::info!("System audio capture started");
         Ok(())
@@ -189,7 +189,7 @@ impl SystemAudioRecorder {
 
     /// Stops capturing system audio
     pub fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if !*self.is_recording.lock().unwrap() {
+        if !*self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) {
             return Ok(()); // Not recording
         }
 
@@ -200,7 +200,7 @@ impl SystemAudioRecorder {
         }
 
         self.sample_rx = None;
-        *self.is_recording.lock().unwrap() = false;
+        *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = false;
 
         log::info!("System audio capture stopped");
         Ok(())
@@ -208,7 +208,7 @@ impl SystemAudioRecorder {
 
     /// Returns whether the recorder is currently capturing
     pub fn is_recording(&self) -> bool {
-        *self.is_recording.lock().unwrap()
+        *self.is_recording.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// Tries to receive available audio samples (non-blocking)

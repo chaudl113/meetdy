@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Sparkles,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { commands } from "@/bindings";
+import { listen } from "@tauri-apps/api/event";
 
 interface MeetingSummaryProps {
   sessionId: string;
@@ -34,14 +35,62 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
   const [isExpanded, setIsExpanded] = useState(true);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [pullPercent, setPullPercent] = useState<number | null>(null);
+  const unlistenRef = useRef<Array<() => void>>([]);
+
+  // Clean up event listeners on unmount
+  useEffect(() => {
+    return () => {
+      for (const unlisten of unlistenRef.current) {
+        unlisten();
+      }
+    };
+  }, []);
 
   const handleGenerateSummary = async () => {
     if (!hasTranscript) return;
 
     setIsGenerating(true);
     setError(null);
+    setStatusMessage(
+      t("meeting.summary.generating", "Generating summary..."),
+    );
+    setPullPercent(null);
+
+    // Listen for status updates from backend (auto-start, auto-pull)
+    const cleanups: Array<() => void> = [];
 
     try {
+      const unlistenStatus = await listen<string>(
+        "meeting_summary_status",
+        (event) => {
+          setStatusMessage(event.payload);
+        },
+      );
+      cleanups.push(unlistenStatus);
+
+      const unlistenPull = await listen<{
+        model: string;
+        status: string;
+        percent: number | null;
+      }>("ollama_pull_progress", (event) => {
+        const { status, percent } = event.payload;
+        if (status === "success") {
+          setStatusMessage(
+            t("meeting.summary.generating", "Generating summary..."),
+          );
+          setPullPercent(null);
+        } else {
+          const pct = percent != null ? ` (${Math.round(percent)}%)` : "";
+          setStatusMessage(
+            `${t("meeting.summary.downloadingModel", "Downloading model")}${pct}`,
+          );
+          setPullPercent(percent);
+        }
+      });
+      cleanups.push(unlistenPull);
+
       const result = await commands.generateMeetingSummary(sessionId);
       if (result.status === "ok") {
         onSummaryGenerated(result.data);
@@ -56,6 +105,12 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
       );
     } finally {
       setIsGenerating(false);
+      setStatusMessage("");
+      setPullPercent(null);
+      // Cleanup all listeners
+      for (const cleanup of cleanups) {
+        cleanup();
+      }
     }
   };
 
@@ -145,9 +200,24 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
 
           {/* Generating state */}
           {isGenerating ? (
-            <div className="flex items-center justify-center py-8 text-mid-gray">
-              <Loader2 className="h-5 w-5 animate-spin mr-2" />
-              {t("meeting.summary.generating", "Generating summary...")}
+            <div className="flex flex-col items-center justify-center py-8 text-mid-gray gap-3">
+              <div className="flex items-center">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                <span className="text-sm">{statusMessage || t("meeting.summary.generating", "Generating summary...")}</span>
+              </div>
+              {pullPercent != null && (
+                <div className="w-full max-w-xs">
+                  <div className="h-1.5 bg-mid-gray/20 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(pullPercent, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-mid-gray/70 text-center mt-1">
+                    {Math.round(pullPercent)}%
+                  </p>
+                </div>
+              )}
             </div>
           ) : summary ? (
             /* Summary content - render as preformatted text */

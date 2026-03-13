@@ -390,7 +390,8 @@ pub fn change_post_process_base_url_setting(
         .post_process_provider_mut(&provider_id)
         .expect("Provider looked up above must exist");
 
-    if provider.id != "custom" {
+    // Only allow editing base URL for providers that don't require API keys (local/custom)
+    if provider.requires_api_key {
         return Err(format!(
             "Provider '{}' does not allow editing the base URL",
             label
@@ -565,8 +566,8 @@ pub async fn fetch_post_process_models(
         .cloned()
         .unwrap_or_default();
 
-    // Skip fetching if no API key for providers that typically need one
-    if api_key.trim().is_empty() && provider.id != "custom" {
+    // Skip fetching if no API key for providers that require one
+    if api_key.trim().is_empty() && provider.requires_api_key {
         return Err(format!(
             "API key is required for {}. Please add an API key to list available models.",
             provider.label
