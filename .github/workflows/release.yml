@@ -70,7 +70,7 @@ jobs:
           - platform: "macos-15" # for Arm based macs (M1 and above). Uses macOS 15 (Sequoia).
             args: "--target aarch64-apple-darwin"
             target: "aarch64-apple-darwin"
-          - platform: "macos-latest" # for Intel based macs.
+          - platform: "macos-13" # for Intel based macs. Must use macos-13 (Intel runner) to avoid arm64/x86_64 cross-compile issues with Swift crates.
             args: "--target x86_64-apple-darwin"
             target: "x86_64-apple-darwin"
           - platform: "ubuntu-22.04" # Build .deb on 22.04
