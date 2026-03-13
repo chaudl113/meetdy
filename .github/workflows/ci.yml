@@ -24,7 +24,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: ESLint
         run: bun run lint
@@ -57,7 +57,7 @@ jobs:
             libx11-dev libxtst-dev libxrandr-dev
 
       - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: TypeScript type check
         run: bunx tsc --noEmit

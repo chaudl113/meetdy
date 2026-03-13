@@ -50,10 +50,18 @@ jobs:
       contents: write
     runs-on: ${{ inputs.platform }}
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (default)
+        if: ${{ inputs.repository == '' }}
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Checkout repository (custom)
+        if: ${{ inputs.repository != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
