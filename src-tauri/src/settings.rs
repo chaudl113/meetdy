@@ -517,6 +517,17 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             requires_api_key: true,
             default_model: None,
         },
+        // ChatGPT Plus subscription: uses session access token captured from
+        // chatgpt.com login flow instead of an API key. Calls the unofficial
+        // `/backend-api/conversation` endpoint. Not officially supported by
+        // OpenAI, may break at any time.
+        PostProcessProvider {
+            id: "chatgpt_plus".to_string(),
+            label: "ChatGPT (Plus subscription)".to_string(),
+            base_url: "https://chatgpt.com".to_string(),
+            requires_api_key: true,
+            default_model: Some("gpt-4o".to_string()),
+        },
         PostProcessProvider {
             id: "openrouter".to_string(),
             label: "OpenRouter".to_string(),

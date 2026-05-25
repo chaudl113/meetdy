@@ -875,6 +875,46 @@ async deleteMeetingTemplate(id: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Translates `text` from `source` language to `target` language.
+ * 
+ * `source` may be "auto" to let Google detect the language. Language codes
+ * follow ISO 639-1 (e.g. "en", "vi", "ja", "zh-CN").
+ */
+async translateText(text: string, source: string, target: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("translate_text", { text, source, target }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Opens (or focuses) the ChatGPT login webview window. The user signs in
+ * inside that window; once a session is established the injected script
+ * captures the access token and calls back into `complete_chatgpt_login`.
+ */
+async openChatgptLogin() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_chatgpt_login") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Called by the injected script when it has extracted an access token from
+ * the chatgpt.com session. Emits an app-level event so the settings UI can
+ * persist the token, then closes the login window.
+ */
+async completeChatgptLogin(accessToken: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("complete_chatgpt_login", { accessToken }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Checks if the Mac is a laptop by detecting battery presence
  * 
  * This uses pmset to check for battery information.

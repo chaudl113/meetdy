@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCcw } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import { commands } from "@/bindings";
 
 import { SettingsGroup } from "../../ui/SettingsGroup";
@@ -27,6 +28,61 @@ const DisabledNotice: React.FC<{ children: React.ReactNode }> = ({
     <p className="text-sm text-mid-gray">{children}</p>
   </div>
 );
+
+interface ChatgptPlusLoginControlProps {
+  hasToken: boolean;
+  onTokenReceived: (token: string) => void;
+}
+
+const ChatgptPlusLoginControl: React.FC<ChatgptPlusLoginControlProps> = ({
+  hasToken,
+  onTokenReceived,
+}) => {
+  const [isOpening, setIsOpening] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  // Listen for the access token emitted by the injected login script.
+  useEffect(() => {
+    const unlistenPromise = listen<{ access_token: string }>(
+      "chatgpt-login-success",
+      (event) => {
+        const token = event.payload?.access_token;
+        if (token) {
+          onTokenReceived(token);
+          setStatus("Logged in. Token saved.");
+          setIsOpening(false);
+        }
+      },
+    );
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, [onTokenReceived]);
+
+  const handleLogin = async () => {
+    setIsOpening(true);
+    setStatus("Opening ChatGPT login window…");
+    const result = await commands.openChatgptLogin();
+    if (result.status === "error") {
+      setStatus(`Failed to open login window: ${result.error}`);
+      setIsOpening(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Button onClick={handleLogin} disabled={isOpening}>
+          {hasToken ? "Re-login with ChatGPT" : "Login with ChatGPT"}
+        </Button>
+        {hasToken && (
+          <span className="text-xs text-green-400">Session token saved</span>
+        )}
+      </div>
+      {status && <p className="text-xs text-mid-gray">{status}</p>}
+    </div>
+  );
+};
 
 const PostProcessingSettingsApiComponent: React.FC = () => {
   const { t } = useTranslation();
@@ -114,8 +170,24 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
             </>
           )}
 
+          {/* Show ChatGPT Plus login button instead of an API key field. */}
+          {state.isChatgptPlusProvider && (
+            <SettingContainer
+              title="ChatGPT login"
+              description="Sign in to your ChatGPT account in a popup window. Meetdy will use your subscription session instead of an API key. Token refreshes automatically on each login; re-login if requests start failing."
+              descriptionMode="tooltip"
+              layout="horizontal"
+              grouped={true}
+            >
+              <ChatgptPlusLoginControl
+                hasToken={Boolean(state.apiKey)}
+                onTokenReceived={state.handleApiKeyChange}
+              />
+            </SettingContainer>
+          )}
+
           {/* Show API Key for cloud providers that require it */}
-          {!state.isLocalProvider && (
+          {!state.isLocalProvider && !state.isChatgptPlusProvider && (
             <SettingContainer
               title={t("settings.postProcessing.api.apiKey.title")}
               description={t("settings.postProcessing.api.apiKey.description")}

@@ -3192,7 +3192,7 @@ dependencies = [
 
 [[package]]
 name = "meetdy"
-version = "0.6.9"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6977,8 +6977,6 @@ dependencies = [
 [[package]]
 name = "transcribe-rs"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "856646076d3d9739998ba693ebfff3afe95c0cdb71d4fead32e761b11496094f"
 dependencies = [
  "async-openai",
  "async-trait",

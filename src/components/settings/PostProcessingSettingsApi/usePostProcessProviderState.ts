@@ -12,6 +12,7 @@ type PostProcessProviderState = {
   selectedProvider: PostProcessProvider | undefined;
   isCustomProvider: boolean;
   isAppleProvider: boolean;
+  isChatgptPlusProvider: boolean;
   isLocalProvider: boolean;
   baseUrl: string;
   handleBaseUrlChange: (value: string) => void;
@@ -31,6 +32,7 @@ type PostProcessProviderState = {
 };
 
 const APPLE_PROVIDER_ID = "apple_intelligence";
+const CHATGPT_PLUS_PROVIDER_ID = "chatgpt_plus";
 
 export const usePostProcessProviderState = (): PostProcessProviderState => {
   const {
@@ -61,6 +63,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   }, [providers, selectedProviderId]);
 
   const isAppleProvider = selectedProvider?.id === APPLE_PROVIDER_ID;
+  const isChatgptPlusProvider = selectedProvider?.id === CHATGPT_PLUS_PROVIDER_ID;
 
   // Use settings directly as single source of truth
   const baseUrl = selectedProvider?.base_url ?? "";
@@ -185,6 +188,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     selectedProvider,
     isCustomProvider,
     isAppleProvider,
+    isChatgptPlusProvider,
     isLocalProvider,
     baseUrl,
     handleBaseUrlChange,

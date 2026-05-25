@@ -8,12 +8,21 @@
   "sidebar": {
     "general": "General",
     "meeting": "Meeting",
-    "templates": "Templates",
+    "models": "Models",
     "advanced": "Advanced",
     "postProcessing": "Post Process",
     "history": "History",
     "debug": "Debug",
     "about": "About"
+  },
+  "models": {
+    "installedTitle": "Installed Models",
+    "installedDescription": "Models downloaded on this device. Activate one to use it for transcription.",
+    "availableTitle": "Available to Download",
+    "availableDescription": "Choose additional models to download for transcription.",
+    "noInstalled": "No models installed yet. Download one below to get started.",
+    "noAvailable": "All available models are already installed.",
+    "activate": "Activate"
   },
   "onboarding": {
     "subtitle": "To get started, choose a transcription model",

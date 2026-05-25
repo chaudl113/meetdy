@@ -9,11 +9,21 @@
   "sidebar": {
     "general": "Chung",
     "meeting": "Cuộc họp",
+    "models": "Mô hình",
     "advanced": "Nâng cao",
     "postProcessing": "Xử lý sau",
     "history": "Lịch sử",
     "debug": "Gỡ lỗi",
     "about": "Giới thiệu"
+  },
+  "models": {
+    "installedTitle": "Mô hình đã cài",
+    "installedDescription": "Các mô hình đã tải về thiết bị này. Chọn một mô hình để sử dụng cho việc chuyển giọng nói thành văn bản.",
+    "availableTitle": "Có thể tải về",
+    "availableDescription": "Chọn thêm mô hình để tải về cho việc chuyển giọng nói.",
+    "noInstalled": "Chưa có mô hình nào. Tải một mô hình bên dưới để bắt đầu.",
+    "noAvailable": "Tất cả mô hình đã được cài đặt.",
+    "activate": "Kích hoạt"
   },
   "onboarding": {
     "subtitle": "Để bắt đầu, hãy chọn một mô hình chuyển đổi giọng nói",

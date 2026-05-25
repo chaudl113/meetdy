@@ -89,7 +89,6 @@ impl MixedAudioRecorder {
 
         match &self.config {
             AudioSourceConfig::MicrophoneOnly => {
-                // Just use the mic recorder with sample callback
                 let mut recorder = AudioRecorder::new()?;
                 if let Some(cb) = &sample_callback {
                     let cb = cb.clone();
@@ -99,7 +98,6 @@ impl MixedAudioRecorder {
                         cb(s);
                     });
                 }
-                // Wire error callback
                 if let Some(err_cb) = &error_callback {
                     let err_cb = err_cb.clone();
                     recorder = recorder.with_error_callback(move |error| {
@@ -111,30 +109,33 @@ impl MixedAudioRecorder {
                 self.mic_recorder = Some(recorder);
             }
             AudioSourceConfig::SystemOnly => {
-                // Just use system audio recorder
                 let mut system_recorder = SystemAudioRecorder::new()?;
+                if let Some(cb) = &sample_callback {
+                    let cb = cb.clone();
+                    let samples = mixed_samples.clone();
+                    system_recorder = system_recorder.with_sample_callback(move |s| {
+                        samples.lock().unwrap_or_else(|p| p.into_inner()).extend_from_slice(&s);
+                        cb(s);
+                    });
+                }
                 system_recorder.start()?;
                 self.system_recorder = Some(system_recorder);
-
-                // Start mixer thread to receive and forward system samples
-                let is_recording = self.is_recording.clone();
-                *is_recording.lock().unwrap_or_else(|p| p.into_inner()) = true;
-
-                // We need to poll the system recorder for samples
-                // Since we can't move system_recorder into thread, we'll handle differently
             }
             AudioSourceConfig::Mixed => {
-                // Start both recorders
+                // Both mic (via AudioRecorder) and system audio (via ScreenCaptureKit)
+                // are configured to deliver 16kHz mono f32 samples. We mix them by
+                // consuming equal-length prefixes from each stream, keeping any extra
+                // samples buffered until the slower stream catches up. This preserves
+                // time alignment instead of mixing by raw index across uneven chunks.
                 let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
-                let (_sys_tx, sys_rx) = mpsc::channel::<Vec<f32>>();
+                let (sys_tx, sys_rx) = mpsc::channel::<Vec<f32>>();
 
-                // Mic recorder
+                // Start mic recorder
                 let mut mic_recorder = AudioRecorder::new()?;
                 let mic_tx_clone = mic_tx.clone();
                 mic_recorder = mic_recorder.with_sample_callback(move |s| {
                     let _ = mic_tx_clone.send(s);
                 });
-                // Wire error callback for mic
                 if let Some(err_cb) = &error_callback {
                     let err_cb = err_cb.clone();
                     mic_recorder = mic_recorder.with_error_callback(move |error| {
@@ -143,61 +144,135 @@ impl MixedAudioRecorder {
                 }
                 mic_recorder.open(None)?;
                 mic_recorder.start()?;
-                self.mic_recorder = Some(mic_recorder);
 
-                // System recorder
-                let mut system_recorder = SystemAudioRecorder::new()?;
-                system_recorder.start()?;
+                // Start system recorder with callback that sends to mixer channel
+                let sys_tx_clone = sys_tx.clone();
+                let mut system_recorder = SystemAudioRecorder::new()?
+                    .with_sample_callback(move |s| {
+                        let _ = sys_tx_clone.send(s);
+                    });
+                if let Err(e) = system_recorder.start() {
+                    // Clean up mic recorder if system audio fails
+                    let _ = mic_recorder.close();
+                    return Err(e);
+                }
 
                 // Start mixer thread
                 let is_recording = self.is_recording.clone();
                 let samples_clone = mixed_samples.clone();
                 let callback = sample_callback.clone();
-
                 let handle = thread::spawn(move || {
-                    let mut mic_buffer: Vec<f32> = Vec::new();
-                    let mut sys_buffer: Vec<f32> = Vec::new();
+                    use std::collections::VecDeque;
+
+                    // If one stream lags too far behind the other, drop samples from
+                    // the faster stream to avoid unbounded drift if e.g. system
+                    // audio is silent / not delivering. Allow up to ~2 seconds.
+                    const MAX_DRIFT_SAMPLES: usize = 16_000 * 2;
+
+                    let mut mic_buffer: VecDeque<f32> = VecDeque::new();
+                    let mut sys_buffer: VecDeque<f32> = VecDeque::new();
+
+                    let drain_rx = |rx: &mpsc::Receiver<Vec<f32>>, buf: &mut VecDeque<f32>| {
+                        while let Ok(samples) = rx.try_recv() {
+                            buf.extend(samples);
+                        }
+                    };
+
+                    let mix_aligned = |mic: &mut VecDeque<f32>, sys: &mut VecDeque<f32>|
+                        -> Vec<f32>
+                    {
+                        let pair_len = mic.len().min(sys.len());
+                        if pair_len == 0 {
+                            return Vec::new();
+                        }
+
+                        let mut out = Vec::with_capacity(pair_len);
+                        for _ in 0..pair_len {
+                            let m = mic.pop_front().unwrap_or(0.0);
+                            let s = sys.pop_front().unwrap_or(0.0);
+                            out.push(((m + s) * 0.5).clamp(-1.0, 1.0));
+                        }
+                        out
+                    };
 
                     while *is_recording.lock().unwrap_or_else(|p| p.into_inner()) {
-                        // Collect mic samples
-                        while let Ok(samples) = mic_rx.try_recv() {
-                            mic_buffer.extend(samples);
+                        drain_rx(&mic_rx, &mut mic_buffer);
+                        drain_rx(&sys_rx, &mut sys_buffer);
+
+                        // Mix the overlapping prefix in time-aligned fashion.
+                        let mixed = mix_aligned(&mut mic_buffer, &mut sys_buffer);
+
+                        if !mixed.is_empty() {
+                            samples_clone
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .extend_from_slice(&mixed);
+                            if let Some(ref cb) = callback {
+                                cb(mixed);
+                            }
                         }
 
-                        // Collect system samples
-                        while let Ok(samples) = sys_rx.try_recv() {
-                            sys_buffer.extend(samples);
+                        // Prevent runaway drift if one source stalls (e.g. no system
+                        // audio playing). Trim the faster buffer down to the drift
+                        // limit so we resync once the other side resumes.
+                        if mic_buffer.len() > MAX_DRIFT_SAMPLES {
+                            let drop = mic_buffer.len() - MAX_DRIFT_SAMPLES;
+                            mic_buffer.drain(..drop);
+                            log::warn!(
+                                "Mixer dropping {} mic samples due to drift (system audio lagging)",
+                                drop
+                            );
                         }
-
-                        // Mix available samples
-                        if !mic_buffer.is_empty() || !sys_buffer.is_empty() {
-                            let mix_len = mic_buffer.len().max(sys_buffer.len());
-                            let mut mixed = Vec::with_capacity(mix_len);
-
-                            for i in 0..mix_len {
-                                let mic = mic_buffer.get(i).copied().unwrap_or(0.0);
-                                let sys = sys_buffer.get(i).copied().unwrap_or(0.0);
-                                // Mix with equal weight, clamp to [-1, 1]
-                                mixed.push(((mic + sys) * 0.5).clamp(-1.0, 1.0));
-                            }
-
-                            if !mixed.is_empty() {
-                                samples_clone.lock().unwrap_or_else(|p| p.into_inner()).extend_from_slice(&mixed);
-                                if let Some(ref cb) = callback {
-                                    cb(mixed);
-                                }
-                            }
-
-                            mic_buffer.clear();
-                            sys_buffer.clear();
+                        if sys_buffer.len() > MAX_DRIFT_SAMPLES {
+                            let drop = sys_buffer.len() - MAX_DRIFT_SAMPLES;
+                            sys_buffer.drain(..drop);
+                            log::warn!(
+                                "Mixer dropping {} system samples due to drift (mic lagging)",
+                                drop
+                            );
                         }
 
                         thread::sleep(Duration::from_millis(10));
                     }
+
+                    // Final flush: drain anything still in the channels and mix the
+                    // remaining aligned tail. Any unmatched samples on one side are
+                    // emitted as-is so we don't lose audio at the end of the session.
+                    drain_rx(&mic_rx, &mut mic_buffer);
+                    drain_rx(&sys_rx, &mut sys_buffer);
+                    let tail = mix_aligned(&mut mic_buffer, &mut sys_buffer);
+                    let mut remainder: Vec<f32> = Vec::new();
+                    remainder.extend(mic_buffer.drain(..));
+                    remainder.extend(sys_buffer.drain(..));
+
+                    if !tail.is_empty() {
+                        samples_clone
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .extend_from_slice(&tail);
+                        if let Some(ref cb) = callback {
+                            cb(tail);
+                        }
+                    }
+                    if !remainder.is_empty() {
+                        // Scale by 0.5 to match the mixed gain level.
+                        let scaled: Vec<f32> = remainder
+                            .into_iter()
+                            .map(|v| (v * 0.5).clamp(-1.0, 1.0))
+                            .collect();
+                        samples_clone
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .extend_from_slice(&scaled);
+                        if let Some(ref cb) = callback {
+                            cb(scaled);
+                        }
+                    }
                 });
 
-                self.mixer_handle = Some(handle);
+                self.mic_recorder = Some(mic_recorder);
                 self.system_recorder = Some(system_recorder);
+                self.mixer_handle = Some(handle);
             }
         }
 

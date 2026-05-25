@@ -1,8 +1,14 @@
 use crate::settings::PostProcessProvider;
-use log::debug;
+use futures_util::StreamExt;
+use log::{debug, warn};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use uuid::Uuid;
+
+/// Provider id for the ChatGPT Plus subscription path. Kept in one place so
+/// `send_chat_completion` and friends can branch on it.
+pub const CHATGPT_PLUS_PROVIDER_ID: &str = "chatgpt_plus";
 
 /// Default timeout for LLM API requests (2 minutes)
 const LLM_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -90,6 +96,12 @@ pub async fn send_chat_completion(
     model: &str,
     prompt: String,
 ) -> Result<Option<String>, String> {
+    // ChatGPT Plus uses the unofficial chatgpt.com web backend, not the
+    // standard /chat/completions endpoint.
+    if provider.id == CHATGPT_PLUS_PROVIDER_ID {
+        return send_chatgpt_plus(api_key, model, prompt).await;
+    }
+
     let base_url = provider.base_url.trim_end_matches('/');
     let url = format!("{}/chat/completions", base_url);
 
@@ -193,4 +205,154 @@ pub async fn fetch_models(
     }
 
     Ok(models)
+}
+
+// ---------------------------------------------------------------------------
+// ChatGPT Plus (unofficial chatgpt.com web endpoint)
+// ---------------------------------------------------------------------------
+
+const CHATGPT_PLUS_CONVERSATION_URL: &str = "https://chatgpt.com/backend-api/conversation";
+const CHATGPT_PLUS_USER_AGENT: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+/// Sends a single-turn request to chatgpt.com using a captured Plus session
+/// access token. The endpoint streams Server-Sent Events; we accumulate the
+/// final assistant message and return it.
+///
+/// `model` should match a slug visible in the ChatGPT UI (e.g. "gpt-4o",
+/// "gpt-4o-mini", "auto"). The web backend will silently fall back if the
+/// account doesn't have access to the requested slug.
+async fn send_chatgpt_plus(
+    access_token: String,
+    model: &str,
+    prompt: String,
+) -> Result<Option<String>, String> {
+    if access_token.trim().is_empty() {
+        return Err("ChatGPT Plus is not logged in. Use 'Login with ChatGPT' first.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(LLM_REQUEST_TIMEOUT)
+        .user_agent(CHATGPT_PLUS_USER_AGENT)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let message_id = Uuid::new_v4().to_string();
+    let parent_id = Uuid::new_v4().to_string();
+
+    let body = serde_json::json!({
+        "action": "next",
+        "messages": [{
+            "id": message_id,
+            "author": { "role": "user" },
+            "content": { "content_type": "text", "parts": [prompt] },
+            "metadata": {},
+        }],
+        "parent_message_id": parent_id,
+        "model": model,
+        "timezone_offset_min": 0,
+        "history_and_training_disabled": false,
+        "conversation_mode": { "kind": "primary_assistant" },
+        "force_paragen": false,
+        "force_paragen_model_slug": "",
+        "force_rate_limit": false,
+        "suggestions": [],
+    });
+
+    let response = client
+        .post(CHATGPT_PLUS_CONVERSATION_URL)
+        .bearer_auth(&access_token)
+        .header(CONTENT_TYPE, "application/json")
+        .header("Accept", "text/event-stream")
+        .header("Origin", "https://chatgpt.com")
+        .header(REFERER, "https://chatgpt.com/")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("ChatGPT request failed: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to read error response".to_string());
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(format!(
+                "ChatGPT session expired or unauthorized ({}). Please log in again. Details: {}",
+                status, error_text
+            ));
+        }
+        return Err(format!(
+            "ChatGPT request failed with status {}: {}",
+            status, error_text
+        ));
+    }
+
+    // Stream the SSE response and keep only the final assistant text.
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut final_text: Option<String> = None;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Failed to read stream chunk: {}", e))?;
+        let chunk_str = std::str::from_utf8(&chunk)
+            .map_err(|e| format!("Invalid UTF-8 in stream: {}", e))?;
+        buffer.push_str(chunk_str);
+
+        // SSE events are separated by blank lines.
+        while let Some(idx) = buffer.find("\n\n") {
+            let event_block = buffer[..idx].to_string();
+            buffer.drain(..idx + 2);
+
+            for line in event_block.lines() {
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue;
+                };
+                let data = data.trim();
+                if data == "[DONE]" {
+                    continue;
+                }
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
+                    continue;
+                };
+
+                // The web backend emits assistant deltas inside
+                // value["message"]["content"]["parts"][0]. We replace
+                // final_text on each event because parts are cumulative.
+                if let Some(text) = extract_assistant_text(&value) {
+                    final_text = Some(text);
+                }
+            }
+        }
+    }
+
+    if final_text.is_none() {
+        warn!("ChatGPT stream finished without assistant message");
+    }
+
+    Ok(final_text)
+}
+
+fn extract_assistant_text(event: &serde_json::Value) -> Option<String> {
+    let message = event.get("message")?;
+    let role = message
+        .pointer("/author/role")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if role != "assistant" {
+        return None;
+    }
+    let parts = message.pointer("/content/parts")?.as_array()?;
+    let mut out = String::new();
+    for part in parts {
+        if let Some(s) = part.as_str() {
+            out.push_str(s);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }

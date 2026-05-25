@@ -408,8 +408,16 @@ impl TranscriptionManager {
                         ..Default::default()
                     };
 
+                    info!(
+                        "Running Parakeet transcription on {} audio samples",
+                        audio.len()
+                    );
+
                     parakeet_engine
                         .transcribe_samples(audio, Some(params))
+                        .inspect_err(|e| {
+                            error!("Parakeet transcription error details: {:?}", e);
+                        })
                         .map_err(|e| anyhow::anyhow!("Parakeet transcription failed: {}", e))?
                 }
             }

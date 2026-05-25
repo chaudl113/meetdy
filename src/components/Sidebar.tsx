@@ -8,7 +8,7 @@ import {
   Mic,
   Sparkles,
   Video,
-  BookTemplate,
+  Boxes,
 } from "lucide-react";
 import MeetdyTextLogo from "./icons/MeetdyTextLogo";
 import { useSettings } from "../hooks/useSettings";
@@ -19,7 +19,7 @@ import {
   DebugSettings,
   AboutSettings,
   PostProcessingSettings,
-  MeetingTemplateSettings,
+  ModelsSettings,
 } from "./settings";
 import { MeetingMode } from "./meeting";
 
@@ -53,10 +53,10 @@ export const SECTIONS_CONFIG = {
     component: MeetingMode,
     enabled: () => true,
   },
-  templates: {
-    labelKey: "sidebar.templates",
-    icon: BookTemplate,
-    component: MeetingTemplateSettings,
+  models: {
+    labelKey: "sidebar.models",
+    icon: Boxes,
+    component: ModelsSettings,
     enabled: () => true,
   },
   advanced: {

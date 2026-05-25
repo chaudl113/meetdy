@@ -68,7 +68,7 @@ uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tar = "0.4.44"
 flate2 = "1.0"
-transcribe-rs = "0.1.4"
+transcribe-rs = { path = "vendor_transcribe_rs" }
 ferrous-opencc = "0.2.3"
 specta = "=2.0.0-rc.22"
 specta-typescript = "0.0.9"

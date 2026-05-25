@@ -80,6 +80,7 @@ pub fn request_screen_recording_permission() -> Result<bool, Box<dyn std::error:
 #[cfg(target_os = "macos")]
 struct SystemAudioHandler {
     sample_tx: mpsc::Sender<Vec<f32>>,
+    sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -103,7 +104,10 @@ impl SCStreamOutputTrait for SystemAudioHandler {
                         .collect();
 
                     if !samples.is_empty() {
-                        let _ = self.sample_tx.send(samples);
+                        let _ = self.sample_tx.send(samples.clone());
+                        if let Some(ref cb) = self.sample_cb {
+                            cb(samples);
+                        }
                     }
                 }
             }
@@ -117,6 +121,7 @@ pub struct SystemAudioRecorder {
     stream: Option<SCStream>,
     sample_rx: Option<mpsc::Receiver<Vec<f32>>>,
     is_recording: Arc<Mutex<bool>>,
+    sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -127,7 +132,17 @@ impl SystemAudioRecorder {
             stream: None,
             sample_rx: None,
             is_recording: Arc::new(Mutex::new(false)),
+            sample_cb: None,
         })
+    }
+
+    /// Sets a callback for receiving audio samples
+    pub fn with_sample_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(Vec<f32>) + Send + Sync + 'static,
+    {
+        self.sample_cb = Some(Arc::new(cb));
+        self
     }
 
     /// Starts capturing system audio
@@ -139,9 +154,19 @@ impl SystemAudioRecorder {
             return Ok(()); // Already recording
         }
 
+        // Check screen recording permission first
+        if !has_screen_recording_permission() {
+            request_screen_recording_permission()?;
+            return Err(
+                "Screen recording permission is required for system audio capture. \
+                 Please grant permission in System Settings > Privacy & Security > Screen Recording"
+                    .into(),
+            );
+        }
+
         // Get shareable content (displays)
         let content = SCShareableContent::get()
-            .map_err(|e| format!("Failed to get shareable content: {:?}", e))?;
+            .map_err(|e| format!("Failed to get shareable content: {}", e))?;
 
         let displays = content.displays();
         if displays.is_empty() {
@@ -156,9 +181,10 @@ impl SystemAudioRecorder {
             .build();
 
         // Configure stream for audio-only capture
+        // Width/height must be >= 2 for ScreenCaptureKit to accept the configuration
         let config = SCStreamConfiguration::new()
-            .with_width(1) // Minimal video (required for audio capture)
-            .with_height(1)
+            .with_width(2)
+            .with_height(2)
             .with_captures_audio(true)
             .with_excludes_current_process_audio(false) // Include our app's audio if any
             .with_sample_rate(constants::WHISPER_SAMPLE_RATE as i32) // 16kHz for Whisper
@@ -170,14 +196,36 @@ impl SystemAudioRecorder {
         // Create and configure stream
         let mut stream = SCStream::new(&filter, &config);
 
-        // Add audio output handler
-        let handler = SystemAudioHandler { sample_tx };
-        stream.add_output_handler(handler, SCStreamOutputType::Audio);
+        // Add audio output handler with optional sample callback
+        let handler = SystemAudioHandler {
+            sample_tx,
+            sample_cb: self.sample_cb.clone(),
+        };
+        if stream
+            .add_output_handler(handler, SCStreamOutputType::Audio)
+            .is_none()
+        {
+            return Err("Failed to add audio output handler to system audio stream".into());
+        }
 
         // Start capture
-        stream
-            .start_capture()
-            .map_err(|e| format!("Failed to start capture: {:?}", e))?;
+        stream.start_capture().map_err(|e| {
+            let msg = match &e {
+                screencapturekit::error::SCError::SCStreamError { code, .. } => {
+                    match code {
+                        screencapturekit::error::SCStreamErrorCode::UserDeclined =>
+                            "Screen recording permission denied by user".to_string(),
+                        screencapturekit::error::SCStreamErrorCode::FailedToStart =>
+                            "System audio stream failed to start (this may require restarting the app or granting screen recording permission in System Settings > Privacy & Security > Screen Recording)".to_string(),
+                        screencapturekit::error::SCStreamErrorCode::MissingEntitlements =>
+                            "App is missing required entitlements for screen/audio capture".to_string(),
+                        _ => format!("System audio stream error: {}", code),
+                    }
+                }
+                _ => format!("Failed to start capture: {}", e),
+            };
+            msg
+        })?;
 
         self.stream = Some(stream);
         self.sample_rx = Some(sample_rx);
@@ -241,6 +289,13 @@ pub struct SystemAudioRecorder;
 impl SystemAudioRecorder {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Err("System audio capture is only supported on macOS".into())
+    }
+
+    pub fn with_sample_callback<F>(self, _cb: F) -> Self
+    where
+        F: Fn(Vec<f32>) + Send + Sync + 'static,
+    {
+        self
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
