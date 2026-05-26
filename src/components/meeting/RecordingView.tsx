@@ -14,6 +14,8 @@ import { RecordingInfoCard } from "./recording/RecordingInfoCard";
 import { QuickNotesCard } from "./recording/QuickNotesCard";
 import { BottomControlsBar } from "./recording/BottomControlsBar";
 import { RecordingFooter } from "./recording/RecordingFooter";
+import { AddNoteModal } from "./recording/AddNoteModal";
+import { useMeetingStore } from "../../stores/meetingStore";
 
 /**
  * RecordingView — main UI shown while a meeting is being recorded.
@@ -28,6 +30,21 @@ import { RecordingFooter } from "./recording/RecordingFooter";
 export const RecordingView: React.FC = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<RecordingTab>("transcript");
+  const [noteModalOpen, setNoteModalOpen] = useState(false);
+  const [noteTimestamp, setNoteTimestamp] = useState(0);
+
+  const { addNote, recordingDuration } = useMeetingStore();
+
+  const openAddNote = () => {
+    // Pin the note to the moment the button was clicked, not to the moment
+    // the user finishes typing.
+    setNoteTimestamp(recordingDuration);
+    setNoteModalOpen(true);
+  };
+
+  const handleSaveNote = async (content: string) => {
+    await addNote(noteTimestamp, content);
+  };
 
   const renderPanel = () => {
     switch (activeTab) {
@@ -36,13 +53,13 @@ export const RecordingView: React.FC = () => {
       case "summary":
         return <AISummaryPanel />;
       case "notes":
-        return <NotesPanel />;
+        return <NotesPanel onAddNote={openAddNote} />;
     }
   };
 
   return (
     <div className="w-full max-w-[1200px] flex flex-col gap-4">
-      <RecordingTopBar />
+      <RecordingTopBar onAddNote={openAddNote} />
       <RecordingMetaBar />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -61,12 +78,19 @@ export const RecordingView: React.FC = () => {
         <div className="flex flex-col gap-4">
           <AudioStatsCard />
           <RecordingInfoCard />
-          <QuickNotesCard />
+          <QuickNotesCard onAddNote={openAddNote} />
         </div>
       </div>
 
       <BottomControlsBar />
       <RecordingFooter />
+
+      <AddNoteModal
+        open={noteModalOpen}
+        timestampSeconds={noteTimestamp}
+        onClose={() => setNoteModalOpen(false)}
+        onSubmit={handleSaveNote}
+      />
     </div>
   );
 };

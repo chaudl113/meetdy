@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
 use std::path::PathBuf;
 
-use super::models::{AudioSourceType, MeetingSession, MeetingStatus};
+use super::models::{AudioSourceType, MeetingNote, MeetingSession, MeetingStatus};
 
 /// Database migrations for meeting sessions.
 /// Each migration is applied in order. The library tracks which migrations
@@ -36,6 +36,19 @@ static MIGRATIONS: &[M] = &[
     ),
     M::up(
         "ALTER TABLE meeting_sessions ADD COLUMN template_id TEXT;",
+    ),
+    M::up(
+        "CREATE TABLE IF NOT EXISTS meeting_notes (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            timestamp_seconds INTEGER NOT NULL DEFAULT 0,
+            content TEXT NOT NULL,
+            author TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES meeting_sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_notes_session_id
+            ON meeting_notes(session_id);",
     ),
 ];
 
@@ -343,4 +356,64 @@ pub(crate) fn find_interrupted_sessions(db_path: &PathBuf) -> Result<Vec<Meeting
         .filter_map(|r| r.ok())
         .collect();
     Ok(sessions)
+}
+
+// --- Notes -----------------------------------------------------------------
+
+fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<MeetingNote> {
+    Ok(MeetingNote {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        timestamp_seconds: row.get(2)?,
+        content: row.get(3)?,
+        author: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
+/// Inserts a new note for a meeting session.
+pub(crate) fn insert_note(db_path: &PathBuf, note: &MeetingNote) -> Result<()> {
+    let conn = get_connection(db_path)?;
+    conn.execute(
+        "INSERT INTO meeting_notes (id, session_id, timestamp_seconds, content, author, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            note.id,
+            note.session_id,
+            note.timestamp_seconds,
+            note.content,
+            note.author,
+            note.created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Returns the notes attached to a session, oldest first (timestamp then created_at).
+pub(crate) fn list_notes_by_session(
+    db_path: &PathBuf,
+    session_id: &str,
+) -> Result<Vec<MeetingNote>> {
+    let conn = get_connection(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, timestamp_seconds, content, author, created_at
+         FROM meeting_notes
+         WHERE session_id = ?1
+         ORDER BY timestamp_seconds ASC, created_at ASC",
+    )?;
+    let notes = stmt
+        .query_map(params![session_id], |row| row_to_note(row))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(notes)
+}
+
+/// Deletes a single note by id. Returns `true` if a row was removed.
+pub(crate) fn delete_note(db_path: &PathBuf, note_id: &str) -> Result<bool> {
+    let conn = get_connection(db_path)?;
+    let rows = conn.execute(
+        "DELETE FROM meeting_notes WHERE id = ?1",
+        params![note_id],
+    )?;
+    Ok(rows > 0)
 }

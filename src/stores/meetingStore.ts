@@ -3,6 +3,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AudioSourceType,
+  MeetingNote,
   MeetingSession,
   MeetingStatus,
 } from "@/bindings";
@@ -32,6 +33,9 @@ interface MeetingStore {
   isLoading: boolean;
   error: string | null;
 
+  // Notes for the currently displayed session (recording or completed).
+  notes: MeetingNote[];
+
   // Actions
   startMeeting: (
     audioSource?: AudioSourceType,
@@ -43,6 +47,11 @@ interface MeetingStore {
   refreshStatus: () => Promise<void>;
   fetchSessions: () => Promise<void>;
   clearError: () => void;
+
+  // Notes actions
+  loadNotes: (sessionId: string) => Promise<void>;
+  addNote: (timestampSeconds: number, content: string) => Promise<void>;
+  deleteNote: (noteId: string) => Promise<void>;
 
   // Internal setters
   setSessionStatus: (status: MeetingStatus) => void;
@@ -74,6 +83,7 @@ export const useMeetingStore = create<MeetingStore>()(
     recordingDuration: 0,
     isLoading: false,
     error: null,
+    notes: [],
 
     // Internal timer reference
     _durationInterval: null,
@@ -144,6 +154,8 @@ export const useMeetingStore = create<MeetingStore>()(
           const session = result.data as MeetingSession;
           setCurrentSession(session);
           setSessionStatus("recording");
+          // Fresh session — clear any stale notes from a previous one.
+          set({ notes: [] });
           _startDurationTimer();
         } else {
           setError(result.error);
@@ -300,6 +312,70 @@ export const useMeetingStore = create<MeetingStore>()(
       }
     },
 
+    // --- Notes -----------------------------------------------------------
+
+    // Loads notes for the given session into the store.
+    loadNotes: async (sessionId: string) => {
+      const { setError } = get();
+      try {
+        const result = await commands.listMeetingNotes(sessionId);
+        if (result.status === "ok") {
+          set({ notes: result.data });
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to load notes";
+        setError(errorMessage);
+      }
+    },
+
+    // Adds a note to the current session (no-op if no session).
+    addNote: async (timestampSeconds: number, content: string) => {
+      const { currentSession, setError } = get();
+      if (!currentSession) {
+        setError("No active meeting session for note");
+        return;
+      }
+      const trimmed = content.trim();
+      if (!trimmed) return;
+
+      try {
+        const result = await commands.addMeetingNote(
+          currentSession.id,
+          Math.max(0, Math.floor(timestampSeconds)),
+          trimmed,
+        );
+        if (result.status === "ok") {
+          set((state) => ({ notes: [...state.notes, result.data] }));
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to add note";
+        setError(errorMessage);
+      }
+    },
+
+    // Deletes a note from the current list and the backend.
+    deleteNote: async (noteId: string) => {
+      const { setError } = get();
+      try {
+        const result = await commands.deleteMeetingNote(noteId);
+        if (result.status === "ok") {
+          set((state) => ({ notes: state.notes.filter((n) => n.id !== noteId) }));
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to delete note";
+        setError(errorMessage);
+      }
+    },
+
     // Initialize event listeners for meeting_* events from backend
     initializeEventListeners: async () => {
       const {
@@ -333,6 +409,9 @@ export const useMeetingStore = create<MeetingStore>()(
             const session = event.payload;
             setCurrentSession(session);
             setSessionStatus("recording");
+            // Reset notes for the new session; load any pre-existing ones.
+            set({ notes: [] });
+            get().loadNotes(session.id);
             _startDurationTimer();
             // Sync duration if available
             if (session.duration !== undefined && session.duration !== null) {

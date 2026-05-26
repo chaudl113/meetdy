@@ -24,7 +24,9 @@ use crate::managers::meeting_logger::{
 };
 
 use super::db::init_meeting_database;
-use super::models::{AudioSourceType, MeetingManagerState, MeetingSession, MeetingStatus};
+use super::models::{
+    AudioSourceType, MeetingManagerState, MeetingNote, MeetingSession, MeetingStatus,
+};
 use super::wav_writer::WavWriterHandle;
 
 
@@ -618,6 +620,61 @@ impl MeetingSessionManager {
         }
 
         info!("Deleted meeting session from database: {}", session_id);
+        Ok(())
+    }
+
+    // --- Notes -----------------------------------------------------------
+
+    /// Adds a note to the given meeting session.
+    ///
+    /// Generates a new UUID for the note and records the current timestamp.
+    /// The note is persisted via the meeting_notes table.
+    pub fn add_note(
+        &self,
+        session_id: &str,
+        timestamp_seconds: i64,
+        content: String,
+    ) -> Result<MeetingNote> {
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow::anyhow!("Note content cannot be empty"));
+        }
+
+        // Ensure the parent session exists; surface a clean error otherwise so
+        // the FK constraint failure doesn't bubble up as an opaque SQLite error.
+        if self.get_session(session_id)?.is_none() {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+
+        let note = MeetingNote {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            timestamp_seconds: timestamp_seconds.max(0),
+            content: trimmed.to_string(),
+            author: None,
+            created_at: chrono::Utc::now().timestamp(),
+        };
+
+        super::db::insert_note(&self.db_path, &note)?;
+        info!(
+            "Added note {} to session {} at t={}s",
+            note.id, session_id, note.timestamp_seconds
+        );
+        Ok(note)
+    }
+
+    /// Returns the notes attached to a meeting session, ordered chronologically.
+    pub fn list_notes(&self, session_id: &str) -> Result<Vec<MeetingNote>> {
+        super::db::list_notes_by_session(&self.db_path, session_id)
+    }
+
+    /// Deletes a note by id. Returns Ok(()) if the note existed, error otherwise.
+    pub fn delete_note(&self, note_id: &str) -> Result<()> {
+        let deleted = super::db::delete_note(&self.db_path, note_id)?;
+        if !deleted {
+            return Err(anyhow::anyhow!("Note not found: {}", note_id));
+        }
+        info!("Deleted note {}", note_id);
         Ok(())
     }
 

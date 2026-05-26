@@ -134,7 +134,8 @@
     },
     "notes": {
       "emptyTitle": "Chưa có ghi chú",
-      "emptyMessage": "Thêm ghi chú trong cuộc họp để đánh dấu các thời điểm quan trọng kèm dấu thời gian."
+      "emptyMessage": "Thêm ghi chú trong cuộc họp để đánh dấu các thời điểm quan trọng kèm dấu thời gian.",
+      "addFirst": "Thêm ghi chú đầu tiên"
     },
     "audioStats": {
       "title": "Thông số âm thanh",
@@ -173,7 +174,8 @@
     "quickNotes": {
       "title": "Ghi chú nhanh",
       "add": "Thêm",
-      "empty": "Chưa có ghi chú nhanh nào."
+      "empty": "Chưa có ghi chú nhanh nào.",
+      "delete": "Xoá ghi chú"
     },
     "bottom": {
       "microphone": "Micro",
@@ -186,6 +188,15 @@
     },
     "footer": {
       "saveTo": "Bản ghi sẽ được lưu tại"
+    },
+    "addNoteModal": {
+      "title": "Thêm ghi chú",
+      "atTime": "Tại",
+      "placeholder": "Ghi lại khoảnh khắc: quyết định, đầu việc, ý tưởng…",
+      "hint": "⌘/Ctrl + Enter để lưu",
+      "cancel": "Huỷ",
+      "save": "Lưu ghi chú",
+      "close": "Đóng"
     }
   },
   "models": {

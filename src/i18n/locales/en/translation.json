@@ -133,7 +133,8 @@
     },
     "notes": {
       "emptyTitle": "No notes yet",
-      "emptyMessage": "Add notes during the meeting to capture important moments with timestamps."
+      "emptyMessage": "Add notes during the meeting to capture important moments with timestamps.",
+      "addFirst": "Add first note"
     },
     "audioStats": {
       "title": "Audio Stats",
@@ -172,7 +173,8 @@
     "quickNotes": {
       "title": "Quick Notes",
       "add": "Add",
-      "empty": "No quick notes yet."
+      "empty": "No quick notes yet.",
+      "delete": "Delete note"
     },
     "bottom": {
       "microphone": "Microphone",
@@ -185,6 +187,15 @@
     },
     "footer": {
       "saveTo": "Recording will be saved to"
+    },
+    "addNoteModal": {
+      "title": "Add Note",
+      "atTime": "At",
+      "placeholder": "Capture the moment: a decision, action item, or thought…",
+      "hint": "⌘/Ctrl + Enter to save",
+      "cancel": "Cancel",
+      "save": "Save Note",
+      "close": "Close"
     }
   },
   "models": {

@@ -1,5 +1,5 @@
 use crate::managers::meeting::{
-    AudioSourceType, MeetingSession, MeetingSessionManager, MeetingStatus,
+    AudioSourceType, MeetingNote, MeetingSession, MeetingSessionManager, MeetingStatus,
 };
 use crate::settings::get_settings;
 use log::{debug, info, warn};
@@ -840,4 +840,47 @@ pub fn get_meeting_summary(app: AppHandle, session_id: String) -> Result<Option<
         .map_err(|e| format!("Failed to read summary file: {}", e))?;
 
     Ok(Some(content))
+}
+
+// --- Meeting notes commands ------------------------------------------------
+
+/// Adds a timestamped note to an existing meeting session.
+///
+/// The timestamp is given in seconds from the start of the recording and is
+/// stored as-is. Pass `0` for notes captured outside a recording.
+#[tauri::command]
+#[specta::specta]
+pub fn add_meeting_note(
+    app: AppHandle,
+    session_id: String,
+    timestamp_seconds: i64,
+    content: String,
+) -> Result<MeetingNote, String> {
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+    manager
+        .add_note(&session_id, timestamp_seconds, content)
+        .map_err(|e| format!("Failed to add meeting note: {}", e))
+}
+
+/// Lists every note attached to a meeting session, oldest first.
+#[tauri::command]
+#[specta::specta]
+pub fn list_meeting_notes(
+    app: AppHandle,
+    session_id: String,
+) -> Result<Vec<MeetingNote>, String> {
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+    manager
+        .list_notes(&session_id)
+        .map_err(|e| format!("Failed to list meeting notes: {}", e))
+}
+
+/// Deletes a single meeting note by id.
+#[tauri::command]
+#[specta::specta]
+pub fn delete_meeting_note(app: AppHandle, note_id: String) -> Result<(), String> {
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+    manager
+        .delete_note(&note_id)
+        .map_err(|e| format!("Failed to delete meeting note: {}", e))
 }

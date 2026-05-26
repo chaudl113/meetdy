@@ -101,6 +101,30 @@ pub struct MeetingSession {
     pub template_id: Option<String>,
 }
 
+/// A short, timestamped note attached to a meeting session.
+///
+/// Notes are captured during a recording (via the "Add Note" button) or
+/// after the fact in the Notes tab. They are stored in their own table
+/// keyed by `session_id` with `ON DELETE CASCADE` so removing a session
+/// also removes its notes.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct MeetingNote {
+    /// Unique identifier (UUID).
+    pub id: String,
+    /// Session this note belongs to.
+    pub session_id: String,
+    /// Offset from the start of the recording, in seconds.
+    /// May be `0` for notes added before recording starts or after it stops.
+    pub timestamp_seconds: i64,
+    /// Free-form note content (plain text, may contain newlines).
+    pub content: String,
+    /// Optional author label. Reserved for future multi-user support;
+    /// currently always `None` from the UI.
+    pub author: Option<String>,
+    /// Unix timestamp (seconds) when the note was created.
+    pub created_at: i64,
+}
+
 impl MeetingSession {
     /// Creates a new meeting session with a unique ID and default title.
     ///

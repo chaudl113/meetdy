@@ -842,6 +842,39 @@ async getMeetingSummary(sessionId: string) : Promise<Result<string | null, strin
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Adds a timestamped note to an existing meeting session.
+ */
+async addMeetingNote(sessionId: string, timestampSeconds: number, content: string) : Promise<Result<MeetingNote, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_meeting_note", { sessionId, timestampSeconds, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Lists every note attached to a meeting session, oldest first.
+ */
+async listMeetingNotes(sessionId: string) : Promise<Result<MeetingNote[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_meeting_notes", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Deletes a single meeting note by id.
+ */
+async deleteMeetingNote(noteId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_meeting_note", { noteId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listMeetingTemplates() : Promise<Result<MeetingTemplate[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_meeting_templates") };
@@ -1056,6 +1089,17 @@ summary_path: string | null;
  * Template ID if this meeting was created from a template
  */
 template_id?: string | null }
+/**
+ * A short, timestamped note attached to a meeting session.
+ */
+export type MeetingNote = {
+    id: string;
+    session_id: string;
+    timestamp_seconds: number;
+    content: string;
+    author: string | null;
+    created_at: number;
+}
 /**
  * Represents the lifecycle status of a meeting session.
  * 
