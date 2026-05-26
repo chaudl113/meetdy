@@ -94,9 +94,10 @@ function App() {
    */
   const handleSectionChange = useCallback(
     async (newSection: SidebarSection) => {
-      const isEnteringMeeting = newSection === "meeting";
-      const isLeavingMeeting =
-        currentSection === "meeting" && newSection !== "meeting";
+      const wasInMeeting = currentSection === "meeting";
+      const willBeInMeeting = newSection === "meeting";
+      const isEnteringMeeting = willBeInMeeting && !wasInMeeting;
+      const isLeavingMeeting = wasInMeeting && !willBeInMeeting;
       const isMeetingRecording = sessionStatus === "recording";
 
       // Case 1: Switching TO meeting mode

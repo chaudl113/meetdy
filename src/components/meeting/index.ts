@@ -5,6 +5,8 @@
  */
 
 export { MeetingMode } from "./MeetingMode";
+export { RecordingView } from "./RecordingView";
+export { StartMeeting } from "./StartMeeting";
 export { MeetingControls } from "./MeetingControls";
 export { MeetingDetailView } from "./MeetingDetailView";
 export { MeetingHistory } from "./MeetingHistory";

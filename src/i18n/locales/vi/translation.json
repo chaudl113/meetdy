@@ -8,6 +8,8 @@
   },
   "sidebar": {
     "general": "Chung",
+    "startMeeting": "Bắt đầu họp",
+    "newBadge": "Mới",
     "meeting": "Cuộc họp",
     "models": "Mô hình",
     "advanced": "Nâng cao",
@@ -15,6 +17,176 @@
     "history": "Lịch sử",
     "debug": "Gỡ lỗi",
     "about": "Giới thiệu"
+  },
+  "startMeeting": {
+    "title": "Bắt đầu họp",
+    "subtitle": "Ghi âm cuộc họp mới và nhận bản ghi cùng phân tích bằng AI.",
+    "section": {
+      "source": "Nguồn ghi âm",
+      "settings": "Thiết lập ghi âm",
+      "info": "Thông tin cuộc họp",
+      "generated": "Những gì sẽ được tạo?"
+    },
+    "sourceHint": "Chọn cách bạn muốn ghi âm cuộc họp.",
+    "source": {
+      "systemAudio": {
+        "label": "Âm thanh hệ thống",
+        "description": "Ghi âm thanh hệ thống và mọi ứng dụng."
+      },
+      "microphone": {
+        "label": "Micro",
+        "description": "Chỉ ghi âm từ micro của bạn."
+      },
+      "mixed": {
+        "label": "Hệ thống + Micro",
+        "description": "Ghi cả âm hệ thống và micro của bạn."
+      }
+    },
+    "recordingQuality": "Chất lượng ghi âm",
+    "quality": {
+      "low": "Thấp",
+      "medium": "Trung bình",
+      "highRecommended": "Cao (Khuyến nghị)"
+    },
+    "language": "Ngôn ngữ",
+    "autoDetect": "Tự động phát hiện",
+    "saveLocation": "Vị trí lưu",
+    "change": "Đổi",
+    "selectFolderTitle": "Chọn thư mục lưu",
+    "autoTranscribe": {
+      "title": "Tự động chuyển văn bản",
+      "description": "Tự động bắt đầu chuyển văn bản sau khi ghi."
+    },
+    "autoSummary": {
+      "title": "Tự động tóm tắt",
+      "description": "Tạo tóm tắt AI khi có bản ghi."
+    },
+    "startRecording": "Bắt đầu ghi",
+    "scheduleMeeting": "Lên lịch họp",
+    "optional": "(Tùy chọn)",
+    "meetingTitle": "Tiêu đề cuộc họp",
+    "meetingTitlePlaceholder": "VD: Họp nhóm hàng tuần",
+    "participants": "Người tham gia",
+    "commaSeparated": "(ngăn cách bằng dấu phẩy)",
+    "participantsPlaceholder": "VD: John, Mary, Alex",
+    "tags": "Thẻ",
+    "tagsPlaceholder": "Thêm thẻ để tổ chức cuộc họp",
+    "generated": {
+      "transcription": {
+        "title": "Bản ghi",
+        "description": "Chuyển giọng nói sang văn bản chính xác"
+      },
+      "summary": {
+        "title": "Tóm tắt AI",
+        "description": "Điểm chính và các hành động"
+      },
+      "actionItems": {
+        "title": "Hành động cần làm",
+        "description": "Trích xuất nhiệm vụ và bước tiếp theo"
+      },
+      "notes": {
+        "title": "Ghi chú cuộc họp",
+        "description": "Ghi chú có cấu trúc kèm dấu thời gian"
+      }
+    },
+    "tips": {
+      "title": "Mẹo",
+      "tip1": "Đóng các ứng dụng không cần thiết để cải thiện chất lượng ghi.",
+      "tip2": "Dùng tai nghe để tránh tiếng vọng âm thanh.",
+      "tip3": "Đảm bảo bạn có đủ dung lượng lưu trữ."
+    }
+  },
+  "recording": {
+    "comingSoon": "Sắp ra mắt",
+    "status": {
+      "recording": "Đang ghi",
+      "paused": "Tạm dừng"
+    },
+    "actions": {
+      "pause": "Tạm dừng",
+      "resume": "Tiếp tục",
+      "stop": "Dừng",
+      "addNote": "Thêm ghi chú",
+      "more": "Khác"
+    },
+    "meta": {
+      "untitled": "Cuộc họp chưa đặt tên",
+      "autoLanguage": "Tự động"
+    },
+    "quality": {
+      "low": "Thấp",
+      "medium": "Trung bình",
+      "high": "Cao"
+    },
+    "tabs": {
+      "transcript": "Phụ đề trực tiếp",
+      "summary": "Tóm tắt AI",
+      "notes": "Ghi chú",
+      "liveBadge": "Trực tiếp"
+    },
+    "transcript": {
+      "emptyTitle": "Phụ đề trực tiếp chưa khả dụng",
+      "emptyMessage": "Phụ đề thời gian thực sẽ hiện ở đây khi được bật. Bản ghi đầy đủ được tạo sau khi dừng."
+    },
+    "summary": {
+      "emptyTitle": "Tóm tắt AI sẽ hiển thị tại đây",
+      "emptyMessage": "Các điểm chính, mục hành động và quyết định sẽ được trích xuất sau khi cuộc họp kết thúc."
+    },
+    "notes": {
+      "emptyTitle": "Chưa có ghi chú",
+      "emptyMessage": "Thêm ghi chú trong cuộc họp để đánh dấu các thời điểm quan trọng kèm dấu thời gian."
+    },
+    "audioStats": {
+      "title": "Thông số âm thanh",
+      "inputLevel": "Mức đầu vào",
+      "quality": "Chất lượng",
+      "noise": "Ồn",
+      "clarity": "Rõ nét",
+      "qualityValue": {
+        "good": "Tốt",
+        "fair": "Trung bình",
+        "poor": "Kém"
+      },
+      "noiseValue": {
+        "low": "Thấp",
+        "medium": "Trung bình",
+        "high": "Cao"
+      },
+      "clarityValue": {
+        "low": "Thấp",
+        "medium": "Trung bình",
+        "high": "Cao"
+      }
+    },
+    "info": {
+      "title": "Thông tin bản ghi",
+      "fileName": "Tên tệp",
+      "fileNamePending": "Đang chờ…",
+      "saveLocation": "Vị trí lưu",
+      "fileSize": "Kích thước tệp",
+      "duration": "Thời lượng",
+      "autoTranscribe": "Tự động chuyển thoại",
+      "autoSummary": "Tự động tóm tắt",
+      "on": "Bật",
+      "off": "Tắt"
+    },
+    "quickNotes": {
+      "title": "Ghi chú nhanh",
+      "add": "Thêm",
+      "empty": "Chưa có ghi chú nhanh nào."
+    },
+    "bottom": {
+      "microphone": "Micro",
+      "systemAudio": "Âm thanh hệ thống",
+      "noiseCancellation": "Khử ồn",
+      "settings": "Cài đặt",
+      "endMeeting": "Kết thúc",
+      "on": "Bật",
+      "off": "Tắt"
+    },
+    "footer": {
+      "saveTo": "Bản ghi sẽ được lưu tại"
+    }
   },
   "models": {
     "installedTitle": "Mô hình đã cài",

@@ -5,13 +5,14 @@ import {
   FlaskConical,
   History,
   Info,
-  Mic,
+  Settings,
   Sparkles,
   Video,
   Boxes,
 } from "lucide-react";
-import MeetdyTextLogo from "./icons/MeetdyTextLogo";
+import MeetdyIcon from "./icons/MeetdyIcon";
 import { useSettings } from "../hooks/useSettings";
+import { useMeetingStore } from "../stores/meetingStore";
 import {
   GeneralSettings,
   AdvancedSettings,
@@ -38,12 +39,13 @@ interface SectionConfig {
   icon: React.ComponentType<IconProps>;
   component: React.ComponentType;
   enabled: (settings: any) => boolean;
+  badge?: "new" | "count";
 }
 
 export const SECTIONS_CONFIG = {
   general: {
     labelKey: "sidebar.general",
-    icon: Mic,
+    icon: Settings,
     component: GeneralSettings,
     enabled: () => true,
   },
@@ -52,6 +54,7 @@ export const SECTIONS_CONFIG = {
     icon: Video,
     component: MeetingMode,
     enabled: () => true,
+    badge: "new",
   },
   models: {
     labelKey: "sidebar.models",
@@ -69,13 +72,14 @@ export const SECTIONS_CONFIG = {
     labelKey: "sidebar.postProcessing",
     icon: Sparkles,
     component: PostProcessingSettings,
-    enabled: () => true, // Always show for meeting summary feature
+    enabled: () => true,
   },
-  history: {
+  recordings: {
     labelKey: "sidebar.history",
     icon: History,
     component: HistorySettings,
     enabled: () => true,
+    badge: "count",
   },
   debug: {
     labelKey: "sidebar.debug",
@@ -102,41 +106,81 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t } = useTranslation();
   const { settings } = useSettings();
+  const { sessions } = useMeetingStore();
 
   const availableSections = Object.entries(SECTIONS_CONFIG)
     .filter(([_, config]) => config.enabled(settings))
     .map(([id, config]) => ({ id: id as SidebarSection, ...config }));
 
-
+  const historyCount = sessions?.length ?? 0;
 
   return (
-    <div className="flex flex-col w-40 h-full border-r border-mid-gray/20 items-center px-2">
-      <MeetdyTextLogo width={120} className="m-4" />
-      <div className="flex flex-col w-full items-center gap-1 pt-2 border-t border-mid-gray/20">
+    <div className="flex flex-col w-56 h-full border-r border-mid-gray/20 bg-background">
+      {/* Header: logo + app name + version + pro badge */}
+      <div className="flex items-center gap-3 px-4 py-4">
+        <div className="w-12 h-12 rounded-xl bg-logo-primary/15 flex items-center justify-center shrink-0">
+          <MeetdyIcon width={28} height={28} />
+        </div>
+        <div className="flex flex-col min-w-0">
+          <span className="text-base font-semibold leading-tight truncate">
+            {"Meetdy"}
+          </span>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-xs text-text/60">v0.7.0</span>
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-logo-primary/15 text-logo-primary">
+              {"Pro"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Menu items */}
+      <nav className="flex-1 flex flex-col gap-1 px-2 overflow-y-auto">
         {availableSections.map((section) => {
           const Icon = section.icon;
           const isActive = activeSection === section.id;
+          const badge = "badge" in section ? section.badge : undefined;
+          const showCountBadge = badge === "count" && historyCount > 0;
+          const showNewBadge = badge === "new";
 
           return (
-            <div
+            <button
               key={section.id}
-              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors ${isActive
-                  ? "bg-logo-primary/80"
-                  : "hover:bg-mid-gray/20 hover:opacity-100 opacity-85"
-                }`}
+              type="button"
               onClick={() => onSectionChange(section.id)}
+              className={`flex items-center gap-3 w-full px-2.5 py-2 rounded-lg cursor-pointer transition-colors text-left ${
+                isActive
+                  ? "bg-logo-primary/15 text-logo-primary"
+                  : "text-text/80 hover:bg-mid-gray/10"
+              }`}
             >
-              <Icon width={24} height={24} className="shrink-0" />
-              <p
-                className="text-sm font-medium truncate"
+              <span
+                className={`flex items-center justify-center w-7 h-7 rounded-md shrink-0 ${
+                  isActive ? "text-logo-primary" : "text-text/70"
+                }`}
+              >
+                <Icon width={18} height={18} />
+              </span>
+              <span
+                className="flex-1 text-sm font-medium truncate"
                 title={t(section.labelKey)}
               >
                 {t(section.labelKey)}
-              </p>
-            </div>
+              </span>
+              {showNewBadge && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-logo-primary/15 text-logo-primary">
+                  {t("sidebar.newBadge")}
+                </span>
+              )}
+              {showCountBadge && (
+                <span className="text-[10px] font-semibold min-w-[20px] h-5 px-1.5 rounded-full bg-logo-primary/15 text-logo-primary flex items-center justify-center">
+                  {historyCount}
+                </span>
+              )}
+            </button>
           );
         })}
-      </div>
+      </nav>
     </div>
   );
 };

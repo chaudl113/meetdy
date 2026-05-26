@@ -7,12 +7,184 @@
   },
   "sidebar": {
     "general": "Ogólne",
+    "startMeeting": "Rozpocznij spotkanie",
+    "newBadge": "Nowe",
     "meeting": "Spotkanie",
     "advanced": "Zaawansowane",
     "postProcessing": "Postproces",
     "history": "Historia",
     "debug": "Debugowanie",
     "about": "O programie"
+  },
+  "startMeeting": {
+    "title": "Start Meeting",
+    "subtitle": "Record a new meeting and get AI-powered transcription and insights.",
+    "section": {
+      "source": "Meeting Source",
+      "settings": "Recording Settings",
+      "info": "Meeting Info",
+      "generated": "What will be generated?"
+    },
+    "sourceHint": "Choose how you want to record your meeting.",
+    "source": {
+      "systemAudio": {
+        "label": "System Audio",
+        "description": "Record system sound and all application audio."
+      },
+      "microphone": {
+        "label": "Microphone",
+        "description": "Record from your microphone only."
+      },
+      "mixed": {
+        "label": "System Audio + Mic",
+        "description": "Record both system audio and your microphone."
+      }
+    },
+    "recordingQuality": "Recording Quality",
+    "quality": {
+      "low": "Low",
+      "medium": "Medium",
+      "highRecommended": "High (Recommended)"
+    },
+    "language": "Language",
+    "autoDetect": "Auto Detect",
+    "saveLocation": "Save Location",
+    "change": "Change",
+    "selectFolderTitle": "Wybierz folder zapisu",
+    "autoTranscribe": {
+      "title": "Auto Transcribe",
+      "description": "Start transcription automatically after recording."
+    },
+    "autoSummary": {
+      "title": "Auto Summary",
+      "description": "Generate AI summary when transcription is ready."
+    },
+    "startRecording": "Start Recording",
+    "scheduleMeeting": "Schedule Meeting",
+    "optional": "(Optional)",
+    "meetingTitle": "Meeting Title",
+    "meetingTitlePlaceholder": "e.g. Weekly Team Sync",
+    "participants": "Participants",
+    "commaSeparated": "(comma separated)",
+    "participantsPlaceholder": "e.g. John, Mary, Alex",
+    "tags": "Tags",
+    "tagsPlaceholder": "Add tags to organize your meeting",
+    "generated": {
+      "transcription": {
+        "title": "Transcription",
+        "description": "Accurate speech-to-text transcription"
+      },
+      "summary": {
+        "title": "AI Summary",
+        "description": "Key points and action items"
+      },
+      "actionItems": {
+        "title": "Action Items",
+        "description": "Tasks and next steps extracted"
+      },
+      "notes": {
+        "title": "Meeting Notes",
+        "description": "Structured notes with timestamps"
+      }
+    },
+    "tips": {
+      "title": "Tips",
+      "tip1": "Close unnecessary applications to improve recording quality.",
+      "tip2": "Use headphones to avoid audio echo.",
+      "tip3": "Ensure you have enough storage space."
+    }
+  },
+  "recording": {
+    "comingSoon": "Coming soon",
+    "status": {
+      "recording": "Recording",
+      "paused": "Paused"
+    },
+    "actions": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "stop": "Stop",
+      "addNote": "Add Note",
+      "more": "More"
+    },
+    "meta": {
+      "untitled": "Untitled Meeting",
+      "autoLanguage": "Auto"
+    },
+    "quality": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "tabs": {
+      "transcript": "Live Transcript",
+      "summary": "AI Summary",
+      "notes": "Notes",
+      "liveBadge": "Live"
+    },
+    "transcript": {
+      "emptyTitle": "Live transcript not available yet",
+      "emptyMessage": "Real-time transcription will appear here once enabled. Final transcript is generated after the recording stops."
+    },
+    "summary": {
+      "emptyTitle": "AI Summary will appear here",
+      "emptyMessage": "Key points, action items and decisions are extracted from the recording after it ends."
+    },
+    "notes": {
+      "emptyTitle": "No notes yet",
+      "emptyMessage": "Add notes during the meeting to capture important moments with timestamps."
+    },
+    "audioStats": {
+      "title": "Audio Stats",
+      "inputLevel": "Input Level",
+      "quality": "Quality",
+      "noise": "Noise",
+      "clarity": "Clarity",
+      "qualityValue": {
+        "good": "Good",
+        "fair": "Fair",
+        "poor": "Poor"
+      },
+      "noiseValue": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "clarityValue": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      }
+    },
+    "info": {
+      "title": "Recording Info",
+      "fileName": "File Name",
+      "fileNamePending": "Pending…",
+      "saveLocation": "Save Location",
+      "fileSize": "File Size",
+      "duration": "Duration",
+      "autoTranscribe": "Auto Transcribe",
+      "autoSummary": "Auto Summary",
+      "on": "On",
+      "off": "Off"
+    },
+    "quickNotes": {
+      "title": "Quick Notes",
+      "add": "Add",
+      "empty": "No quick notes yet."
+    },
+    "bottom": {
+      "microphone": "Microphone",
+      "systemAudio": "System Audio",
+      "noiseCancellation": "Noise Cancellation",
+      "settings": "Settings",
+      "endMeeting": "End Meeting",
+      "on": "On",
+      "off": "Off"
+    },
+    "footer": {
+      "saveTo": "Recording will be saved to"
+    }
   },
   "onboarding": {
     "subtitle": "Aby rozpocząć, wybierz model transkrypcji",
