@@ -153,20 +153,42 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                 </div>
               </SettingContainer>
 
-              <SettingContainer
-                title=""
-                description=""
-                layout="stacked"
-                grouped={true}
-              >
-                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-                  <p className="text-sm text-green-400">
-                    ✨ {t("settings.postProcessing.api.freeProvider.notice", {
-                      defaultValue: "Free — no API key needed. Make sure the service is running locally.",
-                    })}
-                  </p>
-                </div>
-              </SettingContainer>
+              {state.isCustomProvider ? (
+                <SettingContainer
+                  title={t("settings.postProcessing.api.apiKey.title")}
+                  description={t("settings.postProcessing.api.apiKey.description")}
+                  descriptionMode="tooltip"
+                  layout="horizontal"
+                  grouped={true}
+                >
+                  <div className="flex items-center gap-2">
+                    <ApiKeyField
+                      value={state.apiKey}
+                      onBlur={state.handleApiKeyChange}
+                      placeholder={t(
+                        "settings.postProcessing.api.apiKey.placeholder",
+                      )}
+                      disabled={state.isApiKeyUpdating}
+                      className="min-w-[320px]"
+                    />
+                  </div>
+                </SettingContainer>
+              ) : (
+                <SettingContainer
+                  title=""
+                  description=""
+                  layout="stacked"
+                  grouped={true}
+                >
+                  <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                    <p className="text-sm text-green-400">
+                      ✨ {t("settings.postProcessing.api.freeProvider.notice", {
+                        defaultValue: "Free — no API key needed. Make sure the service is running locally.",
+                      })}
+                    </p>
+                  </div>
+                </SettingContainer>
+              )}
             </>
           )}
 

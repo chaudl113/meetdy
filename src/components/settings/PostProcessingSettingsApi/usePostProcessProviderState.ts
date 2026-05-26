@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSettings } from "../../../hooks/useSettings";
 import { useSettingsStore } from "../../../stores/settingsStore";
 import type { PostProcessProvider } from "@/bindings";
@@ -179,7 +179,28 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   const isCustomProvider = selectedProvider?.id === "custom";
   const isLocalProvider = selectedProvider?.requires_api_key === false;
 
-  // No automatic fetching - user must click refresh button
+  // Auto-fetch models when provider, base URL, or API key changes
+  const autoFetchKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!enabled || !selectedProvider || isAppleProvider) return;
+
+    // For providers that require an API key, only fetch when key is present
+    if (selectedProvider.requires_api_key && !apiKey) return;
+
+    const key = `${selectedProviderId}|${baseUrl}|${apiKey}`;
+    if (autoFetchKeyRef.current === key) return;
+    autoFetchKeyRef.current = key;
+
+    void fetchPostProcessModels(selectedProviderId);
+  }, [
+    enabled,
+    selectedProvider,
+    selectedProviderId,
+    baseUrl,
+    apiKey,
+    isAppleProvider,
+    fetchPostProcessModels,
+  ]);
 
   return {
     enabled,
