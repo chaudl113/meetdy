@@ -112,3 +112,50 @@ Settings are stored using Tauri's store plugin with reactive updates:
 ### Single Instance Architecture
 
 The app enforces single instance behavior - launching when already running brings the settings window to front rather than creating a new process.
+
+## Multi-Agent Swarm Protocol
+
+This project uses a swarm orchestration model. The default agent is `orchestrator` (see `.opencode/agent/orchestrator.md`). Non-trivial work MUST be delegated to specialized subagents — never implemented directly by the orchestrator.
+
+**Available subagents:** `architect`, `backend`, `frontend`, `database`, `security`, `devops`, `qa`, `docs`, `reviewer`, `git`.
+
+**Mandatory workflow for any multi-step task:**
+
+1. **Understand** — extract goals, requirements, constraints, dependencies, risks.
+2. **Plan** — build a task graph with explicit dependencies and owner agents.
+3. **Delegate in waves** — run independent tasks in parallel; never start a blocked task.
+4. **Minimize context** — each subagent receives only its assigned files and required context.
+5. **Verify** — confirm files changed, tests run, builds pass. Never trust claims.
+6. **Review** — `reviewer` agent must be different from the author. Reviewer cannot approve own work.
+7. **Recover** — on failure: retry once, then spawn a debug/root-cause agent before continuing.
+8. **Report** — produce a final report (Goal / Task Graph / Agents Used / Waves / Files Changed / Tests / Risks / Next Steps).
+
+**Agent boundaries:**
+
+- `architect`, `security`, `reviewer`, `git` are read-only for source code.
+- `backend` edits only `src-tauri/` and server-side TS.
+- `frontend` edits only `src/` UI files.
+- `database` owns migrations and schema.
+- `devops` owns `.github/`, build scripts, `tauri.conf.json`, infra.
+- `qa` edits only test files.
+- `docs` edits only `*.md` and docstrings.
+
+Cross-boundary edits require explicit orchestrator approval.
+Cross-boundary edits require explicit orchestrator approval.
+
+<!-- HARNESS:BEGIN -->
+## Harness
+
+This repo uses Harness. Before work, read:
+
+- `README.md`
+- `docs/HARNESS.md`
+- `docs/FEATURE_INTAKE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CONTEXT_RULES.md`
+- `scripts/bin/harness-cli query matrix` on macOS/Linux, or `.\scripts\bin\harness-cli.exe query matrix` on Windows
+
+Use the Rust Harness CLI at `scripts/bin/harness-cli` on macOS/Linux or
+`scripts/bin/harness-cli.exe` on Windows as the main operational tool.
+<!-- HARNESS:END -->
+
