@@ -1,4 +1,5 @@
 import React from "react";
+import { withTranslation, type WithTranslation } from "react-i18next";
 
 interface ErrorBoundaryState {
     hasError: boolean;
@@ -7,13 +8,14 @@ interface ErrorBoundaryState {
 
 interface ErrorBoundaryProps {
     children: React.ReactNode;
+    t: WithTranslation["t"];
 }
 
 /**
  * Global error boundary to catch unhandled React rendering errors.
  * Prevents the entire app from showing a white screen on crash.
  */
-export class ErrorBoundary extends React.Component<
+export class ErrorBoundaryInner extends React.Component<
     ErrorBoundaryProps,
     ErrorBoundaryState
 > {
@@ -52,7 +54,7 @@ export class ErrorBoundary extends React.Component<
                         textAlign: "center",
                     }}
                 >
-                    <div style={{ fontSize: "48px", marginBottom: "1rem" }}>⚠️</div>
+                    <div style={{ fontSize: "48px", marginBottom: "1rem" }}>{this.props.t("errorBoundary.icon")}</div>
                     <h1
                         style={{
                             fontSize: "1.5rem",
@@ -60,7 +62,7 @@ export class ErrorBoundary extends React.Component<
                             marginBottom: "0.5rem",
                         }}
                     >
-                        Something went wrong
+                        {this.props.t("errorBoundary.title")}
                     </h1>
                     <p
                         style={{
@@ -70,8 +72,7 @@ export class ErrorBoundary extends React.Component<
                             maxWidth: "400px",
                         }}
                     >
-                        The application encountered an unexpected error. You can try
-                        reloading.
+                        {this.props.t("errorBoundary.description")}
                     </p>
                     {this.state.error && (
                         <pre
@@ -110,7 +111,7 @@ export class ErrorBoundary extends React.Component<
                             (e.currentTarget.style.backgroundColor = "#4a4aff")
                         }
                     >
-                        Try Again
+                        {this.props.t("errorBoundary.tryAgain")}
                     </button>
                 </div>
             );
@@ -119,3 +120,6 @@ export class ErrorBoundary extends React.Component<
         return this.props.children;
     }
 }
+
+const ErrorBoundary = withTranslation()(ErrorBoundaryInner);
+export default ErrorBoundary;

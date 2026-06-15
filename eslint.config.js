@@ -1,4 +1,5 @@
 import i18next from "eslint-plugin-i18next";
+import reactHooks from "eslint-plugin-react-hooks";
 import tsParser from "@typescript-eslint/parser";
 
 export default [
@@ -14,8 +15,12 @@ export default [
     },
     plugins: {
       i18next,
+      "react-hooks": reactHooks,
     },
     rules: {
+      // React hooks rules
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       // Catch text in JSX that should be translated
       "i18next/no-literal-string": [
         "error",

@@ -40,6 +40,7 @@ const ChatgptPlusLoginControl: React.FC<ChatgptPlusLoginControlProps> = ({
 }) => {
   const [isOpening, setIsOpening] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const { t } = useTranslation();
 
   // Listen for the access token emitted by the injected login script.
   useEffect(() => {
@@ -76,7 +77,7 @@ const ChatgptPlusLoginControl: React.FC<ChatgptPlusLoginControlProps> = ({
           {hasToken ? "Re-login with ChatGPT" : "Login with ChatGPT"}
         </Button>
         {hasToken && (
-          <span className="text-xs text-green-400">Session token saved</span>
+          <span className="text-xs text-green-400">{t("postProcessing.sessionTokenSaved")}</span>
         )}
       </div>
       {status && <p className="text-xs text-mid-gray">{status}</p>}
@@ -507,12 +508,13 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                 )}
                 disabled={!!appliedTemplate}
               />
-              <p
-                className="text-xs text-mid-gray/70"
-                dangerouslySetInnerHTML={{
-                  __html: t("settings.postProcessing.prompts.promptTip"),
-                }}
-              />
+              <p className="text-xs text-mid-gray/70">
+                {t("settings.postProcessing.prompts.promptTipPrefix")}{" "}
+                <code className="px-1 py-0.5 bg-primary/10 text-primary rounded text-sm font-mono">
+                  {"${output}"}
+                </code>{" "}
+                {t("settings.postProcessing.prompts.promptTipSuffix")}
+              </p>
             </div>
 
             {appliedTemplate ? (
@@ -606,12 +608,13 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                   "settings.postProcessing.prompts.promptInstructionsPlaceholder",
                 )}
               />
-              <p
-                className="text-xs text-mid-gray/70"
-                dangerouslySetInnerHTML={{
-                  __html: t("settings.postProcessing.prompts.promptTip"),
-                }}
-              />
+              <p className="text-xs text-mid-gray/70">
+                {t("settings.postProcessing.prompts.promptTipPrefix")}{" "}
+                <code className="px-1 py-0.5 bg-primary/10 text-primary rounded text-sm font-mono">
+                  {"${output}"}
+                </code>{" "}
+                {t("settings.postProcessing.prompts.promptTipSuffix")}
+              </p>
             </div>
 
             <div className="flex gap-2 pt-2">
