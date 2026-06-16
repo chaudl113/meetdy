@@ -79,6 +79,9 @@ pub struct TranscriptionSegment {
     pub end: f32,
     /// The transcribed text for this segment
     pub text: String,
+    /// Speaker attribution injected by the diarization layer (above the engine).
+    /// The engine itself always sets this to None.
+    pub speaker_id: Option<String>,
 }
 
 /// Common interface for speech transcription engines.

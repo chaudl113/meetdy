@@ -436,6 +436,8 @@
         "promptInstructions": "Istruzioni del Prompt",
         "promptInstructionsPlaceholder": "Scrivi le istruzioni da eseguire dopo la trascrizione. Esempio: Migliora la grammatica e la chiarezza per il seguente testo: ${output}",
         "promptTip": "Suggerimento: Usa <code>${output}</code> per inserire il testo trascritto nel tuo prompt.",
+        "promptTipPrefix": "Suggerimento: Usa",
+        "promptTipSuffix": "per inserire il testo trascritto nel tuo prompt.",
         "updatePrompt": "Aggiorna Prompt",
         "deletePrompt": "Elimina Prompt",
         "createPrompt": "Crea Prompt",

@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { Play, Square, RotateCcw } from "lucide-react";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { Button } from "../ui/Button";
@@ -27,7 +28,17 @@ export const MeetingControls: React.FC = () => {
     startMeeting,
     stopMeeting,
     retryTranscription,
-  } = useMeetingStore();
+  } = useMeetingStore(
+    useShallow((s) => ({
+      currentSession: s.currentSession,
+      sessionStatus: s.sessionStatus,
+      recordingDuration: s.recordingDuration,
+      isLoading: s.isLoading,
+      startMeeting: s.startMeeting,
+      stopMeeting: s.stopMeeting,
+      retryTranscription: s.retryTranscription,
+    })),
+  );
 
   // Determine button states based on session status
   const isIdle = sessionStatus === "idle";

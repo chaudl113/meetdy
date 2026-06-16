@@ -3,6 +3,11 @@ import { useTranslation } from "react-i18next";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { listen } from "@tauri-apps/api/event";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { ProgressBar } from "../shared";
 import { useSettings } from "../../hooks/useSettings";
 
@@ -68,6 +73,25 @@ const UpdateChecker: React.FC<UpdateCheckerProps> = ({ className = "" }) => {
       if (update) {
         setUpdateAvailable(true);
         setShowUpToDate(false);
+        if (settings?.notify_app_updates) {
+          try {
+            let granted = await isPermissionGranted();
+            if (!granted) {
+              const perm = await requestPermission();
+              granted = perm === "granted";
+            }
+            if (granted) {
+              sendNotification({
+                title: t("footer.updateAvailableShort", "Update available"),
+                body: update.version
+                  ? `Version ${update.version} is ready to install.`
+                  : "A new version is ready to install.",
+              });
+            }
+          } catch (err) {
+            console.warn("update notification failed:", err);
+          }
+        }
       } else {
         setUpdateAvailable(false);
 

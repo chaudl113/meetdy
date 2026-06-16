@@ -296,8 +296,8 @@ async fn send_chatgpt_plus(
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Failed to read stream chunk: {}", e))?;
-        let chunk_str = std::str::from_utf8(&chunk)
-            .map_err(|e| format!("Invalid UTF-8 in stream: {}", e))?;
+        let chunk_str =
+            std::str::from_utf8(&chunk).map_err(|e| format!("Invalid UTF-8 in stream: {}", e))?;
         buffer.push_str(chunk_str);
 
         // SSE events are separated by blank lines.

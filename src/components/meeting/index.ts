@@ -12,5 +12,6 @@ export { MeetingDetailView } from "./MeetingDetailView";
 export { MeetingHistory } from "./MeetingHistory";
 export { MeetingStatusIndicator } from "./MeetingStatusIndicator";
 export { MeetingSummary } from "./MeetingSummary";
+export { MeetingInsightsPanel } from "./MeetingInsightsPanel";
 export { MeetingTitleEditor } from "./MeetingTitleEditor";
 export { MeetingTranscriptDisplay } from "./MeetingTranscriptDisplay";

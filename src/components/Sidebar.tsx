@@ -106,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t } = useTranslation();
   const { settings } = useSettings();
-  const { sessions } = useMeetingStore();
+  const sessions = useMeetingStore((s) => s.sessions);
 
   const availableSections = Object.entries(SECTIONS_CONFIG)
     .filter(([_, config]) => config.enabled(settings))

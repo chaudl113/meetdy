@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Toaster, toast } from "sonner";
 import "./App.css";
 import AccessibilityPermissions from "./components/AccessibilityPermissions";
@@ -25,7 +26,12 @@ function App() {
   // Mode switching stores
   const { currentMode, setCurrentMode, isDictationRecording } =
     useSettingsStore();
-  const { sessionStatus, stopMeeting } = useMeetingStore();
+  const { sessionStatus, stopMeeting } = useMeetingStore(
+    useShallow((s) => ({
+      sessionStatus: s.sessionStatus,
+      stopMeeting: s.stopMeeting,
+    })),
+  );
 
   useEffect(() => {
     checkOnboardingStatus();
@@ -40,6 +46,20 @@ function App() {
     return () => {
       useMeetingStore.getState().cleanupEventListeners();
     };
+  }, []);
+
+  // Cross-component navigation: components can dispatch
+  // `window.dispatchEvent(new CustomEvent("app:navigate", { detail: "general" }))`
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail && detail in SECTIONS_CONFIG) {
+        setCurrentSection(detail as SidebarSection);
+      }
+    };
+    window.addEventListener("app:navigate", handler as EventListener);
+    return () =>
+      window.removeEventListener("app:navigate", handler as EventListener);
   }, []);
 
   // Handle keyboard shortcuts for debug mode toggle
@@ -171,7 +191,7 @@ function App() {
         {/* Scrollable content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto">
-            <div className="flex flex-col items-center p-4 gap-4">
+            <div className="flex flex-col p-4 gap-4 w-full">
               <AccessibilityPermissions />
               {renderSettingsContent(currentSection)}
             </div>

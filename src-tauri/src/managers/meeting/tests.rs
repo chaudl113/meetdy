@@ -1,14 +1,13 @@
-
 #[cfg(test)]
 mod tests {
-    use crate::managers::meeting::*;
     use crate::managers::meeting::db::init_meeting_database;
+    use crate::managers::meeting::*;
     use anyhow::Result;
-    use rusqlite::{Connection, OptionalExtension, params};
+    use rusqlite::{params, Connection, OptionalExtension};
     use std::fs;
     use std::path::PathBuf;
-    use uuid::Uuid;
     use tempfile::tempdir;
+    use uuid::Uuid;
 
     #[test]
     fn test_meeting_status_default() {
@@ -195,6 +194,12 @@ mod tests {
                 audio_source: self.string_to_audio_source(&audio_source_str),
                 summary_path: row.get("summary_path").unwrap_or(None),
                 template_id: row.get("template_id").unwrap_or(None),
+                stt_engine: row
+                    .get("stt_engine")
+                    .unwrap_or_else(|_| "whisper".to_string()),
+                funasr_base_url: row.get("funasr_base_url").unwrap_or(None),
+                funasr_model: row.get("funasr_model").unwrap_or(None),
+                transcription_language: row.get("transcription_language").unwrap_or(None),
             })
         }
 
@@ -244,7 +249,7 @@ mod tests {
             let conn = self.get_connection()?;
             let session = conn
                 .query_row(
-                    "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id, stt_engine, funasr_base_url, funasr_model, transcription_language
                      FROM meeting_sessions WHERE id = ?1",
                     params![session_id],
                     |row| self.row_to_session(row),
@@ -271,7 +276,7 @@ mod tests {
         fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
             let conn = self.get_connection()?;
             let mut stmt = conn.prepare(
-                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source
+                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id, stt_engine, funasr_base_url, funasr_model, transcription_language
                  FROM meeting_sessions ORDER BY created_at DESC",
             )?;
 

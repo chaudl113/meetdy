@@ -8,10 +8,11 @@ import { useSettings } from "../../hooks/useSettings";
 interface MicrophoneSelectorProps {
   descriptionMode?: "inline" | "tooltip";
   grouped?: boolean;
+  icon?: React.ReactNode;
 }
 
 export const MicrophoneSelector: React.FC<MicrophoneSelectorProps> = React.memo(
-  ({ descriptionMode = "tooltip", grouped = false }) => {
+  ({ descriptionMode = "tooltip", grouped = false, icon }) => {
     const { t } = useTranslation();
     const {
       getSetting,
@@ -47,6 +48,7 @@ export const MicrophoneSelector: React.FC<MicrophoneSelectorProps> = React.memo(
         description={t("settings.sound.microphone.description")}
         descriptionMode={descriptionMode}
         grouped={grouped}
+        icon={icon}
       >
         <div className="flex items-center space-x-1">
           <Dropdown

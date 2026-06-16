@@ -145,8 +145,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path $sdkDir | Out-Null
           Add-Content -Path $env:GITHUB_ENV -Value "VULKAN_SDK=$sdkDir"
 
-      - name: Download Vulkan SDK binaries (Windows ARM64)
+      - name: Cache Vulkan SDK binaries (Windows ARM64)
         if: contains(inputs.platform, 'windows') && contains(inputs.target, 'aarch64')
+        id: cache-vulkan-arm64
+        uses: actions/cache@v4
+        with:
+          path: vulkan_sdk_arm.exe
+          key: vulkan-sdk-arm64-1.4.309.0
+
+      - name: Download Vulkan SDK binaries (Windows ARM64)
+        if: contains(inputs.platform, 'windows') && contains(inputs.target, 'aarch64') && steps.cache-vulkan-arm64.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $url = "https://sdk.lunarg.com/sdk/download/1.4.309.0/warm/InstallVulkanARM64-1.4.309.0.exe"
@@ -201,7 +209,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p src-tauri/resources/models
-          curl -L -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
+          # Only download if not already present (committed to repo or cached)
+          if [ ! -f src-tauri/resources/models/silero_vad_v4.onnx ]; then
+            curl -L -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
+          fi
+          # Verify integrity
+          EXPECTED_SHA256="a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28"
+          ACTUAL_SHA256=$(sha256sum src-tauri/resources/models/silero_vad_v4.onnx | awk '{print $1}')
+          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "ERROR: silero_vad_v4.onnx SHA256 mismatch! Expected=$EXPECTED_SHA256, Got=$ACTUAL_SHA256"
+            exit 1
+          fi
+          echo "VAD model integrity verified."
 
       - name: install frontend dependencies
         if: ${{ !(contains(inputs.platform, 'windows') && contains(inputs.target, 'aarch64')) }}

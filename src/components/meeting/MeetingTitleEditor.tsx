@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { Pencil, Check, X } from "lucide-react";
 import { useMeetingStore } from "../../stores/meetingStore";
 
@@ -20,7 +21,13 @@ export const MeetingTitleEditor: React.FC = () => {
   const { t } = useTranslation();
 
   // Connect to meetingStore for state and actions
-  const { currentSession, sessionStatus, updateTitle } = useMeetingStore();
+  const { currentSession, sessionStatus, updateTitle } = useMeetingStore(
+    useShallow((s) => ({
+      currentSession: s.currentSession,
+      sessionStatus: s.sessionStatus,
+      updateTitle: s.updateTitle,
+    })),
+  );
 
   // Local state for editing
   const [isEditing, setIsEditing] = useState(false);

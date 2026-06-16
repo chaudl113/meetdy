@@ -27,7 +27,7 @@ interface SettingsStore {
     key: K,
     value: Settings[K],
   ) => Promise<void>;
-  resetSetting: (key: keyof Settings) => Promise<void>;
+  resetSetting: <K extends keyof Settings>(key: K) => Promise<void>;
   refreshSettings: () => Promise<void>;
   refreshAudioDevices: () => Promise<void>;
   refreshOutputDevices: () => Promise<void>;
@@ -136,6 +136,17 @@ const settingUpdaters: {
     commands.changeAppendTrailingSpaceSetting(value as boolean),
   log_level: (value) => commands.setLogLevel(value as any),
   app_language: (value) => commands.changeAppLanguageSetting(value as string),
+  funasr_base_url: async (value) => {
+    const model =
+      useSettingsStore.getState().settings?.funasr_model ?? "fun-asr-nano";
+    return commands.updateFunasrRuntimeConfig(value as string, model);
+  },
+  funasr_model: async (value) => {
+    const baseUrl =
+      useSettingsStore.getState().settings?.funasr_base_url ??
+      "http://localhost:8000";
+    return commands.updateFunasrRuntimeConfig(baseUrl, value as string);
+  },
 };
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -294,12 +305,12 @@ export const useSettingsStore = create<SettingsStore>()(
     },
 
     // Reset a setting to its default value
-    resetSetting: async (key) => {
+    resetSetting: async <K extends keyof Settings>(key: K) => {
       const { defaultSettings } = get();
       if (defaultSettings) {
-        const defaultValue = defaultSettings[key];
+        const defaultValue: Settings[K] | undefined = defaultSettings[key];
         if (defaultValue !== undefined) {
-          await get().updateSetting(key, defaultValue as any);
+          await get().updateSetting(key, defaultValue);
         }
       }
     },

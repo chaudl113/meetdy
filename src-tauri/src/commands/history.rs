@@ -1,6 +1,28 @@
 use crate::managers::history::{HistoryEntry, HistoryManager};
+use std::path::{Component, Path};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
+
+/// Validates that `file_name` is a plain filename with no path separators or
+/// parent-directory components, preventing path traversal attacks.
+fn validate_filename(file_name: &str) -> Result<(), String> {
+    let path = Path::new(file_name);
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => {
+                return Err(
+                    "Invalid file name: must be a plain filename without path separators"
+                        .to_string(),
+                )
+            }
+        }
+    }
+    if path.components().count() != 1 {
+        return Err("Invalid file name: must be a single filename component".to_string());
+    }
+    Ok(())
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -34,6 +56,7 @@ pub async fn get_audio_file_path(
     history_manager: State<'_, Arc<HistoryManager>>,
     file_name: String,
 ) -> Result<String, String> {
+    validate_filename(&file_name)?;
     let path = history_manager.get_audio_file_path(&file_name);
     path.to_str()
         .ok_or_else(|| "Invalid file path".to_string())

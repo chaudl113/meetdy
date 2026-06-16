@@ -436,6 +436,8 @@
         "promptInstructions": "Instrukcje promptu",
         "promptInstructionsPlaceholder": "Wpisz instrukcje do wykonania po transkrypcji. Przykład: Popraw gramatykę i jasność dla następującego tekstu: ${output}",
         "promptTip": "Wskazówka: użyj <code>${output}</code>, aby wstawić transkrybowany tekst do promptu.",
+        "promptTipPrefix": "Wskazówka: użyj",
+        "promptTipSuffix": ", aby wstawić transkrybowany tekst do promptu.",
         "updatePrompt": "Zaktualizuj prompt",
         "deletePrompt": "Usuń prompt",
         "createPrompt": "Utwórz prompt",

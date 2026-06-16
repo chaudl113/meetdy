@@ -32,6 +32,75 @@ enum LoadedEngine {
     Parakeet(ParakeetEngine),
 }
 
+const TRANSCRIPTION_NOISE_PATTERNS: &[&str] = &[
+    "ghiền mì gõ",
+    "ghien mi go",
+    "hãy subscribe cho kênh",
+    "hay subscribe cho kenh",
+    "đăng ký kênh",
+    "dang ky kenh",
+    "không bỏ lỡ những video",
+    "khong bo lo nhung video",
+    "like và subscribe",
+    "like va subscribe",
+    "nhấn chuông thông báo",
+    "nhan chuong thong bao",
+    "cảm ơn các bạn đã xem",
+    "cam on cac ban da xem",
+    "hẹn gặp lại các bạn ở video",
+    "hen gap lai cac ban o video",
+];
+
+fn is_noise_transcript(text: &str) -> bool {
+    let normalized = text.trim().to_lowercase();
+    normalized.is_empty()
+        || normalized
+            .chars()
+            .all(|c| c.is_ascii_punctuation() || c.is_whitespace())
+        || TRANSCRIPTION_NOISE_PATTERNS
+            .iter()
+            .any(|pattern| normalized.contains(pattern))
+}
+
+fn strip_noise_transcript(text: &str) -> String {
+    text.lines()
+        .filter(|line| !is_noise_transcript(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn normalize_whisper_language(language: &str) -> String {
+    match language {
+        "zh-Hans" | "zh-Hant" => "zh".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn app_language_as_transcription_hint(language: &str) -> Option<String> {
+    let lang = language.split(['-', '_']).next().unwrap_or(language);
+    match lang {
+        // When the UI is Vietnamese, prefer Vietnamese transcription over
+        // Whisper auto-detect. Short chunks can otherwise drift to English
+        // or — worse — Chinese hallucinations.
+        "vi" => Some("vi".to_string()),
+        _ => {
+            // Fallback: if the OS locale is Vietnamese (e.g. user picked
+            // English UI but lives in VN), still hint Vietnamese to keep
+            // short live chunks from drifting.
+            let os_lang = tauri_plugin_os::locale()
+                .and_then(|l| l.split(['-', '_']).next().map(String::from))
+                .unwrap_or_default();
+            if os_lang == "vi" {
+                Some("vi".to_string())
+            } else {
+                None
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct TranscriptionManager {
     engine: Arc<Mutex<Option<LoadedEngine>>>,
@@ -43,6 +112,12 @@ pub struct TranscriptionManager {
     watcher_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     is_loading: Arc<Mutex<bool>>,
     loading_condvar: Arc<Condvar>,
+    is_busy: Arc<AtomicBool>,
+    // Dedicated lightweight engine used for live transcription so it never
+    // shares state or contention with the main (potentially heavy) engine.
+    // Loaded lazily on the first live transcribe call.
+    live_engine: Arc<Mutex<Option<WhisperEngine>>>,
+    live_engine_model_id: Arc<Mutex<Option<String>>>,
 }
 
 impl TranscriptionManager {
@@ -62,6 +137,9 @@ impl TranscriptionManager {
             watcher_handle: Arc::new(Mutex::new(None)),
             is_loading: Arc::new(Mutex::new(false)),
             loading_condvar: Arc::new(Condvar::new()),
+            is_busy: Arc::new(AtomicBool::new(false)),
+            live_engine: Arc::new(Mutex::new(None)),
+            live_engine_model_id: Arc::new(Mutex::new(None)),
         };
 
         // Start the idle watcher
@@ -121,7 +199,10 @@ impl TranscriptionManager {
                 }
                 debug!("Idle watcher thread shutting down gracefully");
             });
-            *manager.watcher_handle.lock().unwrap_or_else(|p| p.into_inner()) = Some(handle);
+            *manager
+                .watcher_handle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner()) = Some(handle);
         }
 
         Ok(manager)
@@ -147,7 +228,10 @@ impl TranscriptionManager {
             *engine = None; // Drop the engine to free memory
         }
         {
-            let mut current_model = self.current_model_id.lock().unwrap_or_else(|p| p.into_inner());
+            let mut current_model = self
+                .current_model_id
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             *current_model = None;
         }
 
@@ -266,7 +350,10 @@ impl TranscriptionManager {
             *engine = Some(loaded_engine);
         }
         {
-            let mut current_model = self.current_model_id.lock().unwrap_or_else(|p| p.into_inner());
+            let mut current_model = self
+                .current_model_id
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             *current_model = Some(model_id.to_string());
         }
 
@@ -304,18 +391,179 @@ impl TranscriptionManager {
             if let Err(e) = self_clone.load_model(&settings.selected_model) {
                 error!("Failed to load model: {}", e);
             }
-            let mut is_loading = self_clone.is_loading.lock().unwrap_or_else(|p| p.into_inner());
+            let mut is_loading = self_clone
+                .is_loading
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             *is_loading = false;
             self_clone.loading_condvar.notify_all();
         });
     }
 
+    /// Returns true if a model is currently being loaded.
+    pub fn is_model_loading(&self) -> bool {
+        let loading = self.is_loading.lock().unwrap_or_else(|p| p.into_inner());
+        *loading
+    }
+
     pub fn get_current_model(&self) -> Option<String> {
-        let current_model = self.current_model_id.lock().unwrap_or_else(|p| p.into_inner());
+        let current_model = self
+            .current_model_id
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         current_model.clone()
     }
 
     pub fn transcribe(&self, audio: Vec<f32>) -> Result<String> {
+        // Block until any in-flight transcription is done so calls remain
+        // sequential per engine.
+        while self
+            .is_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let result = self.transcribe_locked(audio);
+        self.is_busy.store(false, Ordering::Release);
+        result
+    }
+
+    /// Transcribe a chunk using the dedicated lightweight live engine.
+    /// Falls back to the main `transcribe()` if the live model isn't
+    /// available (e.g. Whisper Small not downloaded).
+    pub fn transcribe_live(&self, audio: Vec<f32>) -> Result<String> {
+        if audio.is_empty() {
+            return Ok(String::new());
+        }
+
+        // Pick the live model. Prefer "small" since it's small + fast.
+        // If not downloaded, fall back to the main engine.
+        let live_model_id = self.pick_live_model_id();
+        let Some(live_model_id) = live_model_id else {
+            warn!(
+                "transcribe_live: no live model available (Whisper Small/Medium-Q5/Turbo-Q5 \
+                 not downloaded). Falling back to main engine — live transcription will be SLOW."
+            );
+            return self.transcribe(audio);
+        };
+        info!(
+            "transcribe_live: using model='{}' for {} samples ({:.1}s)",
+            live_model_id,
+            audio.len(),
+            audio.len() as f32 / 16_000.0
+        );
+
+        // Lazy-load / reload the live engine if model changed.
+        self.ensure_live_engine_loaded(&live_model_id)?;
+
+        let settings = get_settings(&self.app_handle);
+        let whisper_language = if settings.selected_language == "auto" {
+            app_language_as_transcription_hint(&settings.app_language)
+        } else {
+            Some(normalize_whisper_language(&settings.selected_language))
+        };
+        let is_vietnamese = whisper_language.as_deref() == Some("vi");
+        let initial_prompt = if is_vietnamese {
+            Some(
+                "Đây là cuộc hội thoại tiếng Việt. Chép lại nguyên văn tiếng Việt, không dịch sang tiếng Anh."
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let params = WhisperInferenceParams {
+            language: whisper_language,
+            translate: settings.translate_to_english && !is_vietnamese,
+            initial_prompt,
+            ..Default::default()
+        };
+
+        let st = std::time::Instant::now();
+        let mut guard = self.live_engine.lock().unwrap_or_else(|p| p.into_inner());
+        let engine = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Live engine not loaded"))?;
+        let result = engine
+            .transcribe_samples(audio, Some(params))
+            .map_err(|e| anyhow::anyhow!("Live transcription failed: {}", e))?;
+        let text = result.text.trim().to_string();
+        info!(
+            "Live transcription completed in {}ms ({} chars)",
+            st.elapsed().as_millis(),
+            text.len()
+        );
+        let corrected = if settings.custom_words.is_empty() {
+            text
+        } else {
+            apply_custom_words(
+                &text,
+                &settings.custom_words,
+                settings.word_correction_threshold,
+            )
+        };
+        Ok(corrected)
+    }
+
+    fn pick_live_model_id(&self) -> Option<String> {
+        // Prefer a small fast Whisper model. Use whichever the user has
+        // downloaded, ordered by preference.
+        for candidate in ["small", "medium-q5", "turbo-q5"] {
+            match self.model_manager.get_model_info(candidate) {
+                Some(info) => {
+                    info!(
+                        "pick_live_model_id: '{}' is_downloaded={} is_downloading={}",
+                        candidate, info.is_downloaded, info.is_downloading
+                    );
+                    if info.is_downloaded {
+                        return Some(candidate.to_string());
+                    }
+                }
+                None => {
+                    info!("pick_live_model_id: '{}' not in registry", candidate);
+                }
+            }
+        }
+        None
+    }
+
+    fn ensure_live_engine_loaded(&self, model_id: &str) -> Result<()> {
+        let mut current = self
+            .live_engine_model_id
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if current.as_deref() == Some(model_id) {
+            debug!("ensure_live_engine_loaded: '{}' already loaded", model_id);
+            return Ok(());
+        }
+
+        info!(
+            "ensure_live_engine_loaded: loading '{}' (previous='{:?}')",
+            model_id, *current
+        );
+        let model_path = self.model_manager.get_model_path(model_id)?;
+        info!(
+            "ensure_live_engine_loaded: model path resolved to {:?}",
+            model_path
+        );
+        let load_start = std::time::Instant::now();
+        let mut engine = WhisperEngine::new();
+        engine
+            .load_model(&model_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load live model {}: {}", model_id, e))?;
+
+        let mut guard = self.live_engine.lock().unwrap_or_else(|p| p.into_inner());
+        *guard = Some(engine);
+        *current = Some(model_id.to_string());
+        info!(
+            "Live engine loaded: {} (took {}ms)",
+            model_id,
+            load_start.elapsed().as_millis()
+        );
+        Ok(())
+    }
+
+    fn transcribe_locked(&self, audio: Vec<f32>) -> Result<String> {
         // Update last activity timestamp
         self.last_activity.store(
             SystemTime::now()
@@ -335,9 +583,20 @@ impl TranscriptionManager {
             return Ok(String::new());
         }
 
-        // Check if model is loaded, if not try to load it
+        // Ensure the selected model is loaded. Startup preloading normally
+        // covers this, but meeting transcription can race app startup or run
+        // after an immediate-unload setting, so make transcribe() robust by
+        // kicking off a load and waiting for it here as well.
+        if self
+            .engine
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_none()
         {
-            // If the model is loading, wait for it to complete.
+            self.initiate_model_load();
+        }
+
+        {
             let mut is_loading = self.is_loading.lock().unwrap_or_else(|p| p.into_inner());
             while *is_loading {
                 is_loading = self.loading_condvar.wait(is_loading).unwrap();
@@ -363,24 +622,26 @@ impl TranscriptionManager {
 
             match engine {
                 LoadedEngine::Whisper(whisper_engine) => {
-                    // Normalize language code for Whisper
-                    // Convert zh-Hans and zh-Hant to zh since Whisper uses ISO 639-1 codes
                     let whisper_language = if settings.selected_language == "auto" {
-                        None
+                        app_language_as_transcription_hint(&settings.app_language)
                     } else {
-                        let normalized = if settings.selected_language == "zh-Hans"
-                            || settings.selected_language == "zh-Hant"
-                        {
-                            "zh".to_string()
-                        } else {
-                            settings.selected_language.clone()
-                        };
-                        Some(normalized)
+                        Some(normalize_whisper_language(&settings.selected_language))
+                    };
+
+                    let is_vietnamese = whisper_language.as_deref() == Some("vi");
+                    let initial_prompt = if is_vietnamese {
+                        Some(
+                            "Đây là cuộc hội thoại tiếng Việt. Chép lại nguyên văn tiếng Việt, không dịch sang tiếng Anh."
+                                .to_string(),
+                        )
+                    } else {
+                        None
                     };
 
                     let params = WhisperInferenceParams {
                         language: whisper_language,
-                        translate: settings.translate_to_english,
+                        translate: settings.translate_to_english && !is_vietnamese,
+                        initial_prompt,
                         ..Default::default()
                     };
 
@@ -446,10 +707,14 @@ impl TranscriptionManager {
             translation_note
         );
 
-        let final_result = corrected_result.trim().to_string();
+        let final_result = strip_noise_transcript(&corrected_result);
 
         if final_result.is_empty() {
-            info!("Transcription result is empty");
+            if corrected_result.trim().is_empty() {
+                info!("Transcription result is empty");
+            } else {
+                debug!("Suppressed noisy transcription result");
+            }
         } else {
             info!("Transcription result: {}", final_result);
         }
@@ -468,7 +733,12 @@ impl Drop for TranscriptionManager {
         self.shutdown_signal.store(true, Ordering::Relaxed);
 
         // Wait for the thread to finish gracefully
-        if let Some(handle) = self.watcher_handle.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        if let Some(handle) = self
+            .watcher_handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
             if let Err(e) = handle.join() {
                 warn!("Failed to join idle watcher thread: {:?}", e);
             } else {

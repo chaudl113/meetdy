@@ -436,6 +436,8 @@
         "promptInstructions": "プロンプトの指示",
         "promptInstructionsPlaceholder": "文字起こし後に実行する指示を記述します。例：以下のテキストの文法と明瞭さを改善してください: ${output}",
         "promptTip": "ヒント：<code>${output}</code>を使用して、文字起こしテキストをプロンプトに挿入します。",
+        "promptTipPrefix": "ヒント：",
+        "promptTipSuffix": "を使用して、文字起こしテキストをプロンプトに挿入します。",
         "updatePrompt": "プロンプトを更新",
         "deletePrompt": "プロンプトを削除",
         "createPrompt": "プロンプトを作成",

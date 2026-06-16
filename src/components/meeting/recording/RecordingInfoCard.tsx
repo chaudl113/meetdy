@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { Info } from "lucide-react";
 import { useMeetingStore, formatDuration } from "../../../stores/meetingStore";
 import { useRecordingConfigStore } from "../../../stores/recordingConfigStore";
@@ -32,9 +33,15 @@ function basename(path: string | null | undefined): string {
  */
 export const RecordingInfoCard: React.FC = () => {
   const { t } = useTranslation();
-  const { currentSession, recordingDuration } = useMeetingStore();
-  const { saveLocation, autoTranscribe, autoSummary } =
+  const { currentSession, recordingDuration } = useMeetingStore(
+    useShallow((s) => ({
+      currentSession: s.currentSession,
+      recordingDuration: s.recordingDuration,
+    })),
+  );
+  const { saveLocation, autoTranscribe, autoSummary, sttEngine } =
     useRecordingConfigStore();
+  const isFunasr = sttEngine === "funasr";
 
   // WAV PCM 16-bit mono @ 16 kHz ≈ 32 000 bytes/sec.
   const estimatedSize = recordingDuration * 32_000;
@@ -90,10 +97,14 @@ export const RecordingInfoCard: React.FC = () => {
           </dt>
           <dd
             className={`text-xs font-semibold ${
-              autoTranscribe ? "text-green-500" : "text-text/50"
+              autoTranscribe || isFunasr ? "text-green-500" : "text-text/50"
             }`}
           >
-            {autoTranscribe ? t("recording.info.on") : t("recording.info.off")}
+            {isFunasr
+              ? t("recording.info.liveChunks", "Live chunks")
+              : autoTranscribe
+                ? t("recording.info.on")
+                : t("recording.info.off")}
           </dd>
         </div>
         <div className="flex items-center justify-between gap-3">

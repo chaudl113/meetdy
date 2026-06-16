@@ -61,8 +61,27 @@
 //! ```
 
 use crate::{TranscriptionEngine, TranscriptionResult, TranscriptionSegment};
+use std::ffi::c_void;
 use std::path::{Path, PathBuf};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use std::sync::Once;
+use whisper_rs::{
+    set_log_callback, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
+};
+
+static WHISPER_LOG_INIT: Once = Once::new();
+
+unsafe extern "C" fn silent_whisper_log_callback(
+    _level: u32,
+    _text: *const i8,
+    _user_data: *mut c_void,
+) {
+}
+
+fn silence_whisper_logs() {
+    WHISPER_LOG_INIT.call_once(|| unsafe {
+        set_log_callback(Some(silent_whisper_log_callback), std::ptr::null_mut());
+    });
+}
 
 /// Parameters for configuring Whisper model loading.
 ///
@@ -98,6 +117,13 @@ pub struct WhisperInferenceParams {
     /// Whether to include timestamp information in the output
     pub print_timestamps: bool,
 
+    /// Whether to disable timestamp tokens. This avoids whisper.cpp timestamp
+    /// heuristics that can skip otherwise valid short chunks.
+    pub no_timestamps: bool,
+
+    /// Whether to calculate token-level timestamps.
+    pub token_timestamps: bool,
+
     /// Whether to suppress blank/empty segments in the output
     pub suppress_blank: bool,
 
@@ -106,6 +132,24 @@ pub struct WhisperInferenceParams {
 
     /// Threshold for detecting silence/no-speech segments (0.0-1.0).
     pub no_speech_thold: f32,
+
+    /// Temperature for decoding.
+    pub temperature: f32,
+
+    /// Maximum initial timestamp.
+    pub max_initial_ts: f32,
+
+    /// Entropy threshold for filtering unstable outputs.
+    pub entropy_thold: f32,
+
+    /// Log-probability threshold for filtering low-confidence outputs.
+    pub logprob_thold: f32,
+
+    /// Maximum segment length.
+    pub max_len: i32,
+
+    /// Whether to force a single segment.
+    pub single_segment: bool,
 
     /// Initial prompt to provide context to the model.
     /// This can be used to improve transcription accuracy by providing
@@ -123,9 +167,17 @@ impl Default for WhisperInferenceParams {
             print_progress: false,
             print_realtime: false,
             print_timestamps: false,
+            no_timestamps: true,
+            token_timestamps: true,
             suppress_blank: true,
             suppress_non_speech_tokens: true,
-            no_speech_thold: 0.2,
+            no_speech_thold: 0.55,
+            temperature: 0.3,
+            max_initial_ts: 1.0,
+            entropy_thold: 2.4,
+            logprob_thold: -1.0,
+            max_len: 200,
+            single_segment: false,
             initial_prompt: None,
         }
     }
@@ -177,6 +229,7 @@ impl WhisperEngine {
     /// // Engine is ready to load a model
     /// ```
     pub fn new() -> Self {
+        silence_whisper_logs();
         Self {
             loaded_model_path: None,
             state: None,
@@ -243,9 +296,17 @@ impl TranscriptionEngine for WhisperEngine {
         full_params.set_print_progress(whisper_params.print_progress);
         full_params.set_print_realtime(whisper_params.print_realtime);
         full_params.set_print_timestamps(whisper_params.print_timestamps);
+        full_params.set_no_timestamps(whisper_params.no_timestamps);
+        full_params.set_token_timestamps(whisper_params.token_timestamps);
         full_params.set_suppress_blank(whisper_params.suppress_blank);
         full_params.set_suppress_non_speech_tokens(whisper_params.suppress_non_speech_tokens);
         full_params.set_no_speech_thold(whisper_params.no_speech_thold);
+        full_params.set_temperature(whisper_params.temperature);
+        full_params.set_max_initial_ts(whisper_params.max_initial_ts);
+        full_params.set_entropy_thold(whisper_params.entropy_thold);
+        full_params.set_logprob_thold(whisper_params.logprob_thold);
+        full_params.set_max_len(whisper_params.max_len);
+        full_params.set_single_segment(whisper_params.single_segment);
         
         if let Some(ref prompt) = whisper_params.initial_prompt {
             full_params.set_initial_prompt(prompt);
@@ -269,6 +330,7 @@ impl TranscriptionEngine for WhisperEngine {
                 start,
                 end,
                 text: text.clone(),
+                speaker_id: None,
             });
             full_text.push_str(&text);
         }

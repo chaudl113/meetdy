@@ -20,6 +20,7 @@ pub fn create_meeting_template(
     audio_source: String,
     prompt_id: Option<String>,
     summary_prompt_template: Option<String>,
+    stt_engine: Option<String>,
 ) -> Result<MeetingTemplate, String> {
     debug!("create_meeting_template command called: name={}", name);
 
@@ -37,10 +38,19 @@ pub fn create_meeting_template(
         return Err(format!("Invalid audio_source: {}", audio_source));
     }
 
+    // Validate stt_engine if provided
+    if let Some(ref engine) = stt_engine {
+        if !["whisper", "soniox", "funasr"].contains(&engine.as_str()) {
+            return Err(format!("Invalid stt_engine: {}", engine));
+        }
+    }
+
     // Validate summary_prompt_template if provided
     if let Some(ref spt) = summary_prompt_template {
         if !spt.contains("{}") {
-            return Err("summary_prompt_template must contain '{}' placeholder for transcript".to_string());
+            return Err(
+                "summary_prompt_template must contain '{}' placeholder for transcript".to_string(),
+            );
         }
         if spt.len() > 10000 {
             return Err("summary_prompt_template is too long (max 10000 characters)".to_string());
@@ -55,7 +65,10 @@ pub fn create_meeting_template(
         .iter()
         .any(|t| t.name == name.trim())
     {
-        return Err(format!("Template with name '{}' already exists", name.trim()));
+        return Err(format!(
+            "Template with name '{}' already exists",
+            name.trim()
+        ));
     }
 
     // Generate new template
@@ -67,6 +80,7 @@ pub fn create_meeting_template(
         audio_source,
         prompt_id,
         summary_prompt_template,
+        stt_engine,
         created_at: chrono::Utc::now().timestamp(),
         updated_at: chrono::Utc::now().timestamp(),
     };
@@ -89,6 +103,7 @@ pub fn update_meeting_template(
     audio_source: Option<String>,
     prompt_id: Option<String>,
     summary_prompt_template: Option<String>,
+    stt_engine: Option<String>,
 ) -> Result<MeetingTemplate, String> {
     debug!("update_meeting_template command called: id={}", id);
 
@@ -135,7 +150,9 @@ pub fn update_meeting_template(
     // Handle summary_prompt_template update
     if let Some(ref spt) = summary_prompt_template {
         if !spt.is_empty() && !spt.contains("{}") {
-            return Err("summary_prompt_template must contain '{}' placeholder for transcript".to_string());
+            return Err(
+                "summary_prompt_template must contain '{}' placeholder for transcript".to_string(),
+            );
         }
         if spt.len() > 10000 {
             return Err("summary_prompt_template is too long (max 10000 characters)".to_string());
@@ -143,6 +160,18 @@ pub fn update_meeting_template(
     }
     if summary_prompt_template.is_some() {
         template.summary_prompt_template = summary_prompt_template;
+    }
+
+    // Handle stt_engine update
+    if let Some(ref engine) = stt_engine {
+        if !engine.is_empty() && !["whisper", "soniox", "funasr"].contains(&engine.as_str()) {
+            return Err(format!("Invalid stt_engine: {}", engine));
+        }
+        template.stt_engine = if engine.is_empty() {
+            None
+        } else {
+            Some(engine.clone())
+        };
     }
 
     template.updated_at = chrono::Utc::now().timestamp();

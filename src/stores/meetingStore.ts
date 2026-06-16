@@ -1,13 +1,67 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import type {
   AudioSourceType,
   MeetingNote,
   MeetingSession,
   MeetingStatus,
+  Participant,
 } from "@/bindings";
 import { commands } from "@/bindings";
+import { useRecordingConfigStore } from "./recordingConfigStore";
+import { useSettingsStore } from "./settingsStore";
+
+// Patterns of known hallucinated/junk transcripts (commonly produced by Whisper
+// on silence/noise — e.g. YouTube subscribe outros from Vietnamese channels).
+const TRANSCRIPT_NOISE_PATTERNS: RegExp[] = [
+  /ghiền\s*mì\s*gõ/i,
+  /hãy\s*subscribe\s*cho\s*kênh/i,
+  /đăng\s*k(ý|y)\s*kênh/i,
+  /không\s*bỏ\s*lỡ\s*những\s*video/i,
+  /like\s*và\s*subscribe/i,
+  /nhấn\s*chuông\s*thông\s*báo/i,
+  /cảm\s*ơn\s*các\s*bạn\s*đã\s*(xem|theo\s*dõi)/i,
+  /hẹn\s*gặp\s*lại\s*(các\s*bạn\s*)?(ở|trong)\s*(video|clip)/i,
+];
+
+const isNoiseTranscript = (text: string): boolean => {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return TRANSCRIPT_NOISE_PATTERNS.some((re) => re.test(trimmed));
+};
+
+const stripNoiseFromText = (text: string): string => {
+  if (!text) return text;
+  return text
+    .split(/\n+/)
+    .map((line) => (isNoiseTranscript(line) ? "" : line))
+    .filter((line) => line.length > 0)
+    .join("\n");
+};
+
+async function notifyIfEnabled(
+  enabled: boolean,
+  title: string,
+  body: string,
+): Promise<void> {
+  if (!enabled) return;
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      const perm = await requestPermission();
+      granted = perm === "granted";
+    }
+    if (granted) sendNotification({ title, body });
+  } catch (err) {
+    console.warn("notification failed:", err);
+  }
+}
 
 /**
  * Formats a duration in seconds to HH:MM:SS format
@@ -24,29 +78,87 @@ export function formatDuration(seconds: number): string {
   return `${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
 }
 
+/**
+ * Real-time audio statistics emitted from the backend at ~10Hz while a
+ * meeting is recording. `null` when no recording is active.
+ */
+export interface MeetingAudioStats {
+  session_id: string;
+  rms: number;
+  peak: number;
+  snr_db: number;
+  noise_floor_db: number;
+  audio_source: AudioSourceType;
+}
+
+export interface MeetingLiveTranscript {
+  session_id: string;
+  text: string;
+  chunk_text: string;
+  is_final: boolean;
+  speaker_id: string | null;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface LiveTranscriptSegment {
+  text: string;
+  offset: number;
+  startMs?: number;
+  endMs?: number;
+  speakerId: string | null;
+}
+
 interface MeetingStore {
   // State
   sessionStatus: MeetingStatus;
   currentSession: MeetingSession | null;
   sessions: MeetingSession[];
   recordingDuration: number;
+  isPaused: boolean;
   isLoading: boolean;
   error: string | null;
 
+  // Latest live audio statistics for the active recording.
+  audioStats: MeetingAudioStats | null;
+
+  // Incremental transcript emitted while recording.
+  liveTranscript: string;
+  liveTranscriptSegments: LiveTranscriptSegment[];
+
+  // Participants for the active recording session.
+  participants: Participant[];
+  activeSpeakerId: string | null;
+
   // Notes for the currently displayed session (recording or completed).
   notes: MeetingNote[];
+
+  // STT engine error (e.g. Soniox connection failed / bad API key).
+  sttError: string | null;
+  clearSttError: () => void;
 
   // Actions
   startMeeting: (
     audioSource?: AudioSourceType,
     templateId?: string,
+    sttEngine?: string,
+    sonioxApiKey?: string,
+    funasrBaseUrl?: string,
+    funasrModel?: string,
   ) => Promise<void>;
   stopMeeting: () => Promise<void>;
+  pauseMeeting: () => Promise<void>;
+  resumeMeeting: () => Promise<void>;
   retryTranscription: () => Promise<void>;
   updateTitle: (title: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
   fetchSessions: () => Promise<void>;
+  clearAllSessions: () => Promise<void>;
   clearError: () => void;
+
+  loadParticipants: (sessionId: string) => Promise<void>;
+  setActiveSpeakerId: (id: string | null) => void;
+  addParticipantToStore: (participant: Participant) => void;
 
   // Notes actions
   loadNotes: (sessionId: string) => Promise<void>;
@@ -81,9 +193,16 @@ export const useMeetingStore = create<MeetingStore>()(
     currentSession: null,
     sessions: [],
     recordingDuration: 0,
+    isPaused: false,
     isLoading: false,
     error: null,
     notes: [],
+    sttError: null,
+    audioStats: null,
+    liveTranscript: "",
+    liveTranscriptSegments: [],
+    participants: [],
+    activeSpeakerId: null,
 
     // Internal timer reference
     _durationInterval: null,
@@ -115,9 +234,11 @@ export const useMeetingStore = create<MeetingStore>()(
 
       // Start new timer that increments every second
       const interval = setInterval(() => {
-        set((state) => ({
-          recordingDuration: state.recordingDuration + 1,
-        }));
+        set((state) =>
+          state.isPaused
+            ? state
+            : { recordingDuration: state.recordingDuration + 1 },
+        );
       }, 1000);
 
       set({ _durationInterval: interval });
@@ -133,7 +254,7 @@ export const useMeetingStore = create<MeetingStore>()(
     },
 
     // Start a new meeting session
-    startMeeting: async (audioSource?: AudioSourceType, templateId?: string) => {
+    startMeeting: async (audioSource?: AudioSourceType, templateId?: string, sttEngine?: string, sonioxApiKey?: string, funasrBaseUrl?: string, funasrModel?: string) => {
       const {
         setLoading,
         setError,
@@ -149,13 +270,17 @@ export const useMeetingStore = create<MeetingStore>()(
         const result = await commands.startMeetingSession(
           audioSource ?? null,
           templateId ?? null,
+          sttEngine ?? null,
+          sonioxApiKey ?? null,
+          funasrBaseUrl ?? null,
+          funasrModel ?? null,
         );
         if (result.status === "ok") {
           const session = result.data as MeetingSession;
           setCurrentSession(session);
           setSessionStatus("recording");
-          // Fresh session — clear any stale notes from a previous one.
-          set({ notes: [] });
+          // Fresh session — clear stale notes and any previous stt error.
+          set({ notes: [], isPaused: false, sttError: null });
           _startDurationTimer();
         } else {
           setError(result.error);
@@ -171,8 +296,7 @@ export const useMeetingStore = create<MeetingStore>()(
 
     // Stop the current meeting session
     stopMeeting: async () => {
-      const { setLoading, setError, setSessionStatus, _stopDurationTimer } =
-        get();
+      const { setLoading, setError, _stopDurationTimer } = get();
 
       setLoading(true);
       setError(null);
@@ -180,7 +304,7 @@ export const useMeetingStore = create<MeetingStore>()(
       try {
         const result = await commands.stopMeetingSession();
         if (result.status === "ok") {
-          setSessionStatus("processing");
+          set({ isPaused: false });
           _stopDurationTimer();
         } else {
           setError(result.error);
@@ -191,6 +315,28 @@ export const useMeetingStore = create<MeetingStore>()(
         setError(errorMessage);
       } finally {
         setLoading(false);
+      }
+    },
+
+    pauseMeeting: async () => {
+      const { setError } = get();
+      setError(null);
+      const result = await commands.pauseMeetingSession();
+      if (result.status === "ok") {
+        set({ isPaused: true });
+      } else {
+        setError(result.error);
+      }
+    },
+
+    resumeMeeting: async () => {
+      const { setError } = get();
+      setError(null);
+      const result = await commands.resumeMeetingSession();
+      if (result.status === "ok") {
+        set({ isPaused: false });
+      } else {
+        setError(result.error);
       }
     },
 
@@ -222,7 +368,7 @@ export const useMeetingStore = create<MeetingStore>()(
       }
     },
 
-    // Retry transcription for a failed meeting session
+    // Retry / regenerate transcription for a meeting session with saved audio.
     retryTranscription: async () => {
       const { currentSession, setLoading, setError, setSessionStatus } = get();
 
@@ -232,9 +378,8 @@ export const useMeetingStore = create<MeetingStore>()(
         return;
       }
 
-      // Validate session is in Failed status
-      if (currentSession.status !== "failed") {
-        setError("Can only retry transcription for failed sessions");
+      if (!["failed", "completed", "interrupted"].includes(currentSession.status)) {
+        setError("Can only regenerate transcript after recording has stopped");
         return;
       }
 
@@ -312,6 +457,35 @@ export const useMeetingStore = create<MeetingStore>()(
       }
     },
 
+    clearAllSessions: async () => {
+      const { setLoading, setError } = get();
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await commands.clearAllMeetingSessions();
+        if (result.status === "ok") {
+          set({
+            sessions: [],
+            currentSession: null,
+            sessionStatus: "idle",
+            liveTranscript: "",
+            liveTranscriptSegments: [],
+            notes: [],
+            participants: [],
+            activeSpeakerId: null,
+          });
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to clear history";
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    },
+
     // --- Notes -----------------------------------------------------------
 
     // Loads notes for the given session into the store.
@@ -376,8 +550,49 @@ export const useMeetingStore = create<MeetingStore>()(
       }
     },
 
+    loadParticipants: async (sessionId: string) => {
+      try {
+        const result = await commands.listMeetingParticipants(sessionId);
+        if (result.status === "ok") {
+          set({ participants: result.data });
+        }
+      } catch (err) {
+        console.warn("Failed to load participants:", err);
+      }
+    },
+
+    setActiveSpeakerId: (activeSpeakerId) => set({ activeSpeakerId }),
+    clearSttError: () => set({ sttError: null }),
+
+    addParticipantToStore: (participant) =>
+      set((state) => ({ participants: [...state.participants, participant] })),
+
     // Initialize event listeners for meeting_* events from backend
     initializeEventListeners: async () => {
+      // Hydrate stt settings from persisted AppSettings so that keyboard
+      // shortcuts work correctly even if StartMeeting screen was never opened.
+      try {
+        const settingsResult = await commands.getAppSettings();
+        if (settingsResult.status === "ok") {
+          const s = settingsResult.data;
+          const store = useRecordingConfigStore.getState();
+          if (s.meeting_stt_engine) {
+            store.setSttEngine(s.meeting_stt_engine as import("./recordingConfigStore").SttEngine);
+          }
+          if (s.soniox_api_key) {
+            store.setSonioxApiKey(s.soniox_api_key);
+          }
+          if (s.funasr_base_url) {
+            store.setFunasrBaseUrl(s.funasr_base_url);
+          }
+          if (s.funasr_model) {
+            store.setFunasrModel(s.funasr_model);
+          }
+        }
+      } catch {
+        // non-fatal: fall back to store defaults
+      }
+
       const {
         setSessionStatus,
         setCurrentSession,
@@ -409,9 +624,18 @@ export const useMeetingStore = create<MeetingStore>()(
             const session = event.payload;
             setCurrentSession(session);
             setSessionStatus("recording");
-            // Reset notes for the new session; load any pre-existing ones.
-            set({ notes: [] });
+            // Reset notes / live stats / live transcript for the new session; load any
+            // pre-existing notes.
+            set({
+              notes: [],
+              audioStats: null,
+              liveTranscript: "",
+              liveTranscriptSegments: [],
+              participants: [],
+              activeSpeakerId: null,
+            });
             get().loadNotes(session.id);
+            get().loadParticipants(session.id);
             _startDurationTimer();
             // Sync duration if available
             if (session.duration !== undefined && session.duration !== null) {
@@ -434,6 +658,8 @@ export const useMeetingStore = create<MeetingStore>()(
             const session = event.payload;
             setCurrentSession(session);
             _stopDurationTimer();
+            // Clear live stats once recording has stopped.
+            set({ audioStats: null, isPaused: false });
             // Sync duration
             if (session.duration !== undefined && session.duration !== null) {
               setRecordingDuration(session.duration);
@@ -483,6 +709,52 @@ export const useMeetingStore = create<MeetingStore>()(
             if (session.duration !== undefined && session.duration !== null) {
               setRecordingDuration(session.duration);
             }
+
+            const settings = useSettingsStore.getState().settings;
+            const autoSavePref = settings?.auto_save ?? true;
+            const autoTranscribePref = settings?.auto_transcribe ?? false;
+            const autoSummaryPref = settings?.auto_summary ?? true;
+            const notifyCompletedPref = settings?.notify_completed ?? true;
+
+            // Auto Save = false → discard meeting (delete persisted session + files)
+            if (!autoSavePref) {
+              commands
+                .deleteMeetingSession(session.id)
+                .catch((err) =>
+                  console.warn("Auto-save off: failed to discard session", err),
+                );
+              return;
+            }
+
+            // Auto Transcribe = true and no transcript yet → force regenerate
+            if (autoTranscribePref && !session.transcript_path) {
+              commands
+                .retryTranscription(session.id)
+                .catch((err) =>
+                  console.warn("Auto transcribe failed:", err),
+                );
+            }
+
+            // Auto Summary (uses persisted setting)
+            const recordingConfig = useRecordingConfigStore.getState();
+            if (autoSummaryPref && session.transcript_path) {
+              commands
+                .generateMeetingSummary(
+                  session.id,
+                  recordingConfig.summaryLanguage === "auto"
+                    ? null
+                    : recordingConfig.summaryLanguage,
+                )
+                .catch((err) => {
+                  console.error("Auto summary failed:", err);
+                });
+            }
+
+            notifyIfEnabled(
+              notifyCompletedPref,
+              "Meeting completed",
+              session.title || "Your recording has finished processing.",
+            );
           },
         );
 
@@ -491,6 +763,22 @@ export const useMeetingStore = create<MeetingStore>()(
           return;
         }
         unlisteners.push(completedUnlisten);
+
+        const summaryGeneratedUnlisten = await listen<MeetingSession>(
+          "meeting_summary_generated",
+          (event) => {
+            if (!isValid()) return;
+            const currentSession = get().currentSession;
+            if (currentSession?.id !== event.payload.id) return;
+            setCurrentSession(event.payload);
+          },
+        );
+
+        if (!isValid()) {
+          summaryGeneratedUnlisten();
+          return;
+        }
+        unlisteners.push(summaryGeneratedUnlisten);
 
         // Listen for meeting_failed event
         const failedUnlisten = await listen<MeetingSession>(
@@ -505,6 +793,13 @@ export const useMeetingStore = create<MeetingStore>()(
             if (session.duration !== undefined && session.duration !== null) {
               setRecordingDuration(session.duration);
             }
+
+            const settings = useSettingsStore.getState().settings;
+            notifyIfEnabled(
+              settings?.notify_failed ?? true,
+              "Meeting failed",
+              session.title || "Recording or transcription failed.",
+            );
           },
         );
 
@@ -513,6 +808,193 @@ export const useMeetingStore = create<MeetingStore>()(
           return;
         }
         unlisteners.push(failedUnlisten);
+
+        // Listen for live audio statistics. Backend emits at ~10Hz; we
+        // throttle the store write to ~5Hz (every 200ms) because the UI
+        // doesn't need sub-100ms updates and every set() here cascades into
+        // re-renders of every component subscribed to the store.
+        let lastStatsApply = 0;
+        let pendingStats: MeetingAudioStats | null = null;
+        let pendingStatsTimer: ReturnType<typeof setTimeout> | null = null;
+        const STATS_THROTTLE_MS = 200;
+        const applyPendingStats = () => {
+          pendingStatsTimer = null;
+          if (pendingStats && isValid()) {
+            lastStatsApply = Date.now();
+            set({ audioStats: pendingStats });
+            pendingStats = null;
+          }
+        };
+        const statsUnlisten = await listen<MeetingAudioStats>(
+          "meeting_audio_stats",
+          (event) => {
+            if (!isValid()) return;
+            pendingStats = event.payload;
+            const now = Date.now();
+            const elapsed = now - lastStatsApply;
+            if (elapsed >= STATS_THROTTLE_MS) {
+              if (pendingStatsTimer) {
+                clearTimeout(pendingStatsTimer);
+                pendingStatsTimer = null;
+              }
+              lastStatsApply = now;
+              set({ audioStats: pendingStats });
+              pendingStats = null;
+            } else if (pendingStatsTimer == null) {
+              pendingStatsTimer = setTimeout(
+                applyPendingStats,
+                STATS_THROTTLE_MS - elapsed,
+              );
+            }
+          },
+        );
+
+        if (!isValid()) {
+          statsUnlisten();
+          return;
+        }
+        unlisteners.push(statsUnlisten);
+
+        // Listen for live transcript chunks emitted while recording.
+        const liveTranscriptUnlisten = await listen<MeetingLiveTranscript>(
+          "meeting_live_transcript",
+          (event) => {
+            if (!isValid()) return;
+            const currentSession = get().currentSession;
+            if (currentSession?.id !== event.payload.session_id) return;
+            const chunk = event.payload.chunk_text.trim();
+            const cleanedChunk = isNoiseTranscript(chunk) ? "" : chunk;
+            const cleanedFull = stripNoiseFromText(event.payload.text);
+            set((state) => ({
+              liveTranscript: cleanedFull,
+              liveTranscriptSegments: cleanedChunk
+                ? [
+                    ...state.liveTranscriptSegments,
+                    {
+                      text: cleanedChunk,
+                      offset:
+                        event.payload.start_ms > 0 || event.payload.end_ms > 0
+                          ? Math.max(0, Math.floor(event.payload.start_ms / 1000))
+                          : state.recordingDuration,
+                      startMs: event.payload.start_ms,
+                      endMs: event.payload.end_ms,
+                      speakerId: event.payload.speaker_id ?? null,
+                    },
+                  ]
+                : state.liveTranscriptSegments,
+            }));
+          },
+        );
+
+        if (!isValid()) {
+          liveTranscriptUnlisten();
+          return;
+        }
+        unlisteners.push(liveTranscriptUnlisten);
+
+        const pausedUnlisten = await listen<MeetingSession>(
+          "meeting_paused",
+          (event) => {
+            if (!isValid()) return;
+            const currentSession = get().currentSession;
+            if (currentSession?.id !== event.payload.id) return;
+            set({ isPaused: true });
+          },
+        );
+
+        if (!isValid()) {
+          pausedUnlisten();
+          return;
+        }
+        unlisteners.push(pausedUnlisten);
+
+        const resumedUnlisten = await listen<MeetingSession>(
+          "meeting_resumed",
+          (event) => {
+            if (!isValid()) return;
+            const currentSession = get().currentSession;
+            if (currentSession?.id !== event.payload.id) return;
+            set({ isPaused: false });
+          },
+        );
+
+        if (!isValid()) {
+          resumedUnlisten();
+          return;
+        }
+        unlisteners.push(resumedUnlisten);
+
+        // Listen for STT engine errors (e.g. Soniox bad key / connection lost)
+        const sttErrorUnlisten = await listen<{ session_id: string; message: string }>(
+          "meeting_stt_error",
+          (event) => {
+            if (!isValid()) return;
+            const currentSession = get().currentSession;
+            if (currentSession?.id !== event.payload.session_id) return;
+            set({ sttError: event.payload.message });
+          },
+        );
+        if (!isValid()) {
+          sttErrorUnlisten();
+          return;
+        }
+        unlisteners.push(sttErrorUnlisten);
+
+        // Auto-add diarization participants emitted by Soniox path
+        const participantAddedUnlisten = await listen<import("@/bindings").Participant>(
+          "meeting_participant_added",
+          (event) => {
+            if (!isValid()) return;
+            const currentSession = get().currentSession;
+            if (currentSession?.id !== event.payload.session_id) return;
+            set((state) => ({
+              participants: [...state.participants, event.payload],
+            }));
+          },
+        );
+        if (!isValid()) {
+          participantAddedUnlisten();
+          return;
+        }
+        unlisteners.push(participantAddedUnlisten);
+
+        // Global shortcut events emitted from Rust ACTION_MAP
+        const startStopUnlisten = await listen("shortcut_start_stop_recording", () => {
+          if (!isValid()) return;
+          const state = get();
+          if (state.sessionStatus === "recording") {
+            state.stopMeeting();
+          } else if (state.sessionStatus === "idle") {
+            const { audioSource, sttEngine, sonioxApiKey, funasrBaseUrl, funasrModel } =
+              useRecordingConfigStore.getState();
+            state.startMeeting(
+              audioSource,
+              undefined,
+              sttEngine,
+              sonioxApiKey,
+              funasrBaseUrl,
+              funasrModel,
+            );
+          }
+        });
+        if (!isValid()) {
+          startStopUnlisten();
+          return;
+        }
+        unlisteners.push(startStopUnlisten);
+
+        const pauseResumeUnlisten = await listen("shortcut_pause_resume", () => {
+          if (!isValid()) return;
+          const state = get();
+          if (state.sessionStatus !== "recording") return;
+          if (state.isPaused) state.resumeMeeting();
+          else state.pauseMeeting();
+        });
+        if (!isValid()) {
+          pauseResumeUnlisten();
+          return;
+        }
+        unlisteners.push(pauseResumeUnlisten);
 
         // Set up visibility change handler for reconnection on app focus
         const handleVisibilityChange = () => {

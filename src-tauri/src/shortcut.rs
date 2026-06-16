@@ -426,8 +426,9 @@ pub fn change_post_process_api_key_setting(
     api_key: String,
 ) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
-    validate_provider_exists(&settings, &provider_id)?;
-    settings.post_process_api_keys.insert(provider_id, api_key);
+    settings
+        .post_process_api_keys
+        .insert(provider_id.clone(), api_key.clone());
     settings::write_settings(&app, settings);
     Ok(())
 }
@@ -559,7 +560,7 @@ pub async fn fetch_post_process_models(
         }
     }
 
-    // Get API key
+    // Get API key from keychain
     let api_key = settings
         .post_process_api_keys
         .get(&provider_id)

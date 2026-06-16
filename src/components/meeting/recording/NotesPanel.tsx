@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { StickyNote, Plus, Trash2 } from "lucide-react";
 import { formatDuration, useMeetingStore } from "../../../stores/meetingStore";
 
@@ -15,7 +16,9 @@ interface NotesPanelProps {
  */
 export const NotesPanel: React.FC<NotesPanelProps> = ({ onAddNote }) => {
   const { t } = useTranslation();
-  const { notes, deleteNote } = useMeetingStore();
+  const { notes, deleteNote } = useMeetingStore(
+    useShallow((s) => ({ notes: s.notes, deleteNote: s.deleteNote })),
+  );
 
   if (notes.length === 0) {
     return (

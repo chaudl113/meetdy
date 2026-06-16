@@ -72,9 +72,13 @@ impl ModelManager {
             ModelInfo {
                 id: "small".to_string(),
                 name: "Whisper Small".to_string(),
-                description: "Fast and fairly accurate.".to_string(),
+                description: "Recommended starter model. Fast, reliable, and fairly accurate for most languages."
+                    .to_string(),
                 filename: "ggml-small.bin".to_string(),
-                url: Some("https://blob.handy.computer/ggml-small.bin".to_string()),
+                url: Some(
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+                        .to_string(),
+                ),
                 size_mb: 487,
                 is_downloaded: false,
                 is_downloading: false,
@@ -92,7 +96,9 @@ impl ModelManager {
             ModelInfo {
                 id: "medium".to_string(),
                 name: "Whisper Medium".to_string(),
-                description: "Good accuracy, medium speed".to_string(),
+                description:
+                    "Good accuracy with medium speed. Use if you already prefer this q4_1 build."
+                        .to_string(),
                 filename: "whisper-medium-q4_1.bin".to_string(),
                 url: Some("https://blob.handy.computer/whisper-medium-q4_1.bin".to_string()),
                 size_mb: 492, // Approximate size
@@ -107,13 +113,40 @@ impl ModelManager {
         );
 
         available_models.insert(
+            "medium-q5".to_string(),
+            ModelInfo {
+                id: "medium-q5".to_string(),
+                name: "Whisper Medium Q5".to_string(),
+                description: "Recommended balanced model. Better accuracy than Small with moderate size."
+                    .to_string(),
+                filename: "ggml-medium-q5_0.bin".to_string(),
+                url: Some(
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin"
+                        .to_string(),
+                ),
+                size_mb: 514,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: false,
+                engine_type: EngineType::Whisper,
+                accuracy_score: 0.78,
+                speed_score: 0.58,
+            },
+        );
+
+        available_models.insert(
             "turbo".to_string(),
             ModelInfo {
                 id: "turbo".to_string(),
-                name: "Whisper Turbo".to_string(),
-                description: "Balanced accuracy and speed.".to_string(),
+                name: "Whisper Large-v3 Turbo".to_string(),
+                description: "Highest-quality Turbo option. Use on machines with enough memory; download is large."
+                    .to_string(),
                 filename: "ggml-large-v3-turbo.bin".to_string(),
-                url: Some("https://blob.handy.computer/ggml-large-v3-turbo.bin".to_string()),
+                url: Some(
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+                        .to_string(),
+                ),
                 size_mb: 1600, // Approximate size
                 is_downloaded: false,
                 is_downloading: false,
@@ -126,13 +159,40 @@ impl ModelManager {
         );
 
         available_models.insert(
+            "turbo-q5".to_string(),
+            ModelInfo {
+                id: "turbo-q5".to_string(),
+                name: "Whisper Large-v3 Turbo Q5".to_string(),
+                description: "Recommended best overall. Much smaller than full Turbo with strong accuracy and speed."
+                    .to_string(),
+                filename: "ggml-large-v3-turbo-q5_0.bin".to_string(),
+                url: Some(
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin"
+                        .to_string(),
+                ),
+                size_mb: 548,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: false,
+                engine_type: EngineType::Whisper,
+                accuracy_score: 0.82,
+                speed_score: 0.55,
+            },
+        );
+
+        available_models.insert(
             "large".to_string(),
             ModelInfo {
                 id: "large".to_string(),
-                name: "Whisper Large".to_string(),
-                description: "Good accuracy, but slow.".to_string(),
+                name: "Whisper Large-v3 Q5".to_string(),
+                description: "Recommended when accuracy matters more than speed. Quantized Large-v3, slowest Whisper option here."
+                    .to_string(),
                 filename: "ggml-large-v3-q5_0.bin".to_string(),
-                url: Some("https://blob.handy.computer/ggml-large-v3-q5_0.bin".to_string()),
+                url: Some(
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin"
+                        .to_string(),
+                ),
                 size_mb: 1100, // Approximate size
                 is_downloaded: false,
                 is_downloading: false,
@@ -150,7 +210,9 @@ impl ModelManager {
             ModelInfo {
                 id: "parakeet-tdt-0.6b-v2".to_string(),
                 name: "Parakeet V2".to_string(),
-                description: "English only. The best model for English speakers.".to_string(),
+                description:
+                    "Recommended for English meetings. Very fast and accurate, English only."
+                        .to_string(),
                 filename: "parakeet-tdt-0.6b-v2-int8".to_string(), // Directory name
                 url: Some("https://blob.handy.computer/parakeet-v2-int8.tar.gz".to_string()),
                 size_mb: 473, // Approximate size for int8 quantized model
@@ -169,7 +231,8 @@ impl ModelManager {
             ModelInfo {
                 id: "parakeet-tdt-0.6b-v3".to_string(),
                 name: "Parakeet V3".to_string(),
-                description: "Fast and accurate".to_string(),
+                description: "Recommended fastest English option. Fast and accurate, English only."
+                    .to_string(),
                 filename: "parakeet-tdt-0.6b-v3-int8".to_string(), // Directory name
                 url: Some("https://blob.handy.computer/parakeet-v3-int8.tar.gz".to_string()),
                 size_mb: 478, // Approximate size for int8 quantized model
@@ -202,12 +265,18 @@ impl ModelManager {
     }
 
     pub fn get_available_models(&self) -> Vec<ModelInfo> {
-        let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+        let models = self
+            .available_models
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         models.values().cloned().collect()
     }
 
     pub fn get_model_info(&self, model_id: &str) -> Option<ModelInfo> {
-        let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+        let models = self
+            .available_models
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         models.get(model_id).cloned()
     }
 
@@ -239,7 +308,10 @@ impl ModelManager {
     }
 
     fn update_download_status(&self) -> Result<()> {
-        let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+        let mut models = self
+            .available_models
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
 
         for model in models.values_mut() {
             if model.is_directory {
@@ -292,7 +364,10 @@ impl ModelManager {
         // If no model is selected or selected model is empty
         if settings.selected_model.is_empty() {
             // Find the first available (downloaded) model
-            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+            let models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             if let Some(available_model) = models.values().find(|model| model.is_downloaded) {
                 info!(
                     "Auto-selecting model: {} ({})",
@@ -313,7 +388,10 @@ impl ModelManager {
 
     pub async fn download_model(&self, model_id: &str) -> Result<()> {
         let model_info = {
-            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+            let models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             models.get(model_id).cloned()
         };
 
@@ -350,7 +428,10 @@ impl ModelManager {
 
         // Mark as downloading
         {
-            let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+            let mut models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             if let Some(model) = models.get_mut(model_id) {
                 model.is_downloading = true;
             }
@@ -390,7 +471,10 @@ impl ModelManager {
         {
             // Mark as not downloading on error
             {
-                let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+                let mut models = self
+                    .available_models
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
                 if let Some(model) = models.get_mut(model_id) {
                     model.is_downloading = false;
                 }
@@ -441,7 +525,10 @@ impl ModelManager {
             let chunk = chunk.map_err(|e| {
                 // Mark as not downloading on error
                 {
-                    let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+                    let mut models = self
+                        .available_models
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
                     if let Some(model) = models.get_mut(model_id) {
                         model.is_downloading = false;
                     }
@@ -479,7 +566,10 @@ impl ModelManager {
                 // Download is incomplete/corrupted - delete partial and return error
                 let _ = fs::remove_file(&partial_path);
                 {
-                    let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+                    let mut models = self
+                        .available_models
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
                     if let Some(model) = models.get_mut(model_id) {
                         model.is_downloading = false;
                     }
@@ -568,7 +658,10 @@ impl ModelManager {
 
         // Update download status
         {
-            let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+            let mut models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             if let Some(model) = models.get_mut(model_id) {
                 model.is_downloading = false;
                 model.is_downloaded = true;
@@ -591,7 +684,10 @@ impl ModelManager {
         debug!("ModelManager: delete_model called for: {}", model_id);
 
         let model_info = {
-            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+            let models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             models.get(model_id).cloned()
         };
 
@@ -695,7 +791,10 @@ impl ModelManager {
         debug!("ModelManager: cancel_download called for: {}", model_id);
 
         let _model_info = {
-            let models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+            let models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             models.get(model_id).cloned()
         };
 
@@ -704,7 +803,10 @@ impl ModelManager {
 
         // Mark as not downloading
         {
-            let mut models = self.available_models.lock().unwrap_or_else(|p| p.into_inner());
+            let mut models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             if let Some(model) = models.get_mut(model_id) {
                 model.is_downloading = false;
             }

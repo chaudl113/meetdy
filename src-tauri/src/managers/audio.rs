@@ -217,7 +217,8 @@ impl AudioRecordingManager {
         let settings = get_settings(&self.app_handle);
         let mut did_mute_guard = self.did_mute.lock().unwrap_or_else(|p| p.into_inner());
 
-        if settings.mute_while_recording && *self.is_open.lock().unwrap_or_else(|p| p.into_inner()) {
+        if settings.mute_while_recording && *self.is_open.lock().unwrap_or_else(|p| p.into_inner())
+        {
             set_mute(true);
             *did_mute_guard = true;
             debug!("Mute applied");
@@ -293,7 +294,12 @@ impl AudioRecordingManager {
         }
         *did_mute_guard = false;
 
-        if let Some(rec) = self.recorder.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+        if let Some(rec) = self
+            .recorder
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_mut()
+        {
             // If still recording, stop first.
             if *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) {
                 let _ = rec.stop();
@@ -314,7 +320,10 @@ impl AudioRecordingManager {
 
         match (cur_mode, &new_mode) {
             (MicrophoneMode::AlwaysOn, MicrophoneMode::OnDemand) => {
-                if matches!(*self.state.lock().unwrap_or_else(|p| p.into_inner()), RecordingState::Idle) {
+                if matches!(
+                    *self.state.lock().unwrap_or_else(|p| p.into_inner()),
+                    RecordingState::Idle
+                ) {
                     drop(mode_guard);
                     self.stop_microphone_stream();
                 }
@@ -337,14 +346,22 @@ impl AudioRecordingManager {
 
         if let RecordingState::Idle = *state {
             // Ensure microphone is open in on-demand mode
-            if matches!(*self.mode.lock().unwrap_or_else(|p| p.into_inner()), MicrophoneMode::OnDemand) {
+            if matches!(
+                *self.mode.lock().unwrap_or_else(|p| p.into_inner()),
+                MicrophoneMode::OnDemand
+            ) {
                 if let Err(e) = self.start_microphone_stream() {
                     error!("Failed to open microphone stream: {e}");
                     return false;
                 }
             }
 
-            if let Some(rec) = self.recorder.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+            if let Some(rec) = self
+                .recorder
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .as_ref()
+            {
                 if rec.start().is_ok() {
                     *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = true;
                     *state = RecordingState::Recording {
@@ -380,7 +397,12 @@ impl AudioRecordingManager {
                 *state = RecordingState::Idle;
                 drop(state);
 
-                let samples = if let Some(rec) = self.recorder.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+                let samples = if let Some(rec) = self
+                    .recorder
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .as_ref()
+                {
                     match rec.stop() {
                         Ok(buf) => buf,
                         Err(e) => {
@@ -396,7 +418,10 @@ impl AudioRecordingManager {
                 *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = false;
 
                 // In on-demand mode turn the mic off again
-                if matches!(*self.mode.lock().unwrap_or_else(|p| p.into_inner()), MicrophoneMode::OnDemand) {
+                if matches!(
+                    *self.mode.lock().unwrap_or_else(|p| p.into_inner()),
+                    MicrophoneMode::OnDemand
+                ) {
                     self.stop_microphone_stream();
                 }
 
@@ -429,14 +454,22 @@ impl AudioRecordingManager {
             *state = RecordingState::Idle;
             drop(state);
 
-            if let Some(rec) = self.recorder.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+            if let Some(rec) = self
+                .recorder
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .as_ref()
+            {
                 let _ = rec.stop(); // Discard the result
             }
 
             *self.is_recording.lock().unwrap_or_else(|p| p.into_inner()) = false;
 
             // In on-demand mode turn the mic off again
-            if matches!(*self.mode.lock().unwrap_or_else(|p| p.into_inner()), MicrophoneMode::OnDemand) {
+            if matches!(
+                *self.mode.lock().unwrap_or_else(|p| p.into_inner()),
+                MicrophoneMode::OnDemand
+            ) {
                 self.stop_microphone_stream();
             }
         }

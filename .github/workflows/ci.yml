@@ -30,7 +30,13 @@ jobs:
         run: bun run lint
 
       - name: Prettier
-        run: bun run format:check
+        run: bun run format:frontend
+
+      - name: Cargo fmt
+        run: cd src-tauri && cargo fmt -- --check
+
+      - name: Clippy
+        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test
@@ -65,3 +71,9 @@ jobs:
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --lib
+
+      - name: Cargo audit
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-audit --quiet
+          cargo audit

@@ -1,20 +1,71 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { Activity } from "lucide-react";
 import { WaveformVisualizer } from "./WaveformVisualizer";
 import { useMeetingStore } from "../../../stores/meetingStore";
 
 /**
- * AudioStatsCard — Phase 1 static placeholder.
+ * Buckets the live SNR (dB) into a coarse quality label used by the
+ * existing translation keys. Thresholds are intentionally simple: tune in
+ * one place if user feedback suggests different cut-offs.
+ */
+function snrToQuality(snrDb: number): "good" | "fair" | "poor" {
+  if (snrDb >= 20) return "good";
+  if (snrDb >= 10) return "fair";
+  return "poor";
+}
+
+function noiseFloorToLabel(noiseDb: number): "low" | "medium" | "high" {
+  // noiseDb is negative; closer to 0 = louder noise floor.
+  if (noiseDb <= -50) return "low";
+  if (noiseDb <= -35) return "medium";
+  return "high";
+}
+
+function clarityToLabel(snrDb: number, peak: number): "low" | "medium" | "high" {
+  // Require both a decent SNR and a non-clipping peak to call it "high".
+  if (snrDb >= 20 && peak < 0.95) return "high";
+  if (snrDb >= 10) return "medium";
+  return "low";
+}
+
+/**
+ * AudioStatsCard — live audio quality panel.
  *
- * Real values (RMS / peak / SNR / noise floor) are wired in Phase 3.
- * For now we display a fixed "Good / Low / High" combo and an animated
- * waveform strip so the layout matches the design.
+ * Subscribes to `meeting_audio_stats` (via the meeting store) and renders
+ * the current input level, scrolling waveform, and qualitative labels
+ * (quality / noise / clarity) derived from RMS / peak / SNR / noise floor.
  */
 export const AudioStatsCard: React.FC = () => {
   const { t } = useTranslation();
-  const { sessionStatus } = useMeetingStore();
+  const { sessionStatus, audioStats } = useMeetingStore(
+    useShallow((s) => ({
+      sessionStatus: s.sessionStatus,
+      audioStats: s.audioStats,
+    })),
+  );
   const isRecording = sessionStatus === "recording";
+
+  const peak = audioStats?.peak ?? 0;
+  const rms = audioStats?.rms ?? 0;
+  const snrDb = audioStats?.snr_db ?? 0;
+  const noiseDb = audioStats?.noise_floor_db ?? -60;
+
+  // Use RMS for the input-level meter (perceived loudness) and peak for the
+  // waveform (instantaneous amplitude). Both are already normalized 0–1.
+  const inputPct = Math.round(Math.max(0, Math.min(1, rms)) * 100);
+
+  const qualityKey = audioStats ? snrToQuality(snrDb) : "good";
+  const noiseKey = audioStats ? noiseFloorToLabel(noiseDb) : "low";
+  const clarityKey = audioStats ? clarityToLabel(snrDb, peak) : "high";
+
+  const qualityColor =
+    qualityKey === "good"
+      ? "text-green-500"
+      : qualityKey === "fair"
+        ? "text-yellow-500"
+        : "text-red-500";
 
   return (
     <div className="bg-background border border-mid-gray/20 rounded-xl p-5">
@@ -25,19 +76,24 @@ export const AudioStatsCard: React.FC = () => {
         </span>
       </div>
 
-      <WaveformVisualizer active={isRecording} height={64} className="mb-4" />
+      <WaveformVisualizer
+        active={isRecording}
+        level={isRecording ? peak : 0}
+        height={64}
+        className="mb-4"
+      />
 
       <div className="mb-4">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-text/60">
             {t("recording.audioStats.inputLevel")}
           </span>
-          <span className="text-xs font-mono text-text/80">{"68%"}</span>
+          <span className="text-xs font-mono text-text/80">{`${inputPct}%`}</span>
         </div>
         <div className="h-2 bg-mid-gray/15 rounded-full overflow-hidden">
           <div
             className="h-full bg-gradient-to-r from-green-500 via-green-400 to-yellow-400 rounded-full transition-all"
-            style={{ width: "68%" }}
+            style={{ width: `${inputPct}%` }}
           />
         </div>
       </div>
@@ -47,8 +103,8 @@ export const AudioStatsCard: React.FC = () => {
           <div className="text-xs text-text/60 mb-0.5">
             {t("recording.audioStats.quality")}
           </div>
-          <div className="text-sm font-semibold text-green-500">
-            {t("recording.audioStats.qualityValue.good")}
+          <div className={`text-sm font-semibold ${qualityColor}`}>
+            {t(`recording.audioStats.qualityValue.${qualityKey}`)}
           </div>
         </div>
         <div>
@@ -56,7 +112,7 @@ export const AudioStatsCard: React.FC = () => {
             {t("recording.audioStats.noise")}
           </div>
           <div className="text-sm font-semibold text-text/80">
-            {t("recording.audioStats.noiseValue.low")}
+            {t(`recording.audioStats.noiseValue.${noiseKey}`)}
           </div>
         </div>
         <div>
@@ -64,7 +120,7 @@ export const AudioStatsCard: React.FC = () => {
             {t("recording.audioStats.clarity")}
           </div>
           <div className="text-sm font-semibold text-text/80">
-            {t("recording.audioStats.clarityValue.high")}
+            {t(`recording.audioStats.clarityValue.${clarityKey}`)}
           </div>
         </div>
       </div>

@@ -10,11 +10,17 @@ interface OutputDeviceSelectorProps {
   descriptionMode?: "inline" | "tooltip";
   grouped?: boolean;
   disabled?: boolean;
+  icon?: React.ReactNode;
 }
 
 export const OutputDeviceSelector: React.FC<OutputDeviceSelectorProps> =
   React.memo(
-    ({ descriptionMode = "tooltip", grouped = false, disabled = false }) => {
+    ({
+      descriptionMode = "tooltip",
+      grouped = false,
+      disabled = false,
+      icon,
+    }) => {
       const { t } = useTranslation();
       const {
         getSetting,
@@ -51,6 +57,7 @@ export const OutputDeviceSelector: React.FC<OutputDeviceSelectorProps> =
           descriptionMode={descriptionMode}
           grouped={grouped}
           disabled={disabled}
+          icon={icon}
         >
           <div className="flex items-center space-x-1">
             <Dropdown

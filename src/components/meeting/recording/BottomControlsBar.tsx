@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import {
   Mic,
   Monitor,
@@ -21,7 +22,13 @@ import { useRecordingConfigStore } from "../../../stores/recordingConfigStore";
  */
 export const BottomControlsBar: React.FC = () => {
   const { t } = useTranslation();
-  const { sessionStatus, isLoading, stopMeeting } = useMeetingStore();
+  const { sessionStatus, isLoading, stopMeeting } = useMeetingStore(
+    useShallow((s) => ({
+      sessionStatus: s.sessionStatus,
+      isLoading: s.isLoading,
+      stopMeeting: s.stopMeeting,
+    })),
+  );
   const { audioSource } = useRecordingConfigStore();
 
   const micOn = audioSource === "microphone_only" || audioSource === "mixed";

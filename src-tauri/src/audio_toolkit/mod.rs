@@ -7,7 +7,8 @@ pub mod utils;
 pub mod vad;
 
 pub use audio::{
-    list_input_devices, list_output_devices, save_wav_file, AudioRecorder, CpalDeviceInfo,
+    list_input_devices, list_output_devices, save_wav_file, AudioRecorder, AudioStats,
+    CpalDeviceInfo,
 };
 pub use mixed_recorder::{AudioSourceConfig, MixedAudioRecorder};
 pub use system_audio::{

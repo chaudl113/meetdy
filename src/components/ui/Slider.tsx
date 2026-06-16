@@ -14,6 +14,7 @@ interface SliderProps {
   grouped?: boolean;
   showValue?: boolean;
   formatValue?: (value: number) => string;
+  icon?: React.ReactNode;
 }
 
 export const Slider: React.FC<SliderProps> = ({
@@ -29,6 +30,7 @@ export const Slider: React.FC<SliderProps> = ({
   grouped = false,
   showValue = true,
   formatValue = (v) => v.toFixed(2),
+  icon,
 }) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onChange(parseFloat(e.target.value));
@@ -42,6 +44,7 @@ export const Slider: React.FC<SliderProps> = ({
       grouped={grouped}
       layout="horizontal"
       disabled={disabled}
+      icon={icon}
     >
       <div className="w-full">
         <div className="flex items-center space-x-1 h-6">

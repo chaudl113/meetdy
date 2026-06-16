@@ -18,6 +18,7 @@ interface ShortcutRecorderProps {
   grouped?: boolean;
   shortcutId: string;
   disabled?: boolean;
+  icon?: React.ReactNode;
 }
 
 export const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
@@ -25,6 +26,7 @@ export const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
   grouped = false,
   shortcutId,
   disabled = false,
+  icon,
 }) => {
   const { t } = useTranslation();
   const { getSetting, updateBinding, resetBinding, isUpdating, isLoading } =
@@ -312,6 +314,7 @@ export const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
       grouped={grouped}
       disabled={disabled}
       layout="horizontal"
+      icon={icon}
     >
       <div className="flex items-center space-x-1">
         {editingShortcutId === shortcutId ? (
@@ -323,7 +326,7 @@ export const ShortcutRecorder: React.FC<ShortcutRecorderProps> = ({
           </div>
         ) : (
           <div
-            className="px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 hover:bg-logo-primary/10 rounded cursor-pointer hover:border-logo-primary"
+            className="h-8 px-3 flex items-center text-sm font-medium bg-background border border-mid-gray/30 rounded-lg cursor-pointer hover:border-logo-primary"
             onClick={() => startRecording(shortcutId)}
           >
             {formatKeyCombination(binding.current_binding, osType)}

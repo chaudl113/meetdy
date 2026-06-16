@@ -5,6 +5,7 @@ mod audio_feedback;
 pub mod audio_toolkit;
 mod clipboard;
 mod commands;
+mod funasr_client;
 mod helpers;
 mod input;
 mod llm_client;
@@ -18,6 +19,8 @@ mod tray;
 mod tray_i18n;
 mod utils;
 use specta_typescript::{BigIntExportBehavior, Typescript};
+#[cfg(debug_assertions)]
+use std::fs;
 use tauri_specta::{collect_commands, Builder};
 
 use env_filter::Builder as EnvFilterBuilder;
@@ -111,7 +114,7 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-fn initialize_core_logic(app_handle: &AppHandle) {
+fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), String> {
     // Initialize the input state (Enigo singleton for keyboard/mouse simulation)
     // Note: This requires Accessibility permission on macOS. If not granted,
     // we log a warning and continue — input simulation will fail at runtime
@@ -129,21 +132,27 @@ fn initialize_core_logic(app_handle: &AppHandle) {
         }
     }
 
-    // Initialize the managers
+    // Initialize the managers — return Err on failure so Tauri shows a proper
+    // error dialog instead of crashing with a panic message the user can't act on.
     let recording_manager = Arc::new(
-        AudioRecordingManager::new(app_handle).expect("Failed to initialize recording manager"),
+        AudioRecordingManager::new(app_handle)
+            .map_err(|e| format!("Failed to initialize recording manager: {}", e))?,
     );
-    let model_manager =
-        Arc::new(ModelManager::new(app_handle).expect("Failed to initialize model manager"));
+    let model_manager = Arc::new(
+        ModelManager::new(app_handle)
+            .map_err(|e| format!("Failed to initialize model manager: {}", e))?,
+    );
     let transcription_manager = Arc::new(
         TranscriptionManager::new(app_handle, model_manager.clone())
-            .expect("Failed to initialize transcription manager"),
+            .map_err(|e| format!("Failed to initialize transcription manager: {}", e))?,
     );
-    let history_manager =
-        Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
+    let history_manager = Arc::new(
+        HistoryManager::new(app_handle)
+            .map_err(|e| format!("Failed to initialize history manager: {}", e))?,
+    );
     let meeting_manager = Arc::new(
         MeetingSessionManager::new(app_handle, transcription_manager.clone())
-            .expect("Failed to initialize meeting manager"),
+            .map_err(|e| format!("Failed to initialize meeting manager: {}", e))?,
     );
 
     // Add managers to Tauri's managed state
@@ -152,11 +161,17 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
     app_handle.manage(meeting_manager.clone());
+    app_handle.manage(crate::commands::soniox::SonioxState::default());
 
     // Check for interrupted meeting sessions from previous runs
     if let Err(e) = meeting_manager.check_interrupted_sessions() {
         log::error!("Failed to check for interrupted meeting sessions: {}", e);
     }
+
+    // Preload the selected transcription model in the background so the first
+    // meeting / shortcut transcription doesn't fail with "Model is not loaded".
+    // `initiate_model_load` is a no-op if a model is already loaded or loading.
+    transcription_manager.initiate_model_load();
 
     // Initialize the shortcuts
     shortcut::init_shortcuts(app_handle);
@@ -236,6 +251,8 @@ fn initialize_core_logic(app_handle: &AppHandle) {
 
     // Create the recording overlay window (hidden by default)
     utils::create_recording_overlay(app_handle);
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -248,6 +265,21 @@ fn trigger_update_check(app: AppHandle) -> Result<(), String> {
     app.emit("check-for-updates", ())
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(debug_assertions)]
+fn patch_typescript_bindings(path: &str) {
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+
+    let patched = content
+        .replace("onEvent: TAURI_CHANNEL<", "onEvent: __TAURI_CHANNEL__<")
+        .replace("Channel as TAURI_CHANNEL,", "Channel as __TAURI_CHANNEL__,");
+
+    if patched != content {
+        fs::write(path, patched).expect("Failed to patch TypeScript bindings");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -311,6 +343,10 @@ pub fn run() {
         commands::models::has_any_models_available,
         commands::models::has_any_models_or_downloads,
         commands::models::get_recommended_first_model,
+        commands::models::update_funasr_runtime_config,
+        commands::models::get_funasr_runtime_status,
+        commands::models::setup_funasr_runtime,
+        commands::models::delete_funasr_runtime,
         commands::audio::update_microphone_mode,
         commands::audio::get_microphone_mode,
         commands::audio::get_available_microphones,
@@ -335,6 +371,8 @@ pub fn run() {
         commands::history::update_recording_retention_period,
         commands::meeting::start_meeting_session,
         commands::meeting::stop_meeting_session,
+        commands::meeting::pause_meeting_session,
+        commands::meeting::resume_meeting_session,
         commands::meeting::get_meeting_status,
         commands::meeting::get_current_meeting,
         commands::meeting::update_meeting_title,
@@ -343,18 +381,40 @@ pub fn run() {
         commands::meeting::list_meeting_sessions,
         commands::meeting::get_meetings_directory,
         commands::meeting::delete_meeting_session,
+        commands::meeting::clear_all_meeting_sessions,
         commands::meeting::generate_meeting_summary,
         commands::meeting::get_meeting_summary,
+        commands::meeting::extract_meeting_insights,
         commands::meeting::add_meeting_note,
         commands::meeting::list_meeting_notes,
         commands::meeting::delete_meeting_note,
+        commands::meeting::add_meeting_action_item,
+        commands::meeting::list_meeting_action_items,
+        commands::meeting::update_meeting_action_item,
+        commands::meeting::delete_meeting_action_item,
+        commands::meeting::add_meeting_key_point,
+        commands::meeting::list_meeting_key_points,
+        commands::meeting::add_meeting_participant,
+        commands::meeting::list_meeting_participants,
+        commands::meeting::update_meeting_participant,
+        commands::meeting::delete_meeting_participant,
+        commands::meeting::set_active_speaker,
+        commands::meeting::get_meeting_transcript_segments,
+        commands::meeting::add_meeting_tag,
+        commands::meeting::list_meeting_tags,
+        commands::meeting::delete_meeting_tag,
+        commands::meeting::list_all_meeting_tag_labels,
         commands::templates::list_meeting_templates,
         commands::templates::create_meeting_template,
         commands::templates::update_meeting_template,
         commands::templates::delete_meeting_template,
         commands::translate::translate_text,
+        commands::tts::edge_tts_speak,
         commands::chatgpt_auth::open_chatgpt_login,
         commands::chatgpt_auth::complete_chatgpt_login,
+        commands::soniox::soniox_start,
+        commands::soniox::soniox_send_audio,
+        commands::soniox::soniox_stop,
         helpers::clamshell::is_laptop,
         ollama::check_ollama_status,
         ollama::start_ollama,
@@ -369,6 +429,7 @@ pub fn run() {
             "../src/bindings.ts",
         )
         .expect("Failed to export typescript bindings");
+    patch_typescript_bindings("../src/bindings.ts");
 
     let mut builder = tauri::Builder::default().plugin(
         LogBuilder::new()
@@ -412,6 +473,7 @@ pub fn run() {
         .plugin(tauri_plugin_macos_permissions::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
@@ -427,7 +489,17 @@ pub fn run() {
             FILE_LOG_LEVEL.store(file_log_level.to_level_filter() as u8, Ordering::Relaxed);
             let app_handle = app.handle().clone();
 
-            initialize_core_logic(&app_handle);
+            if let Err(e) = initialize_core_logic(&app_handle) {
+                log::error!("Failed to initialize application: {}", e);
+                // Show a user-facing error dialog then exit gracefully
+                let _ = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "startup-error",
+                    tauri::WebviewUrl::App("index.html".into()),
+                );
+                eprintln!("Startup error: {}", e);
+                std::process::exit(1);
+            }
 
             // Show main window only if not starting hidden
             if !settings.start_hidden {

@@ -78,7 +78,8 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE0NjZCQzQxMUJDREFCRDkKUldUWnE4MGJRYnhtcEJvaHYzN2IzYlpNQTAvNWVQMlIzcUVaOUxJeUxRUFQvL3ZUYzdkNlpKMUQK",
       "endpoints": [
         "https://github.com/chaudl113/meetdy/releases/latest/download/latest.json"
-      ]
+      ],
+      "_comment_endpoint": "VERIFY: ensure chaudl113/meetdy is the canonical production repo. Rotate pubkey via tauri signer generate if key is compromised."
     }
   }
 }
