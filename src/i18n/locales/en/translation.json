@@ -205,7 +205,8 @@
     "availableDescription": "Choose additional models to download for transcription.",
     "noInstalled": "No models installed yet. Download one below to get started.",
     "noAvailable": "All available models are already installed.",
-    "activate": "Activate"
+    "activate": "Activate",
+    "idLabel": "ID:"
   },
   "onboarding": {
     "subtitle": "To get started, choose a transcription model",
@@ -400,6 +401,7 @@
     "postProcessing": {
       "title": "Post Process",
       "disabledNotice": "Post processing is currently disabled. Enable it in Debug settings to configure.",
+      "sessionTokenSaved": "Session token saved",
       "api": {
         "title": "API (OpenAI Compatible)",
         "provider": {
@@ -735,5 +737,11 @@
   },
   "overlay": {
     "transcribing": "Transcribing..."
+  },
+  "errorBoundary": {
+    "icon": "⚠️",
+    "title": "Something went wrong",
+    "description": "The application encountered an unexpected error. You can try reloading.",
+    "tryAgain": "Try Again"
   }
 }

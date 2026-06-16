@@ -40,6 +40,7 @@ const ChatgptPlusLoginControl: React.FC<ChatgptPlusLoginControlProps> = ({
 }) => {
   const [isOpening, setIsOpening] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const { t } = useTranslation();
 
   // Listen for the access token emitted by the injected login script.
   useEffect(() => {
@@ -76,7 +77,7 @@ const ChatgptPlusLoginControl: React.FC<ChatgptPlusLoginControlProps> = ({
           {hasToken ? "Re-login with ChatGPT" : "Login with ChatGPT"}
         </Button>
         {hasToken && (
-          <span className="text-xs text-green-400">Session token saved</span>
+          <span className="text-xs text-green-400">{t("settings.postProcessing.sessionTokenSaved")}</span>
         )}
       </div>
       {status && <p className="text-xs text-mid-gray">{status}</p>}
