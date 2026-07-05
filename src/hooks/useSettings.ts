@@ -44,35 +44,66 @@ interface UseSettingsReturn {
 }
 
 export const useSettings = (): UseSettingsReturn => {
-  const store = useSettingsStore();
+  const settings = useSettingsStore((s) => s.settings);
+  const isLoading = useSettingsStore((s) => s.isLoading);
+  const audioDevices = useSettingsStore((s) => s.audioDevices);
+  const outputDevices = useSettingsStore((s) => s.outputDevices);
+  const postProcessModelOptions = useSettingsStore(
+    (s) => s.postProcessModelOptions,
+  );
+  const isUpdating = useSettingsStore((s) => s.isUpdatingKey);
+  const updateSetting = useSettingsStore((s) => s.updateSetting);
+  const resetSetting = useSettingsStore((s) => s.resetSetting);
+  const refreshSettings = useSettingsStore((s) => s.refreshSettings);
+  const refreshAudioDevices = useSettingsStore((s) => s.refreshAudioDevices);
+  const refreshOutputDevices = useSettingsStore((s) => s.refreshOutputDevices);
+  const updateBinding = useSettingsStore((s) => s.updateBinding);
+  const resetBinding = useSettingsStore((s) => s.resetBinding);
+  const getSetting = useSettingsStore((s) => s.getSetting);
+  const setPostProcessProvider = useSettingsStore(
+    (s) => s.setPostProcessProvider,
+  );
+  const updatePostProcessBaseUrl = useSettingsStore(
+    (s) => s.updatePostProcessBaseUrl,
+  );
+  const updatePostProcessApiKey = useSettingsStore(
+    (s) => s.updatePostProcessApiKey,
+  );
+  const updatePostProcessModel = useSettingsStore(
+    (s) => s.updatePostProcessModel,
+  );
+  const fetchPostProcessModels = useSettingsStore(
+    (s) => s.fetchPostProcessModels,
+  );
+  const initialize = useSettingsStore((s) => s.initialize);
 
   // Initialize on first mount
   useEffect(() => {
-    if (store.isLoading) {
-      store.initialize();
+    if (isLoading) {
+      initialize();
     }
-  }, [store.initialize, store.isLoading]);
+  }, [initialize, isLoading]);
 
   return {
-    settings: store.settings,
-    isLoading: store.isLoading,
-    isUpdating: store.isUpdatingKey,
-    audioDevices: store.audioDevices,
-    outputDevices: store.outputDevices,
-    audioFeedbackEnabled: store.settings?.audio_feedback || false,
-    postProcessModelOptions: store.postProcessModelOptions,
-    updateSetting: store.updateSetting,
-    resetSetting: store.resetSetting,
-    refreshSettings: store.refreshSettings,
-    refreshAudioDevices: store.refreshAudioDevices,
-    refreshOutputDevices: store.refreshOutputDevices,
-    updateBinding: store.updateBinding,
-    resetBinding: store.resetBinding,
-    getSetting: store.getSetting,
-    setPostProcessProvider: store.setPostProcessProvider,
-    updatePostProcessBaseUrl: store.updatePostProcessBaseUrl,
-    updatePostProcessApiKey: store.updatePostProcessApiKey,
-    updatePostProcessModel: store.updatePostProcessModel,
-    fetchPostProcessModels: store.fetchPostProcessModels,
+    settings,
+    isLoading,
+    isUpdating,
+    audioDevices,
+    outputDevices,
+    audioFeedbackEnabled: settings?.audio_feedback || false,
+    postProcessModelOptions,
+    updateSetting,
+    resetSetting,
+    refreshSettings,
+    refreshAudioDevices,
+    refreshOutputDevices,
+    updateBinding,
+    resetBinding,
+    getSetting,
+    setPostProcessProvider,
+    updatePostProcessBaseUrl,
+    updatePostProcessApiKey,
+    updatePostProcessModel,
+    fetchPostProcessModels,
   };
 };

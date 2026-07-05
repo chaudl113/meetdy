@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { listen } from "@tauri-apps/api/event";
 import { Check, Download, Trash2 } from "lucide-react";
 import { commands, type ModelInfo } from "@/bindings";
 import { SettingsGroup } from "../../ui/SettingsGroup";
@@ -10,33 +9,21 @@ import {
   getTranslatedModelDescription,
   getTranslatedModelName,
 } from "../../../lib/utils/modelTranslation";
-
-interface DownloadProgress {
-  model_id: string;
-  downloaded: number;
-  total: number;
-  percentage: number;
-}
-
-interface ModelStateEvent {
-  event_type: string;
-  model_id?: string;
-  model_name?: string;
-  error?: string;
-}
+import { useModelEvents } from "@/hooks/useModelEvents";
+import { useModelEventStore, type DownloadProgress } from "@/stores/modelEventStore";
 
 export const ModelsSettings: React.FC = () => {
   const { t } = useTranslation();
+
+  useModelEvents();
+
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [currentModelId, setCurrentModelId] = useState<string>("");
-  const [downloadProgress, setDownloadProgress] = useState<
-    Map<string, DownloadProgress>
-  >(new Map());
-  const [extractingModels, setExtractingModels] = useState<Set<string>>(
-    new Set(),
-  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
+
+  const currentModelId = useModelEventStore((s) => s.currentModelId);
+  const downloadProgress = useModelEventStore((s) => s.downloadProgress);
+  const extractingModels = useModelEventStore((s) => s.extractingModels);
 
   const loadModels = async () => {
     const result = await commands.getAvailableModels();
@@ -48,93 +35,13 @@ export const ModelsSettings: React.FC = () => {
   const loadCurrentModel = async () => {
     const result = await commands.getCurrentModel();
     if (result.status === "ok") {
-      setCurrentModelId(result.data ?? "");
+      useModelEventStore.getState().setCurrentModelId(result.data ?? "");
     }
   };
 
   useEffect(() => {
     loadModels();
     loadCurrentModel();
-
-    const stateUnlisten = listen<ModelStateEvent>(
-      "model-state-changed",
-      (event) => {
-        const { event_type, model_id, error } = event.payload;
-        if (event_type === "loading_completed" && model_id) {
-          setCurrentModelId(model_id);
-          setBusyModelId(null);
-          setErrorMessage(null);
-        } else if (event_type === "loading_failed") {
-          setErrorMessage(error || "Failed to load model");
-          setBusyModelId(null);
-        }
-      },
-    );
-
-    const progressUnlisten = listen<DownloadProgress>(
-      "model-download-progress",
-      (event) => {
-        const progress = event.payload;
-        setDownloadProgress((prev) => {
-          const next = new Map(prev);
-          next.set(progress.model_id, progress);
-          return next;
-        });
-      },
-    );
-
-    const completeUnlisten = listen<string>(
-      "model-download-complete",
-      (event) => {
-        const modelId = event.payload;
-        setDownloadProgress((prev) => {
-          const next = new Map(prev);
-          next.delete(modelId);
-          return next;
-        });
-        loadModels();
-      },
-    );
-
-    const extractStartUnlisten = listen<string>(
-      "model-extraction-started",
-      (event) => {
-        setExtractingModels((prev) => new Set(prev).add(event.payload));
-      },
-    );
-
-    const extractDoneUnlisten = listen<string>(
-      "model-extraction-completed",
-      (event) => {
-        setExtractingModels((prev) => {
-          const next = new Set(prev);
-          next.delete(event.payload);
-          return next;
-        });
-        loadModels();
-      },
-    );
-
-    const extractFailUnlisten = listen<{ model_id: string; error: string }>(
-      "model-extraction-failed",
-      (event) => {
-        setExtractingModels((prev) => {
-          const next = new Set(prev);
-          next.delete(event.payload.model_id);
-          return next;
-        });
-        setErrorMessage(`Failed to extract model: ${event.payload.error}`);
-      },
-    );
-
-    return () => {
-      stateUnlisten.then((fn) => fn());
-      progressUnlisten.then((fn) => fn());
-      completeUnlisten.then((fn) => fn());
-      extractStartUnlisten.then((fn) => fn());
-      extractDoneUnlisten.then((fn) => fn());
-      extractFailUnlisten.then((fn) => fn());
-    };
   }, []);
 
   const handleSelect = async (modelId: string) => {
@@ -146,7 +53,7 @@ export const ModelsSettings: React.FC = () => {
       setErrorMessage(result.error);
       setBusyModelId(null);
     } else {
-      setCurrentModelId(modelId);
+      useModelEventStore.getState().setCurrentModelId(modelId);
     }
   };
 
@@ -164,7 +71,7 @@ export const ModelsSettings: React.FC = () => {
     if (result.status === "ok") {
       await loadModels();
       if (modelId === currentModelId) {
-        setCurrentModelId("");
+        useModelEventStore.getState().setCurrentModelId("");
       }
     } else {
       setErrorMessage(result.error);
@@ -234,7 +141,7 @@ export const ModelsSettings: React.FC = () => {
   };
 
   const renderDownloadableModel = (model: ModelInfo) => {
-    const progress = downloadProgress.get(model.id);
+    const progress = downloadProgress[model.id];
     const isDownloading = !!progress;
     const isExtracting = extractingModels.has(model.id);
 

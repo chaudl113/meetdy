@@ -29,6 +29,72 @@ const DisabledNotice: React.FC<{ children: React.ReactNode }> = ({
   </div>
 );
 
+const PromptFormFields: React.FC<{
+  draftName: string;
+  draftText: string;
+  onNameChange: (v: string) => void;
+  onTextChange: (v: string) => void;
+  disabled?: boolean;
+}> = ({ draftName, draftText, onNameChange, onTextChange, disabled }) => {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="space-y-2 flex flex-col">
+        <label className="text-sm font-semibold">
+          {t("settings.postProcessing.prompts.promptLabel")}
+        </label>
+        <Input
+          type="text"
+          value={draftName}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder={t("settings.postProcessing.prompts.promptLabelPlaceholder")}
+          variant="compact"
+          disabled={disabled}
+        />
+      </div>
+      <div className="space-y-2 flex flex-col">
+        <label className="text-sm font-semibold">
+          {t("settings.postProcessing.prompts.promptInstructions")}
+        </label>
+        <Textarea
+          value={draftText}
+          onChange={(e) => onTextChange(e.target.value)}
+          placeholder={t("settings.postProcessing.prompts.promptInstructionsPlaceholder")}
+          disabled={disabled}
+        />
+        <p
+          className="text-xs text-mid-gray/70"
+          dangerouslySetInnerHTML={{
+            __html: t("settings.postProcessing.prompts.promptTip"),
+          }}
+        />
+      </div>
+    </>
+  );
+};
+
+const TemplateInfoBar: React.FC<{
+  template: PromptTemplate;
+  onClear: () => void;
+}> = ({ template, onClear }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-between">
+      <div className="flex items-center gap-2 text-sm">
+        <span>{template.icon}</span>
+        <span className="text-text">
+          {t("settings.postProcessing.prompts.usingTemplate", {
+            name: t(template.nameKey),
+          })}
+        </span>
+      </div>
+      <button onClick={onClear} className="text-sm text-primary hover:underline">
+        {t("common.clear")}
+      </button>
+    </div>
+  );
+};
+
 interface ChatgptPlusLoginControlProps {
   hasToken: boolean;
   onTokenReceived: (token: string) => void;
@@ -432,22 +498,7 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
 
         {/* Applied Template Info */}
         {appliedTemplate && (
-          <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm">
-              <span>{appliedTemplate.icon}</span>
-              <span className="text-text">
-                {t("settings.postProcessing.prompts.usingTemplate", {
-                  name: t(appliedTemplate.nameKey),
-                })}
-              </span>
-            </div>
-            <button
-              onClick={handleClearTemplate}
-              className="text-sm text-primary hover:underline"
-            >
-              {t("common.clear")}
-            </button>
-          </div>
+          <TemplateInfoBar template={appliedTemplate} onClear={handleClearTemplate} />
         )}
 
         <div className="flex gap-2">
@@ -480,41 +531,13 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
 
         {!isCreating && ((hasPrompts && selectedPrompt) || appliedTemplate) && (
           <div className="space-y-3">
-            <div className="space-y-2 flex flex-col">
-              <label className="text-sm font-semibold">
-                {t("settings.postProcessing.prompts.promptLabel")}
-              </label>
-              <Input
-                type="text"
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                placeholder={t(
-                  "settings.postProcessing.prompts.promptLabelPlaceholder",
-                )}
-                variant="compact"
-                disabled={!!appliedTemplate}
-              />
-            </div>
-
-            <div className="space-y-2 flex flex-col">
-              <label className="text-sm font-semibold">
-                {t("settings.postProcessing.prompts.promptInstructions")}
-              </label>
-              <Textarea
-                value={draftText}
-                onChange={(e) => setDraftText(e.target.value)}
-                placeholder={t(
-                  "settings.postProcessing.prompts.promptInstructionsPlaceholder",
-                )}
-                disabled={!!appliedTemplate}
-              />
-              <p
-                className="text-xs text-mid-gray/70"
-                dangerouslySetInnerHTML={{
-                  __html: t("settings.postProcessing.prompts.promptTip"),
-                }}
-              />
-            </div>
+            <PromptFormFields
+              draftName={draftName}
+              draftText={draftText}
+              onNameChange={setDraftName}
+              onTextChange={setDraftText}
+              disabled={!!appliedTemplate}
+            />
 
             {appliedTemplate ? (
               <div className="flex gap-2 pt-2">
@@ -581,39 +604,12 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
 
         {isCreating && (
           <div className="space-y-3">
-            <div className="space-y-2 block flex flex-col">
-              <label className="text-sm font-semibold text-text">
-                {t("settings.postProcessing.prompts.promptLabel")}
-              </label>
-              <Input
-                type="text"
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                placeholder={t(
-                  "settings.postProcessing.prompts.promptLabelPlaceholder",
-                )}
-                variant="compact"
-              />
-            </div>
-
-            <div className="space-y-2 flex flex-col">
-              <label className="text-sm font-semibold">
-                {t("settings.postProcessing.prompts.promptInstructions")}
-              </label>
-              <Textarea
-                value={draftText}
-                onChange={(e) => setDraftText(e.target.value)}
-                placeholder={t(
-                  "settings.postProcessing.prompts.promptInstructionsPlaceholder",
-                )}
-              />
-              <p
-                className="text-xs text-mid-gray/70"
-                dangerouslySetInnerHTML={{
-                  __html: t("settings.postProcessing.prompts.promptTip"),
-                }}
-              />
-            </div>
+            <PromptFormFields
+              draftName={draftName}
+              draftText={draftText}
+              onNameChange={setDraftName}
+              onTextChange={setDraftText}
+            />
 
             <div className="flex gap-2 pt-2">
               <Button

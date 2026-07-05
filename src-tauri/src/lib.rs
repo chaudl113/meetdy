@@ -11,6 +11,7 @@ mod llm_client;
 mod managers;
 mod ollama;
 mod overlay;
+mod panic_hook;
 mod settings;
 mod shortcut;
 mod signal_handle;
@@ -252,6 +253,8 @@ fn trigger_update_check(app: AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    panic_hook::set_panic_hook();
+
     // Parse console logging directives from RUST_LOG, falling back to info-level logging
     // when the variable is unset
     let console_filter = build_console_filter();

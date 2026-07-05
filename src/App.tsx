@@ -1,19 +1,49 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { Toaster, toast } from "sonner";
+import { Loader2 } from "lucide-react";
 import "./App.css";
 import AccessibilityPermissions from "./components/AccessibilityPermissions";
 import Footer from "./components/footer";
 import Onboarding from "./components/onboarding";
-import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
+import { Sidebar, SidebarSection } from "./components/Sidebar";
 import { useSettings } from "./hooks/useSettings";
 import { commands } from "@/bindings";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useMeetingStore } from "@/stores/meetingStore";
 
+const GeneralSettings = lazy(() => import("./components/settings/general/GeneralSettings").then(m => ({ default: m.GeneralSettings })));
+const MeetingMode = lazy(() => import("./components/meeting/MeetingMode").then(m => ({ default: m.MeetingMode })));
+const ModelsSettings = lazy(() => import("./components/settings/models/ModelsSettings").then(m => ({ default: m.ModelsSettings })));
+const AdvancedSettings = lazy(() => import("./components/settings/advanced/AdvancedSettings").then(m => ({ default: m.AdvancedSettings })));
+const PostProcessingSettings = lazy(() => import("./components/settings/post-processing/PostProcessingSettings").then(m => ({ default: m.PostProcessingSettings })));
+const HistorySettings = lazy(() => import("./components/settings/history/HistorySettings").then(m => ({ default: m.HistorySettings })));
+const DebugSettings = lazy(() => import("./components/settings/debug/DebugSettings").then(m => ({ default: m.DebugSettings })));
+const AboutSettings = lazy(() => import("./components/settings/about/AboutSettings").then(m => ({ default: m.AboutSettings })));
+
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center py-12">
+    <Loader2 className="h-6 w-6 animate-spin text-text/50" />
+  </div>
+);
+
+const sectionComponents: Record<SidebarSection, React.LazyExoticComponent<React.ComponentType<object>>> = {
+  general: GeneralSettings,
+  meeting: MeetingMode,
+  models: ModelsSettings,
+  advanced: AdvancedSettings,
+  postprocessing: PostProcessingSettings,
+  recordings: HistorySettings,
+  debug: DebugSettings,
+  about: AboutSettings,
+};
+
 const renderSettingsContent = (section: SidebarSection) => {
-  const ActiveComponent =
-    SECTIONS_CONFIG[section]?.component || SECTIONS_CONFIG.general.component;
-  return <ActiveComponent />;
+  const ActiveComponent = sectionComponents[section] || GeneralSettings;
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <ActiveComponent />
+    </Suspense>
+  );
 };
 
 function App() {
@@ -45,7 +75,6 @@ function App() {
   // Handle keyboard shortcuts for debug mode toggle
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Check for Ctrl+Shift+D (Windows/Linux) or Cmd+Shift+D (macOS)
       const isDebugShortcut =
         event.shiftKey &&
         event.key.toLowerCase() === "d" &&
@@ -53,19 +82,18 @@ function App() {
 
       if (isDebugShortcut) {
         event.preventDefault();
+        const { settings } = useSettingsStore.getState();
         const currentDebugMode = settings?.debug_mode ?? false;
         updateSetting("debug_mode", !currentDebugMode);
       }
     };
 
-    // Add event listener when component mounts
     document.addEventListener("keydown", handleKeyDown);
 
-    // Cleanup event listener when component unmounts
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [settings?.debug_mode, updateSetting]);
+  }, [updateSetting]);
 
   const checkOnboardingStatus = async () => {
     try {

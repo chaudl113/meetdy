@@ -2,7 +2,12 @@ use log::{debug, warn};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Once;
+use std::time::Instant;
+
+static POST_PROCESS_DEFAULTS_INIT: Once = Once::new();
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
@@ -640,6 +645,14 @@ fn default_post_process_prompts() -> Vec<LLMPrompt> {
 
 fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
     let mut changed = false;
+    POST_PROCESS_DEFAULTS_INIT.call_once(|| {
+        changed = apply_post_process_defaults(settings);
+    });
+    changed
+}
+
+fn apply_post_process_defaults(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
     for provider in default_post_process_providers() {
         if settings
             .post_process_providers
@@ -825,7 +838,51 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     settings
 }
 
+/// Simple TTL-based cache for AppSettings to avoid reading/deserializing JSON
+/// on every get_settings() call.
+struct SettingsCache {
+    settings: AppSettings,
+    timestamp: Instant,
+    ttl: std::time::Duration,
+}
+
+impl SettingsCache {
+    fn new(settings: AppSettings) -> Self {
+        Self {
+            settings,
+            timestamp: Instant::now(),
+            ttl: std::time::Duration::from_secs(1),
+        }
+    }
+
+    fn get(&self) -> Option<&AppSettings> {
+        if self.timestamp.elapsed() < self.ttl {
+            Some(&self.settings)
+        } else {
+            None
+        }
+    }
+
+    fn update(&mut self, settings: AppSettings) {
+        self.settings = settings;
+        self.timestamp = Instant::now();
+    }
+}
+
+thread_local! {
+    static SETTINGS_CACHE: RefCell<Option<SettingsCache>> = const { RefCell::new(None) };
+}
+
 pub fn get_settings(app: &AppHandle) -> AppSettings {
+    // Check thread-local cache first
+    let cached = SETTINGS_CACHE.with(|cache| {
+        cache.borrow().as_ref().and_then(|c| c.get().cloned())
+    });
+
+    if let Some(settings) = cached {
+        return settings;
+    }
+
     let store = app
         .store(SETTINGS_STORE_PATH)
         .expect("Failed to initialize store");
@@ -846,6 +903,15 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
+    // Update cache
+    SETTINGS_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        match cache.as_mut() {
+            Some(c) => c.update(settings.clone()),
+            None => *cache = Some(SettingsCache::new(settings.clone())),
+        }
+    });
+
     settings
 }
 
@@ -855,6 +921,15 @@ pub fn write_settings(app: &AppHandle, settings: AppSettings) {
         .expect("Failed to initialize store");
 
     store.set("settings", serde_json::to_value(&settings).unwrap());
+
+    // Invalidate cache on write
+    SETTINGS_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        match cache.as_mut() {
+            Some(c) => c.update(settings),
+            None => *cache = Some(SettingsCache::new(settings)),
+        }
+    });
 }
 
 pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {

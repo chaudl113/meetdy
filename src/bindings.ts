@@ -844,6 +844,9 @@ async getMeetingSummary(sessionId: string) : Promise<Result<string | null, strin
 },
 /**
  * Adds a timestamped note to an existing meeting session.
+ * 
+ * The timestamp is given in seconds from the start of the recording and is
+ * stored as-is. Pass `0` for notes captured outside a recording.
  */
 async addMeetingNote(sessionId: string, timestampSeconds: number, content: string) : Promise<Result<MeetingNote, string>> {
     try {
@@ -1035,6 +1038,41 @@ export type HistoryEntry = { id: number; file_name: string; timestamp: number; s
 export type LLMPrompt = { id: string; name: string; prompt: string }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
 /**
+ * A short, timestamped note attached to a meeting session.
+ * 
+ * Notes are captured during a recording (via the "Add Note" button) or
+ * after the fact in the Notes tab. They are stored in their own table
+ * keyed by `session_id` with `ON DELETE CASCADE` so removing a session
+ * also removes its notes.
+ */
+export type MeetingNote = { 
+/**
+ * Unique identifier (UUID).
+ */
+id: string; 
+/**
+ * Session this note belongs to.
+ */
+session_id: string; 
+/**
+ * Offset from the start of the recording, in seconds.
+ * May be `0` for notes added before recording starts or after it stops.
+ */
+timestamp_seconds: number; 
+/**
+ * Free-form note content (plain text, may contain newlines).
+ */
+content: string; 
+/**
+ * Optional author label. Reserved for future multi-user support;
+ * currently always `None` from the UI.
+ */
+author: string | null; 
+/**
+ * Unix timestamp (seconds) when the note was created.
+ */
+created_at: number }
+/**
  * Represents a meeting session with its metadata and file references.
  * 
  * Each meeting session has a unique ID and is stored in a dedicated folder
@@ -1089,17 +1127,6 @@ summary_path: string | null;
  * Template ID if this meeting was created from a template
  */
 template_id?: string | null }
-/**
- * A short, timestamped note attached to a meeting session.
- */
-export type MeetingNote = {
-    id: string;
-    session_id: string;
-    timestamp_seconds: number;
-    content: string;
-    author: string | null;
-    created_at: number;
-}
 /**
  * Represents the lifecycle status of a meeting session.
  * 

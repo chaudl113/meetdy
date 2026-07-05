@@ -1,5 +1,6 @@
 import i18next from "eslint-plugin-i18next";
 import reactHooks from "eslint-plugin-react-hooks";
+import tseslint from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 
 export default [
@@ -16,12 +17,13 @@ export default [
     plugins: {
       i18next,
       "react-hooks": reactHooks,
+      "@typescript-eslint": tseslint,
     },
     rules: {
-      // React hooks rules
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
-      // Catch text in JSX that should be translated
+      "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/prefer-const": "warn",
       "i18next/no-literal-string": [
         "error",
         {
@@ -38,6 +40,10 @@ export default [
           ], // Ignore common non-translatable attributes
         },
       ],
+      "sort-imports": ["warn", {
+        "ignoreDeclarationSort": false,
+        "ignoreCase": true,
+      }],
     },
   },
 ];

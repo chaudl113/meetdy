@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::audio_toolkit::save_wav_file;
@@ -179,7 +180,7 @@ impl HistoryManager {
     /// Save a transcription to history (both database and WAV file)
     pub async fn save_transcription(
         &self,
-        audio_samples: Vec<f32>,
+        audio_samples: Arc<Vec<f32>>,
         transcription_text: String,
         post_processed_text: Option<String>,
         post_process_prompt: Option<String>,

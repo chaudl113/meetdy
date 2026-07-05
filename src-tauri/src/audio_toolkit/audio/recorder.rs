@@ -358,9 +358,11 @@ fn run_consumer(
         };
 
         // ---------- spectrum processing ---------------------------------- //
-        if let Some(buckets) = visualizer.feed(&raw) {
-            if let Some(cb) = &level_cb {
-                cb(buckets);
+        if recording {
+            if let Some(buckets) = visualizer.feed(&raw) {
+                if let Some(cb) = &level_cb {
+                    cb(buckets);
+                }
             }
         }
 

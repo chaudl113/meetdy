@@ -1,14 +1,19 @@
 use super::{VadFrame, VoiceActivityDetector};
 use anyhow::Result;
-use std::collections::VecDeque;
 
 pub struct SmoothedVad {
     inner_vad: Box<dyn VoiceActivityDetector>,
+    #[allow(dead_code)]
     prefill_frames: usize,
     hangover_frames: usize,
     onset_frames: usize,
 
-    frame_buffer: VecDeque<Vec<f32>>,
+    /// Fixed-size ring buffer of pre-allocated Vec<f32> to avoid allocating
+    /// a new Vec every 30ms frame in push_frame().
+    frame_buffer: Vec<Vec<f32>>,
+    frame_buffer_write_idx: usize,
+    frame_buffer_count: usize,
+
     hangover_counter: usize,
     onset_counter: usize,
     in_speech: bool,
@@ -23,12 +28,15 @@ impl SmoothedVad {
         hangover_frames: usize,
         onset_frames: usize,
     ) -> Self {
+        let ring_capacity = prefill_frames + 1;
         Self {
             inner_vad,
             prefill_frames,
             hangover_frames,
             onset_frames,
-            frame_buffer: VecDeque::new(),
+            frame_buffer: (0..ring_capacity).map(|_| Vec::new()).collect(),
+            frame_buffer_write_idx: 0,
+            frame_buffer_count: 0,
             hangover_counter: 0,
             onset_counter: 0,
             in_speech: false,
@@ -39,10 +47,14 @@ impl SmoothedVad {
 
 impl VoiceActivityDetector for SmoothedVad {
     fn push_frame<'a>(&'a mut self, frame: &'a [f32]) -> Result<VadFrame<'a>> {
-        // 1. Buffer every incoming frame for possible pre-roll
-        self.frame_buffer.push_back(frame.to_vec());
-        while self.frame_buffer.len() > self.prefill_frames + 1 {
-            self.frame_buffer.pop_front();
+        // 1. Copy frame data into the current ring buffer slot (no allocation)
+        let cap = self.frame_buffer.len();
+        let slot = &mut self.frame_buffer[self.frame_buffer_write_idx];
+        slot.clear();
+        slot.extend_from_slice(frame);
+        self.frame_buffer_write_idx = (self.frame_buffer_write_idx + 1) % cap;
+        if self.frame_buffer_count < cap {
+            self.frame_buffer_count += 1;
         }
 
         // 2. Delegate to the wrapped boolean VAD
@@ -58,10 +70,11 @@ impl VoiceActivityDetector for SmoothedVad {
                     self.hangover_counter = self.hangover_frames;
                     self.onset_counter = 0; // Reset for next time
 
-                    // Collect prefill + current frame
+                    // Collect prefill + current frame from ring buffer
                     self.temp_out.clear();
-                    for buf in &self.frame_buffer {
-                        self.temp_out.extend(buf);
+                    for i in 0..self.frame_buffer_count {
+                        let idx = (self.frame_buffer_write_idx + cap - self.frame_buffer_count + i) % cap;
+                        self.temp_out.extend(&self.frame_buffer[idx]);
                     }
                     Ok(VadFrame::Speech(&self.temp_out))
                 } else {
@@ -96,7 +109,11 @@ impl VoiceActivityDetector for SmoothedVad {
     }
 
     fn reset(&mut self) {
-        self.frame_buffer.clear();
+        self.frame_buffer_write_idx = 0;
+        self.frame_buffer_count = 0;
+        for slot in &mut self.frame_buffer {
+            slot.clear();
+        }
         self.hangover_counter = 0;
         self.onset_counter = 0;
         self.in_speech = false;

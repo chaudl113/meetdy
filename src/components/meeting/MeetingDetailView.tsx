@@ -11,42 +11,23 @@ import {
   AlertCircle,
   Trash2,
   Loader2,
-  Languages,
 } from "lucide-react";
 import { commands, type MeetingSession } from "@/bindings";
 import { formatDuration, useMeetingStore } from "../../stores/meetingStore";
 import { AudioPlayer } from "../ui/AudioPlayer";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { MeetingSummary } from "./MeetingSummary";
 import { useSettings } from "../../hooks/useSettings";
 import { isAiConfigured } from "../../lib/utils/aiConfig";
+import { MeetingDeleteDialog } from "./MeetingDeleteDialog";
+import { TranslationSection, TranslationLanguageSelect } from "./TranslationSection";
+import { SummarySection } from "./SummarySection";
 
 interface MeetingDetailViewProps {
   session: MeetingSession;
   onClose: () => void;
 }
 
-const TRANSLATE_LANGUAGES: { code: string; label: string }[] = [
-  { code: "en", label: "English" },
-  { code: "vi", label: "Tiếng Việt" },
-  { code: "zh-CN", label: "中文 (简体)" },
-  { code: "zh-TW", label: "中文 (繁體)" },
-  { code: "ja", label: "日本語" },
-  { code: "ko", label: "한국어" },
-  { code: "fr", label: "Français" },
-  { code: "de", label: "Deutsch" },
-  { code: "es", label: "Español" },
-  { code: "it", label: "Italiano" },
-  { code: "pt", label: "Português" },
-  { code: "ru", label: "Русский" },
-  { code: "th", label: "ภาษาไทย" },
-  { code: "id", label: "Bahasa Indonesia" },
-];
-
-/**
- * Formats a Unix timestamp to a localized date/time string
- */
 function formatDateTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
@@ -74,10 +55,6 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
 
   // Translation state
   const [translateTarget, setTranslateTarget] = useState<string>("");
-  const [translatedText, setTranslatedText] = useState<string | null>(null);
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [translateError, setTranslateError] = useState<string | null>(null);
-  const [translatedCopied, setTranslatedCopied] = useState(false);
 
   // Ref for focus trap
   const modalRef = useRef<HTMLDivElement>(null);
@@ -233,61 +210,6 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
       console.error("Failed to copy:", err);
     }
   };
-
-  const handleCopyTranslated = async () => {
-    if (!translatedText) return;
-    try {
-      await navigator.clipboard.writeText(translatedText);
-      setTranslatedCopied(true);
-      setTimeout(() => setTranslatedCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
-
-  const handleTranslate = useCallback(
-    async (targetLang: string) => {
-      if (!transcript || !targetLang) {
-        setTranslatedText(null);
-        setTranslateError(null);
-        return;
-      }
-      setIsTranslating(true);
-      setTranslateError(null);
-      try {
-        const result = await commands.translateText(
-          transcript,
-          "auto",
-          targetLang,
-        );
-        if (result.status === "ok") {
-          setTranslatedText(result.data);
-        } else {
-          setTranslateError(result.error);
-          setTranslatedText(null);
-        }
-      } catch (err) {
-        setTranslateError(
-          err instanceof Error ? err.message : "Translation failed",
-        );
-        setTranslatedText(null);
-      } finally {
-        setIsTranslating(false);
-      }
-    },
-    [transcript],
-  );
-
-  // Re-translate when transcript changes if a target language was already selected
-  useEffect(() => {
-    if (translateTarget && transcript) {
-      handleTranslate(translateTarget);
-    } else {
-      setTranslatedText(null);
-      setTranslateError(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcript]);
 
   const handleDelete = async () => {
     console.log("Delete button clicked, session:", currentSession.id);
@@ -478,7 +400,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
 
           {/* AI Summary - only shown when AI post-processing is configured */}
           {currentSession.status === "completed" && aiConfigured && (
-            <MeetingSummary
+            <SummarySection
               sessionId={currentSession.id}
               summary={summary}
               hasSummary={!!currentSession.summary_path}
@@ -505,27 +427,10 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                   {t("meeting.detail.transcript", "Transcript")}
                 </h3>
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 text-xs text-mid-gray">
-                    <Languages className="h-3.5 w-3.5" />
-                    <select
-                      value={translateTarget}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setTranslateTarget(val);
-                        handleTranslate(val);
-                      }}
-                      className="bg-dark-gray/50 border border-mid-gray/30 rounded px-2 py-1 text-xs text-white hover:border-mid-gray/60 focus:outline-none focus:border-logo-primary"
-                    >
-                      <option value="">
-                        {t("meeting.detail.translate.none", "No translation")}
-                      </option>
-                      {TRANSLATE_LANGUAGES.map((lang) => (
-                        <option key={lang.code} value={lang.code}>
-                          {lang.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <TranslationLanguageSelect
+                    value={translateTarget}
+                    onChange={(val) => setTranslateTarget(val)}
+                  />
                   <button
                     onClick={handleCopyTranscript}
                     className="inline-flex items-center gap-1.5 px-2 py-1 text-xs text-mid-gray hover:text-white hover:bg-mid-gray/20 rounded transition-colors"
@@ -544,63 +449,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                   </button>
                 </div>
               </div>
-              {translateTarget ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <div className="bg-dark-gray/30 rounded-lg p-4">
-                    <p className="text-xs text-mid-gray mb-2 uppercase tracking-wide">
-                      {t("meeting.detail.translate.original", "Original")}
-                    </p>
-                    <p className="text-sm whitespace-pre-wrap">{transcript}</p>
-                  </div>
-                  <div className="bg-dark-gray/30 rounded-lg p-4 relative">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs text-mid-gray uppercase tracking-wide">
-                        {TRANSLATE_LANGUAGES.find(
-                          (l) => l.code === translateTarget,
-                        )?.label ?? translateTarget}
-                      </p>
-                      {translatedText && !isTranslating && (
-                        <button
-                          onClick={handleCopyTranslated}
-                          className="inline-flex items-center gap-1 text-[10px] text-mid-gray hover:text-white transition-colors"
-                        >
-                          {translatedCopied ? (
-                            <Check className="h-3 w-3" />
-                          ) : (
-                            <Copy className="h-3 w-3" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                    {isTranslating ? (
-                      <div className="flex items-center gap-2 text-sm text-mid-gray">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        {t(
-                          "meeting.detail.translate.loading",
-                          "Translating...",
-                        )}
-                      </div>
-                    ) : translateError ? (
-                      <p className="text-sm text-red-400">{translateError}</p>
-                    ) : translatedText ? (
-                      <p className="text-sm whitespace-pre-wrap">
-                        {translatedText}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-mid-gray italic">
-                        {t(
-                          "meeting.detail.translate.empty",
-                          "No translation yet",
-                        )}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-dark-gray/30 rounded-lg p-4">
-                  <p className="text-sm whitespace-pre-wrap">{transcript}</p>
-                </div>
-              )}
+              <TranslationSection transcript={transcript} translateTarget={translateTarget} />
             </div>
           ) : currentSession.status === "completed" ? (
             <div className="text-center py-8 text-mid-gray">
@@ -617,40 +466,10 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
 
       {/* Delete Confirmation Dialog */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
-          <div className="bg-background border border-mid-gray/30 rounded-xl p-6 max-w-sm w-full mx-4">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-red-500/20 rounded-full">
-                <Trash2 className="h-5 w-5 text-red-400" />
-              </div>
-              <h3 className="text-lg font-semibold">
-                {t("meeting.detail.deleteTitle", "Delete Meeting")}
-              </h3>
-            </div>
-            <p className="text-mid-gray mb-6">
-              {t(
-                "meeting.detail.confirmDelete",
-                "Are you sure you want to delete this meeting? This action cannot be undone.",
-              )}
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2 rounded-lg border border-mid-gray/30 hover:bg-mid-gray/20 transition-colors"
-              >
-                {t("common.cancel", "Cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={confirmDelete}
-                className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
-              >
-                {t("common.delete", "Delete")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <MeetingDeleteDialog
+          onCancel={() => setShowDeleteConfirm(false)}
+          onConfirm={confirmDelete}
+        />
       )}
     </div>
   );

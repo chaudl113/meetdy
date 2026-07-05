@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Monitor,
@@ -184,11 +184,11 @@ export const StartMeeting: React.FC = () => {
     },
   ];
 
-  const tips = [
+  const tips = useMemo(() => [
     t("startMeeting.tips.tip1"),
     t("startMeeting.tips.tip2"),
     t("startMeeting.tips.tip3"),
-  ];
+  ], [t]);
 
   return (
     <div className="w-full max-w-[1200px]">

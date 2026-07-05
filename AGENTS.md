@@ -153,9 +153,34 @@ This repo uses Harness. Before work, read:
 - `docs/FEATURE_INTAKE.md`
 - `docs/ARCHITECTURE.md`
 - `docs/CONTEXT_RULES.md`
+- `docs/CONTEXT.md` (domain glossary)
+- `docs/DOMAIN.md` (domain model)
+- `docs/TOOL_REGISTRY.md`
+- `docs/TEST_MATRIX.md`
 - `scripts/bin/harness-cli query matrix` on macOS/Linux, or `.\scripts\bin\harness-cli.exe query matrix` on Windows
 
 Use the Rust Harness CLI at `scripts/bin/harness-cli` on macOS/Linux or
 `scripts/bin/harness-cli.exe` on Windows as the main operational tool.
+
+## Project Docs
+
+- `docs/ADR/` — architecture decision records (application-level)
+- `docs/decisions/` — Harness infrastructure decisions
+- `docs/API/` — Tauri command contracts + event schemas
+- `docs/RUNBOOK/` — development, build, model setup procedures
+
+## Skills
+
+Skills live in `.claude/skills/`:
+
+| Category | User-invoked (type `/name`) | Model-invoked (auto) |
+|---|---|---|
+| Engineering | `grill-with-docs`, `to-prd`, `to-issues`, `improve-codebase-architecture`, `setup-matt-pocock-skills`, `triage` | `tdd`, `diagnosing-bugs`, `codebase-design`, `domain-modeling`, `prototype`, `code-review` |
+| Productivity | `handoff` | `grilling` |
+| Project | (add project-specific skills here) | — |
 <!-- HARNESS:END -->
 
+<!-- maestro:start -->
+# Maestro Harness Protocol
+Read .maestro/harness/HARNESS.md first before working in this repo.
+<!-- maestro:end -->

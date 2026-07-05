@@ -1,0 +1,17 @@
+# >>> maestro >>>
+# Maestro local-only paths
+runs/
+channels/
+conflicts.jsonl
+maestro-gate.lock
+backups/
+worktree/
+index/
+install-lock.yaml
+update-check
+tasks/*/evidence/
+tasks/*/local/
+archive/**/evidence/
+archive/**/local/
+archive/**/runs/
+# <<< maestro <<<

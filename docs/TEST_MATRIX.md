@@ -1,33 +1,50 @@
 # Test Matrix
 
-This file maps product behavior to proof.
+## Backend (Rust)
 
-No product behavior has been defined or implemented yet. Do not mark a row
-implemented until tests or validation evidence exist.
+| Module | Unit Tests | Integration | Notes |
+|--------|-----------|-------------|-------|
+| managers/meeting | ✅ tests.rs | ❌ | Session lifecycle, state transitions |
+| managers/audio | ❌ | ❌ | Needs cpal device mocking |
+| managers/model | ❌ | ❌ | Needs HTTP mocking |
+| managers/transcription | ❌ | ❌ | Needs model binary |
+| audio_toolkit/vad | ❌ | ❌ | Needs ONNX model |
+| commands/ | ❌ | ❌ | Covered by manager tests |
 
-## Status Values
+## Frontend (TypeScript/React)
 
-| Status | Meaning |
-| --- | --- |
-| planned | Accepted as intended behavior, not implemented |
-| in_progress | Actively being built |
-| implemented | Implemented and proof exists |
-| changed | Contract changed after earlier implementation |
-| retired | No longer part of the product contract |
+| Area | Component Tests | E2E | Notes |
+|------|----------------|-----|-------|
+| stores (Zustand) | ❌ | ❌ | No test runner configured |
+| components | ❌ | ❌ | Needs vitest + jsdom |
+| hooks | ❌ | ❌ | Needs React Testing Library |
 
-## Matrix
+## Platform Coverage
 
-| Story | Contract | Unit | Integration | E2E | Platform | Status | Evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| TBD | Add rows when story packets are created | no | no | no | no | planned | none |
+| Platform | CI Build | CI Test | Manual Test |
+|----------|---------|---------|-------------|
+| macOS ARM64 | ✅ | ❌ | ✅ |
+| macOS Intel | ✅ | ❌ | ❌ |
+| Windows x64 | ✅ | ❌ | ✅ |
+| Windows ARM64 | ✅ | ❌ | ❌ |
+| Linux Ubuntu 22.04 | ✅ | ✅ | ❌ |
+| Linux Ubuntu 24.04 | ✅ | ❌ | ❌ |
 
-## Evidence Rules
+## Test Gaps & Priorities
 
-- Unit proof covers pure domain and application rules.
-- Integration proof covers backend enforcement, data integrity, provider
-  behavior, jobs, or service contracts.
-- E2E proof covers user-visible browser flows.
-- Platform proof covers only shell, deployment, mobile, desktop, or runtime
-  behavior that cannot be proven in lower layers.
-- A story can be implemented without every proof column if the story packet
-  explains why.
+1. **HIGH**: Add vitest + basic store tests (settingsStore, meetingStore)
+2. **HIGH**: Platform-specific unit tests in CI (macOS, Windows)
+3. **MEDIUM**: VAD pipeline tests with sample audio
+4. **MEDIUM**: Model download integration tests
+5. **LOW**: E2E transcription tests (require Whisper model)
+6. **LOW**: Component rendering tests
+
+## Running Tests
+
+```bash
+# Backend
+cd src-tauri && cargo test --lib
+
+# Frontend (future)
+bun run test
+```

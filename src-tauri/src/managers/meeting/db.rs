@@ -3,11 +3,60 @@
 
 use anyhow::Result;
 use log::{debug, info};
-use rusqlite::{params, Connection, OptionalExtension};
+use r2d2::ManageConnection;
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
 use std::path::PathBuf;
 
 use super::models::{AudioSourceType, MeetingNote, MeetingSession, MeetingStatus};
+
+/// Custom r2d2 ManageConnection for rusqlite::Connection.
+/// Avoids the version conflict between r2d2_sqlite (rusqlite 0.32) and our
+/// project's rusqlite 0.37.
+pub(crate) struct SqliteConnectionManager {
+    path: PathBuf,
+}
+
+impl SqliteConnectionManager {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl ManageConnection for SqliteConnectionManager {
+    type Connection = Connection;
+    type Error = rusqlite::Error;
+
+    fn connect(&self) -> std::result::Result<Connection, rusqlite::Error> {
+        Connection::open_with_flags(
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+    }
+
+    fn is_valid(&self, conn: &mut Connection) -> std::result::Result<(), rusqlite::Error> {
+        conn.execute_batch("SELECT 1")
+    }
+
+    fn has_broken(&self, conn: &mut Connection) -> bool {
+        conn.is_autocommit()
+    }
+}
+
+/// Alias for the pool type used throughout the meeting module.
+pub type Pool = r2d2::Pool<SqliteConnectionManager>;
+
+/// Connection pool for the meetings SQLite database.
+#[derive(Clone)]
+pub struct DbPool(Pool);
+
+impl DbPool {
+    pub fn get(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
+        Ok(self.0.get()?)
+    }
+}
 
 /// Database migrations for meeting sessions.
 /// Each migration is applied in order. The library tracks which migrations
@@ -52,18 +101,19 @@ static MIGRATIONS: &[M] = &[
     ),
 ];
 
-/// Initialize the meeting sessions database and run any pending migrations.
+/// Initialize the meeting sessions database and return a connection pool.
 ///
-/// This function opens (or creates) the database at the specified path and
-/// applies all pending migrations. It follows the same pattern as HistoryManager.
+/// This function opens (or creates) the database at the specified path,
+/// applies all pending migrations, then wraps the database in an r2d2
+/// connection pool for reuse across CRUD operations.
 ///
 /// # Arguments
 /// * `db_path` - Path to the SQLite database file
 ///
 /// # Returns
-/// * `Ok(())` if the database was initialized successfully
+/// * `Ok(DbPool)` - Connection pool for the initialized database
 /// * `Err` if the database could not be opened or migrations failed
-pub fn init_meeting_database(db_path: &PathBuf) -> Result<()> {
+pub fn init_meeting_database(db_path: &PathBuf) -> Result<DbPool> {
     info!("Initializing meeting database at {:?}", db_path);
 
     let mut conn = Connection::open(db_path)?;
@@ -100,7 +150,15 @@ pub fn init_meeting_database(db_path: &PathBuf) -> Result<()> {
         );
     }
 
-    Ok(())
+    // Drop the migration connection before creating the pool
+    drop(conn);
+
+    let manager = SqliteConnectionManager::new(db_path.clone());
+    let pool = r2d2::Pool::builder()
+        .max_size(4)
+        .build(manager)?;
+
+    Ok(DbPool(pool))
 }
 
 /// Helper functions for database serialization/deserialization of enums.
@@ -161,14 +219,9 @@ pub(crate) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<MeetingSes
     })
 }
 
-/// Gets a connection to the meetings database.
-pub(crate) fn get_connection(db_path: &PathBuf) -> Result<Connection> {
-    Ok(Connection::open(db_path)?)
-}
-
 /// Creates a new session record in the database.
-pub(crate) fn insert_session(db_path: &PathBuf, session: &MeetingSession) -> Result<()> {
-    let conn = get_connection(db_path)?;
+pub(crate) fn insert_session(pool: &DbPool, session: &MeetingSession) -> Result<()> {
+    let conn = pool.get()?;
     conn.execute(
         "INSERT INTO meeting_sessions (id, title, created_at, status, audio_source, template_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -185,8 +238,8 @@ pub(crate) fn insert_session(db_path: &PathBuf, session: &MeetingSession) -> Res
 }
 
 /// Retrieves a meeting session by its ID.
-pub(crate) fn get_session(db_path: &PathBuf, session_id: &str) -> Result<Option<MeetingSession>> {
-    let conn = get_connection(db_path)?;
+pub(crate) fn get_session(pool: &DbPool, session_id: &str) -> Result<Option<MeetingSession>> {
+    let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, title, created_at, duration, status, audio_path, transcript_path, audio_source, error_message, summary_path, template_id
          FROM meeting_sessions WHERE id = ?1",
@@ -199,11 +252,11 @@ pub(crate) fn get_session(db_path: &PathBuf, session_id: &str) -> Result<Option<
 
 /// Updates the status of a meeting session.
 pub(crate) fn update_session_status(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
     status: &MeetingStatus,
 ) -> Result<()> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     let rows = conn.execute(
         "UPDATE meeting_sessions SET status = ?1 WHERE id = ?2",
         params![status_to_string(status), session_id],
@@ -219,12 +272,12 @@ pub(crate) fn update_session_status(
 
 /// Updates the status of a meeting session with an error message.
 pub(crate) fn update_session_status_with_error(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
     status: &MeetingStatus,
     error_message: &str,
 ) -> Result<()> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     let rows = conn.execute(
         "UPDATE meeting_sessions SET status = ?1, error_message = ?2 WHERE id = ?3",
         params![status_to_string(status), error_message, session_id],
@@ -239,8 +292,9 @@ pub(crate) fn update_session_status_with_error(
 }
 
 /// Lists all meeting sessions, ordered by creation time (newest first).
-pub(crate) fn list_sessions(db_path: &PathBuf) -> Result<Vec<MeetingSession>> {
-    let conn = get_connection(db_path)?;
+/// Use list_sessions_paginated() for paginated queries.
+pub(crate) fn list_sessions(pool: &DbPool) -> Result<Vec<MeetingSession>> {
+    let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, title, created_at, duration, status, audio_path, transcript_path, audio_source, error_message, summary_path, template_id
          FROM meeting_sessions ORDER BY created_at DESC",
@@ -252,9 +306,34 @@ pub(crate) fn list_sessions(db_path: &PathBuf) -> Result<Vec<MeetingSession>> {
     Ok(sessions)
 }
 
+/// Lists meeting sessions with pagination support.
+pub(crate) fn list_sessions_paginated(
+    pool: &DbPool,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<MeetingSession>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, title, created_at, duration, status, audio_path, transcript_path, audio_source, error_message, summary_path, template_id
+         FROM meeting_sessions ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+    )?;
+    let sessions = stmt
+        .query_map(params![limit, offset], |row| row_to_session(row))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(sessions)
+}
+
+/// Returns the total count of meeting sessions.
+pub(crate) fn count_sessions(pool: &DbPool) -> Result<i64> {
+    let conn = pool.get()?;
+    conn.query_row("SELECT COUNT(*) FROM meeting_sessions", [], |row| row.get(0))
+        .map_err(Into::into)
+}
+
 /// Deletes a meeting session record from the database.
-pub(crate) fn delete_session_record(db_path: &PathBuf, session_id: &str) -> Result<()> {
-    let conn = get_connection(db_path)?;
+pub(crate) fn delete_session_record(pool: &DbPool, session_id: &str) -> Result<()> {
+    let conn = pool.get()?;
     conn.execute(
         "DELETE FROM meeting_sessions WHERE id = ?1",
         params![session_id],
@@ -264,11 +343,11 @@ pub(crate) fn delete_session_record(db_path: &PathBuf, session_id: &str) -> Resu
 
 /// Updates the title of a meeting session in the database.
 pub(crate) fn update_session_title(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
     title: &str,
 ) -> Result<()> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     let rows = conn.execute(
         "UPDATE meeting_sessions SET title = ?1 WHERE id = ?2",
         params![title, session_id],
@@ -281,11 +360,11 @@ pub(crate) fn update_session_title(
 
 /// Updates the template_id of a meeting session.
 pub(crate) fn update_session_template_id(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
     template_id: &str,
 ) -> Result<()> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     let rows = conn.execute(
         "UPDATE meeting_sessions SET template_id = ?1 WHERE id = ?2",
         params![template_id, session_id],
@@ -298,11 +377,11 @@ pub(crate) fn update_session_template_id(
 
 /// Updates the summary path of a meeting session.
 pub(crate) fn update_session_summary_path(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
     summary_path: &str,
 ) -> Result<()> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     let rows = conn.execute(
         "UPDATE meeting_sessions SET summary_path = ?1 WHERE id = ?2",
         params![summary_path, session_id],
@@ -315,13 +394,13 @@ pub(crate) fn update_session_summary_path(
 
 /// Updates audio_path and duration for a meeting session.
 pub(crate) fn update_session_audio(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
     audio_path: &str,
     duration: i64,
     status: &MeetingStatus,
 ) -> Result<()> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     conn.execute(
         "UPDATE meeting_sessions SET audio_path = ?1, duration = ?2, status = ?3 WHERE id = ?4",
         params![audio_path, duration, status_to_string(status), session_id],
@@ -331,12 +410,12 @@ pub(crate) fn update_session_audio(
 
 /// Updates transcript_path and status for a meeting session.
 pub(crate) fn update_session_transcript(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
     transcript_path: &str,
     status: &MeetingStatus,
 ) -> Result<()> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     conn.execute(
         "UPDATE meeting_sessions SET transcript_path = ?1, status = ?2 WHERE id = ?3",
         params![transcript_path, status_to_string(status), session_id],
@@ -345,8 +424,8 @@ pub(crate) fn update_session_transcript(
 }
 
 /// Finds sessions in Recording or Interrupted status (for recovery on restart).
-pub(crate) fn find_interrupted_sessions(db_path: &PathBuf) -> Result<Vec<MeetingSession>> {
-    let conn = get_connection(db_path)?;
+pub(crate) fn find_interrupted_sessions(pool: &DbPool) -> Result<Vec<MeetingSession>> {
+    let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, title, created_at, duration, status, audio_path, transcript_path, audio_source, error_message, summary_path, template_id
          FROM meeting_sessions WHERE status IN ('recording', 'interrupted') ORDER BY created_at DESC",
@@ -372,8 +451,8 @@ fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<MeetingNote> {
 }
 
 /// Inserts a new note for a meeting session.
-pub(crate) fn insert_note(db_path: &PathBuf, note: &MeetingNote) -> Result<()> {
-    let conn = get_connection(db_path)?;
+pub(crate) fn insert_note(pool: &DbPool, note: &MeetingNote) -> Result<()> {
+    let conn = pool.get()?;
     conn.execute(
         "INSERT INTO meeting_notes (id, session_id, timestamp_seconds, content, author, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -391,10 +470,10 @@ pub(crate) fn insert_note(db_path: &PathBuf, note: &MeetingNote) -> Result<()> {
 
 /// Returns the notes attached to a session, oldest first (timestamp then created_at).
 pub(crate) fn list_notes_by_session(
-    db_path: &PathBuf,
+    pool: &DbPool,
     session_id: &str,
 ) -> Result<Vec<MeetingNote>> {
-    let conn = get_connection(db_path)?;
+    let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, session_id, timestamp_seconds, content, author, created_at
          FROM meeting_notes
@@ -409,8 +488,8 @@ pub(crate) fn list_notes_by_session(
 }
 
 /// Deletes a single note by id. Returns `true` if a row was removed.
-pub(crate) fn delete_note(db_path: &PathBuf, note_id: &str) -> Result<bool> {
-    let conn = get_connection(db_path)?;
+pub(crate) fn delete_note(pool: &DbPool, note_id: &str) -> Result<bool> {
+    let conn = pool.get()?;
     let rows = conn.execute(
         "DELETE FROM meeting_notes WHERE id = ?1",
         params![note_id],

@@ -197,11 +197,21 @@ jobs:
           sudo apt install vulkan-sdk -y
           sudo apt-get install -y mesa-vulkan-drivers
 
+      - name: Cache VAD model
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/models/silero_vad_v4.onnx
+          key: vad-model-onnx-v4
+          restore-keys: |
+            vad-model-
+
       - name: Download VAD model
         shell: bash
         run: |
-          mkdir -p src-tauri/resources/models
-          curl -L -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
+          if [ ! -f src-tauri/resources/models/silero_vad_v4.onnx ]; then
+            mkdir -p src-tauri/resources/models
+            curl -L -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
+          fi
 
       - name: install frontend dependencies
         if: ${{ !(contains(inputs.platform, 'windows') && contains(inputs.target, 'aarch64')) }}

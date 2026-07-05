@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use hound::{WavReader, WavSpec, WavWriter};
 use log::{debug, error, info};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ use crate::managers::meeting_logger::{
     log_meeting_event, log_performance_metric, MeetingLogContext, MeetingTimer,
 };
 
-use super::db::init_meeting_database;
+use super::db::{init_meeting_database, DbPool, SqliteConnectionManager};
 use super::models::{
     AudioSourceType, MeetingManagerState, MeetingNote, MeetingSession, MeetingStatus,
 };
@@ -51,6 +51,8 @@ pub struct MeetingSessionManager {
     /// Directory for storing meeting session folders
     /// e.g., `{app_data}/meetings/`
     meetings_dir: PathBuf,
+    /// Connection pool for the SQLite database
+    db_pool: DbPool,
     /// Path to the SQLite database for meeting sessions
     /// e.g., `{app_data}/meetings.db`
     db_path: PathBuf,
@@ -95,13 +97,14 @@ impl MeetingSessionManager {
             info!("Created meetings directory: {:?}", meetings_dir);
         }
 
-        // Initialize the database and run migrations
-        init_meeting_database(&db_path)?;
+        // Initialize the database, run migrations, and create connection pool
+        let db_pool = init_meeting_database(&db_path)?;
 
         let manager = Self {
             state: Arc::new(Mutex::new(MeetingManagerState::default())),
             app_handle: app_handle.clone(),
             meetings_dir,
+            db_pool,
             db_path,
             transcription_manager,
         };
@@ -374,9 +377,9 @@ impl MeetingSessionManager {
         }
     }
 
-    /// Gets a connection to the meetings database.
-    fn get_connection(&self) -> Result<Connection> {
-        Ok(Connection::open(&self.db_path)?)
+    /// Gets a connection from the pool to the meetings database.
+    fn get_connection(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
+        Ok(self.db_pool.get()?)
     }
 
     /// Formats a Unix timestamp into a human-readable meeting title.
@@ -655,7 +658,7 @@ impl MeetingSessionManager {
             created_at: chrono::Utc::now().timestamp(),
         };
 
-        super::db::insert_note(&self.db_path, &note)?;
+        super::db::insert_note(&self.db_pool, &note)?;
         info!(
             "Added note {} to session {} at t={}s",
             note.id, session_id, note.timestamp_seconds
@@ -665,12 +668,12 @@ impl MeetingSessionManager {
 
     /// Returns the notes attached to a meeting session, ordered chronologically.
     pub fn list_notes(&self, session_id: &str) -> Result<Vec<MeetingNote>> {
-        super::db::list_notes_by_session(&self.db_path, session_id)
+        super::db::list_notes_by_session(&self.db_pool, session_id)
     }
 
     /// Deletes a note by id. Returns Ok(()) if the note existed, error otherwise.
     pub fn delete_note(&self, note_id: &str) -> Result<()> {
-        let deleted = super::db::delete_note(&self.db_path, note_id)?;
+        let deleted = super::db::delete_note(&self.db_pool, note_id)?;
         if !deleted {
             return Err(anyhow::anyhow!("Note not found: {}", note_id));
         }
@@ -1591,7 +1594,7 @@ impl MeetingSessionManager {
         }
 
         // Read WAV file and convert to f32 samples
-        let reader = WavReader::open(&full_audio_path).map_err(|e| {
+        let mut reader = WavReader::open(&full_audio_path).map_err(|e| {
             anyhow::anyhow!("Failed to open audio file {:?}: {}", full_audio_path, e)
         })?;
 
@@ -1605,12 +1608,17 @@ impl MeetingSessionManager {
             ));
         }
 
-        // Read samples and convert from i16 to f32
-        let samples: Vec<f32> = reader
-            .into_samples::<i16>()
-            .filter_map(Result::ok)
-            .map(|sample| sample as f32 / i16::MAX as f32)
-            .collect();
+        // Stream-read samples, converting from i16 to f32 directly without
+        // intermediate Vec<i16> allocation.
+        let sample_count = reader.duration() as usize;
+        let mut samples: Vec<f32> = Vec::with_capacity(sample_count);
+
+        for sample_result in reader.samples::<i16>() {
+            let sample = sample_result.map_err(|e| {
+                anyhow::anyhow!("Failed to read WAV sample: {}", e)
+            })?;
+            samples.push(sample as f32 / i16::MAX as f32);
+        }
 
         debug!(
             "Read {} audio samples from {:?}",

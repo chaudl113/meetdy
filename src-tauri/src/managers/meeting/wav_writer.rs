@@ -39,15 +39,12 @@ impl WavWriterHandle {
 
         if let Ok(mut guard) = self.inner.lock() {
             if let Some(writer) = guard.as_mut() {
-                for sample in samples {
-                    let sample_i16 = (*sample * i16::MAX as f32) as i16;
-                    writer
-                        .write_sample(sample_i16)
-                        .map_err(|e| anyhow::anyhow!("Failed to write sample: {}", e))?;
-                }
+            for sample in samples {
+                let sample_i16 = (*sample * i16::MAX as f32) as i16;
                 writer
-                    .flush()
-                    .map_err(|e| anyhow::anyhow!("Failed to flush WAV writer: {}", e))?;
+                    .write_sample(sample_i16)
+                    .map_err(|e| anyhow::anyhow!("Failed to write sample: {}", e))?;
+            }
             }
         }
         Ok(())

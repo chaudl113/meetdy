@@ -9,7 +9,8 @@ use tauri::{AppHandle, State};
 pub async fn get_available_models(
     model_manager: State<'_, Arc<ModelManager>>,
 ) -> Result<Vec<ModelInfo>, String> {
-    Ok(model_manager.get_available_models())
+    let models = model_manager.get_available_models();
+    Ok(models.values().cloned().collect())
 }
 
 #[tauri::command]
@@ -105,7 +106,7 @@ pub async fn has_any_models_available(
     model_manager: State<'_, Arc<ModelManager>>,
 ) -> Result<bool, String> {
     let models = model_manager.get_available_models();
-    Ok(models.iter().any(|m| m.is_downloaded))
+    Ok(models.values().any(|m| m.is_downloaded))
 }
 
 #[tauri::command]
@@ -115,7 +116,7 @@ pub async fn has_any_models_or_downloads(
 ) -> Result<bool, String> {
     let models = model_manager.get_available_models();
     // Return true if any models are downloaded OR if any downloads are in progress
-    Ok(models.iter().any(|m| m.is_downloaded))
+    Ok(models.values().any(|m| m.is_downloaded))
 }
 
 #[tauri::command]

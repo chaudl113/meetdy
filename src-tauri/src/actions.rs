@@ -315,9 +315,17 @@ impl ShortcutAction for TranscribeAction {
                 );
 
                 let transcription_time = Instant::now();
-                let samples_clone = samples.clone(); // Clone for history saving
-                match tm.transcribe(samples) {
-                    Ok(transcription) => {
+                let samples_arc = Arc::new(samples); // Share Arc for history saving
+
+                let samples_for_transcribe = Arc::clone(&samples_arc);
+                // Run transcription on a blocking thread to avoid blocking tokio workers
+                let transcription_result = tauri::async_runtime::spawn_blocking(move || {
+                    tm.transcribe(Arc::unwrap_or_clone(samples_for_transcribe))
+                })
+                .await;
+
+                match transcription_result {
+                    Ok(Ok(transcription)) => {
                         debug!(
                             "Transcription completed in {:?}: '{}'",
                             transcription_time.elapsed(),
@@ -361,7 +369,7 @@ impl ShortcutAction for TranscribeAction {
                             tauri::async_runtime::spawn(async move {
                                 if let Err(e) = hm_clone
                                     .save_transcription(
-                                        samples_clone,
+                                        Arc::clone(&samples_arc),
                                         transcription_for_history,
                                         post_processed_text,
                                         post_process_prompt,
@@ -397,8 +405,13 @@ impl ShortcutAction for TranscribeAction {
                             change_tray_icon(&ah, TrayIconState::Idle);
                         }
                     }
-                    Err(err) => {
-                        debug!("Global Shortcut Transcription error: {}", err);
+                    Ok(Err(err)) => {
+                        error!("Global Shortcut Transcription error: {}", err);
+                        utils::hide_recording_overlay(&ah);
+                        change_tray_icon(&ah, TrayIconState::Idle);
+                    }
+                    Err(join_err) => {
+                        error!("Transcription blocking task panicked: {:?}", join_err);
                         utils::hide_recording_overlay(&ah);
                         change_tray_icon(&ah, TrayIconState::Idle);
                     }

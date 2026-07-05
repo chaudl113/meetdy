@@ -65,8 +65,8 @@ mod tests {
         let temp_dir = tempdir().expect("Failed to create temp dir");
         let db_path = temp_dir.path().join("test_meetings.db");
 
-        // Initialize the database
-        init_meeting_database(&db_path).expect("Failed to initialize database");
+        // Initialize the database (pool is used to run migrations, drop afterwards)
+        let _pool = init_meeting_database(&db_path).expect("Failed to initialize database");
 
         // Verify the database file was created
         assert!(db_path.exists(), "Database file should exist");
@@ -110,9 +110,9 @@ mod tests {
         let db_path = temp_dir.path().join("test_meetings_idempotent.db");
 
         // Initialize the database multiple times - should not fail
-        init_meeting_database(&db_path).expect("First init should succeed");
-        init_meeting_database(&db_path).expect("Second init should succeed");
-        init_meeting_database(&db_path).expect("Third init should succeed");
+        let _pool1 = init_meeting_database(&db_path).expect("First init should succeed");
+        let _pool2 = init_meeting_database(&db_path).expect("Second init should succeed");
+        let _pool3 = init_meeting_database(&db_path).expect("Third init should succeed");
 
         // Verify the database is still functional
         let conn = Connection::open(&db_path).expect("Failed to open database");
@@ -144,7 +144,7 @@ mod tests {
             let meetings_dir = temp_dir.join("meetings");
             let db_path = temp_dir.join("meetings.db");
             fs::create_dir_all(&meetings_dir).expect("Failed to create meetings dir");
-            init_meeting_database(&db_path).expect("Failed to init database");
+            let _pool = init_meeting_database(&db_path).expect("Failed to init database");
             Self {
                 meetings_dir,
                 db_path,

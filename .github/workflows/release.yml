@@ -1,6 +1,9 @@
 name: "Release"
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
 
 jobs:
   create-release:
@@ -59,32 +62,22 @@ jobs:
             })
             return data.id
 
+  read-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set-matrix
+        run: echo "matrix=$(cat .github/workflows/build-matrix.json | jq -c .)" >> "$GITHUB_OUTPUT"
+
   publish-tauri:
     permissions:
       contents: write
-    needs: create-release
+    needs: [create-release, read-matrix]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: "macos-15" # for Arm based macs (M1 and above). Uses macOS 15 (Sequoia).
-            args: "--target aarch64-apple-darwin"
-            target: "aarch64-apple-darwin"
-          - platform: "macos-13" # for Intel based macs. Must use macos-13 (Intel runner) to avoid arm64/x86_64 cross-compile issues with Swift crates.
-            args: "--target x86_64-apple-darwin"
-            target: "x86_64-apple-darwin"
-          - platform: "ubuntu-22.04" # Build .deb on 22.04
-            args: "--bundles deb"
-            target: "x86_64-unknown-linux-gnu"
-          - platform: "ubuntu-24.04" # Build AppImage and RPM on 24.04
-            args: "--bundles appimage,rpm"
-            target: "x86_64-unknown-linux-gnu"
-          - platform: "windows-latest"
-            args: ""
-            target: "x86_64-pc-windows-msvc"
-          - platform: "windows-11-arm" # for ARM64 Windows runner
-            args: "--target aarch64-pc-windows-msvc"
-            target: "aarch64-pc-windows-msvc"
+      matrix: ${{ fromJSON(needs.read-matrix.outputs.matrix) }}
 
     uses: ./.github/workflows/build.yml
     with:

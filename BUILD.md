@@ -190,6 +190,52 @@ Configured in `tauri.conf.json`:
 }
 ```
 
+### Linux
+
+#### .deb (Debian/Ubuntu)
+
+Debian packages can be signed with a GPG key for distribution:
+
+```bash
+# Generate a GPG key (one-time)
+gpg --full-generate-key
+
+# Export your public key
+gpg --armor --export your@email.com > public.key
+
+# Sign the .deb package
+dpkg-sig --sign builder meetdy_0.7.0_amd64.deb
+```
+
+For APT repository distribution, host the public key and signed `Release`/`Packages` files alongside the `.deb`.
+
+#### AppImage
+
+AppImages are verified by checksum, not certificate signing. Distribute the SHA256 alongside the AppImage:
+
+```bash
+sha256sum meetdy_0.7.0_amd64.AppImage > meetdy_0.7.0_amd64.AppImage.sha256
+```
+
+Users verify with:
+```bash
+sha256sum -c meetdy_0.7.0_amd64.AppImage.sha256
+```
+
+#### RPM
+
+RPM packages support GPG signing:
+
+```bash
+# Configure rpmsign with your GPG key
+echo "%_gpg_name your@email.com" >> ~/.rpmmacros
+
+# Sign the RPM
+rpmsign --addsign meetdy_0.7.0-1.x86_64.rpm
+```
+
+For CI environments, import keys and configure `rpmsign` via the `RPM_SIGNING_KEY` secret.
+
 ## Update Generation
 
 Builds automatically generate update artifacts when:
@@ -216,7 +262,22 @@ rm -rf dist node_modules
 bun install && bun run tauri build
 ```
 
-## Performance Tips
+### Linux Wayland Notes
+
+The app starts with `"visible": false` in `tauri.conf.json` because it is tray-based — the window only appears when you open settings from the tray menu or press the global shortcut.
+
+On Wayland, system tray support varies by desktop environment:
+
+- **GNOME:** Requires a tray extension (e.g., [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/))
+- **KDE Plasma:** Tray icons work out of the box
+- **Other compositors:** Support varies; some may not render tray icons at all
+
+**Workarounds if the tray icon is missing:**
+
+1. Press the global shortcut (default: `Ctrl+Shift+Space`) — this brings up the settings window regardless of tray state.
+2. Switch to an X11 session at the display manager login screen.
+
+### Performance Tips
 
 - **Incremental builds**: Rust caches builds, subsequent builds are faster
 - **Parallel builds**: Use `--jobs N` flag for cargo

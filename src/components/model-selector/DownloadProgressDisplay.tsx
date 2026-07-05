@@ -1,23 +1,10 @@
 import React from "react";
 import { ProgressBar, ProgressData } from "../shared";
-
-interface DownloadProgress {
-  model_id: string;
-  downloaded: number;
-  total: number;
-  percentage: number;
-}
-
-interface DownloadStats {
-  startTime: number;
-  lastUpdate: number;
-  totalDownloaded: number;
-  speed: number;
-}
+import type { DownloadProgress, DownloadStats } from "@/stores/modelEventStore";
 
 interface DownloadProgressDisplayProps {
-  downloadProgress: Map<string, DownloadProgress>;
-  downloadStats: Map<string, DownloadStats>;
+  downloadProgress: Record<string, DownloadProgress>;
+  downloadStats: Record<string, DownloadStats>;
   className?: string;
 }
 
@@ -26,16 +13,15 @@ const DownloadProgressDisplay: React.FC<DownloadProgressDisplayProps> = ({
   downloadStats,
   className = "",
 }) => {
-  if (downloadProgress.size === 0) {
+  const entries = Object.entries(downloadProgress);
+  if (entries.length === 0) {
     return null;
   }
 
-  const progressData: ProgressData[] = Array.from(
-    downloadProgress.values(),
-  ).map((progress) => {
-    const stats = downloadStats.get(progress.model_id);
+  const progressData: ProgressData[] = entries.map(([modelId, progress]) => {
+    const stats = downloadStats[modelId];
     return {
-      id: progress.model_id,
+      id: modelId,
       percentage: progress.percentage,
       speed: stats?.speed,
     };
@@ -45,7 +31,7 @@ const DownloadProgressDisplay: React.FC<DownloadProgressDisplayProps> = ({
     <ProgressBar
       progress={progressData}
       className={className}
-      showSpeed={downloadProgress.size === 1}
+      showSpeed={entries.length === 1}
       size="medium"
     />
   );

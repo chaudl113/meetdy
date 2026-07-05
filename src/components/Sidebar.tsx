@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Cog,
@@ -11,18 +11,8 @@ import {
   Boxes,
 } from "lucide-react";
 import MeetdyIcon from "./icons/MeetdyIcon";
-import { useSettings } from "../hooks/useSettings";
+import { useSettingsStore } from "../stores/settingsStore";
 import { useMeetingStore } from "../stores/meetingStore";
-import {
-  GeneralSettings,
-  AdvancedSettings,
-  HistorySettings,
-  DebugSettings,
-  AboutSettings,
-  PostProcessingSettings,
-  ModelsSettings,
-} from "./settings";
-import { MeetingMode } from "./meeting";
 
 export type SidebarSection = keyof typeof SECTIONS_CONFIG;
 
@@ -37,7 +27,6 @@ interface IconProps {
 interface SectionConfig {
   labelKey: string;
   icon: React.ComponentType<IconProps>;
-  component: React.ComponentType;
   enabled: (settings: any) => boolean;
   badge?: "new" | "count";
 }
@@ -46,51 +35,43 @@ export const SECTIONS_CONFIG = {
   general: {
     labelKey: "sidebar.general",
     icon: Settings,
-    component: GeneralSettings,
     enabled: () => true,
   },
   meeting: {
     labelKey: "sidebar.meeting",
     icon: Video,
-    component: MeetingMode,
     enabled: () => true,
     badge: "new",
   },
   models: {
     labelKey: "sidebar.models",
     icon: Boxes,
-    component: ModelsSettings,
     enabled: () => true,
   },
   advanced: {
     labelKey: "sidebar.advanced",
     icon: Cog,
-    component: AdvancedSettings,
     enabled: () => true,
   },
   postprocessing: {
     labelKey: "sidebar.postProcessing",
     icon: Sparkles,
-    component: PostProcessingSettings,
     enabled: () => true,
   },
   recordings: {
     labelKey: "sidebar.history",
     icon: History,
-    component: HistorySettings,
     enabled: () => true,
     badge: "count",
   },
   debug: {
     labelKey: "sidebar.debug",
     icon: FlaskConical,
-    component: DebugSettings,
     enabled: (settings) => settings?.debug_mode ?? false,
   },
   about: {
     labelKey: "sidebar.about",
     icon: Info,
-    component: AboutSettings,
     enabled: () => true,
   },
 } as const satisfies Record<string, SectionConfig>;
@@ -105,14 +86,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSectionChange,
 }) => {
   const { t } = useTranslation();
-  const { settings } = useSettings();
-  const { sessions } = useMeetingStore();
+  const settings = useSettingsStore((s) => s.settings);
+  const sessions = useMeetingStore((s) => s.sessions);
 
-  const availableSections = Object.entries(SECTIONS_CONFIG)
-    .filter(([_, config]) => config.enabled(settings))
-    .map(([id, config]) => ({ id: id as SidebarSection, ...config }));
+  const availableSections = useMemo(
+    () =>
+      Object.entries(SECTIONS_CONFIG)
+        .filter(([_, config]) => config.enabled(settings))
+        .map(([id, config]) => ({ id: id as SidebarSection, ...config })),
+    [settings],
+  );
 
   const historyCount = sessions?.length ?? 0;
+
+  const handleSectionClick = useCallback(
+    (sectionId: SidebarSection) => {
+      onSectionChange(sectionId);
+    },
+    [onSectionChange],
+  );
 
   return (
     <div className="flex flex-col w-56 h-full border-r border-mid-gray/20 bg-background">
@@ -147,7 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={section.id}
               type="button"
-              onClick={() => onSectionChange(section.id)}
+              onClick={() => handleSectionClick(section.id)}
               className={`flex items-center gap-3 w-full px-2.5 py-2 rounded-lg cursor-pointer transition-colors text-left ${
                 isActive
                   ? "bg-logo-primary/15 text-logo-primary"
