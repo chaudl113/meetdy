@@ -1,15 +1,30 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { Play, Pause } from "lucide-react";
+
+export interface AudioPlayerHandle {
+  seekTo: (time: number, play?: boolean) => void;
+}
 
 interface AudioPlayerProps {
   src: string;
   className?: string;
+  onTimeChange?: (time: number) => void;
+  onDurationChange?: (duration: number) => void;
 }
 
-export const AudioPlayer: React.FC<AudioPlayerProps> = ({
+export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({
   src,
   className = "",
-}) => {
+  onTimeChange,
+  onDurationChange,
+}, ref) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -31,6 +46,33 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   useEffect(() => {
     isDraggingRef.current = isDragging;
   }, [isDragging]);
+
+  useEffect(() => {
+    onTimeChange?.(currentTime);
+  }, [currentTime, onTimeChange]);
+
+  useEffect(() => {
+    onDurationChange?.(duration);
+  }, [duration, onDurationChange]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      seekTo: (time: number, play = false) => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        const safeTime = Math.max(0, Math.min(time, audio.duration || time));
+        audio.currentTime = safeTime;
+        setCurrentTime(safeTime);
+        if (play) {
+          audio.play().catch((error) => {
+            console.error("Playback failed:", error);
+          });
+        }
+      },
+    }),
+    [],
+  );
 
   // Stable animation loop with no dependencies
   const tick = useCallback(() => {
@@ -217,4 +259,6 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       </div>
     </div>
   );
-};
+});
+
+AudioPlayer.displayName = "AudioPlayer";

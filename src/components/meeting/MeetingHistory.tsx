@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import {
   Clock,
   FileText,
@@ -7,6 +8,7 @@ import {
   Loader2,
   ChevronRight,
   Search,
+  Trash2,
 } from "lucide-react";
 import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
 import { MeetingDetailView } from "./MeetingDetailView";
@@ -75,7 +77,14 @@ const StatusBadge: React.FC<{ status: MeetingSession["status"] }> = ({
  */
 export const MeetingHistory: React.FC = () => {
   const { t } = useTranslation();
-  const { sessions, fetchSessions, isLoading } = useMeetingStore();
+  const { sessions, fetchSessions, clearAllSessions, isLoading } = useMeetingStore(
+    useShallow((s) => ({
+      sessions: s.sessions,
+      fetchSessions: s.fetchSessions,
+      clearAllSessions: s.clearAllSessions,
+      isLoading: s.isLoading,
+    })),
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSession, setSelectedSession] = useState<MeetingSession | null>(
     null,
@@ -92,6 +101,18 @@ export const MeetingHistory: React.FC = () => {
 
   const handleCloseDetail = () => {
     setSelectedSession(null);
+  };
+
+  const handleClearAll = async () => {
+    const confirmed = window.confirm(
+      t(
+        "meeting.history.clearAllConfirm",
+        "Delete all meeting recordings and transcripts? This cannot be undone.",
+      ),
+    );
+    if (!confirmed) return;
+    setSelectedSession(null);
+    await clearAllSessions();
   };
 
   const filteredSessions = sessions.filter((session) => {
@@ -141,18 +162,29 @@ export const MeetingHistory: React.FC = () => {
   return (
     <>
       <div className="p-4 border-b border-mid-gray/20">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-mid-gray" />
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t(
-              "settings.history.searchPlaceholder",
-              "Search meetings by title, date, or status...",
-            )}
-            className="pl-9 w-full"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-mid-gray" />
+            <Input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t(
+                "settings.history.searchPlaceholder",
+                "Search meetings by title, date, or status...",
+              )}
+              className="pl-9 w-full"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleClearAll}
+            disabled={isLoading || sessions.length === 0}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-500/30 px-3 text-sm font-medium text-red-500 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {t("meeting.history.clearAll", "Clear all")}
+          </button>
         </div>
       </div>
 

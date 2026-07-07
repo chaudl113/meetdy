@@ -91,7 +91,7 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
       });
       cleanups.push(unlistenPull);
 
-      const result = await commands.generateMeetingSummary(sessionId);
+      const result = await commands.generateMeetingSummary(sessionId, null);
       if (result.status === "ok") {
         onSummaryGenerated(result.data);
       } else {

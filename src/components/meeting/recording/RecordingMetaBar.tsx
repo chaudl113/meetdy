@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Clock, Languages, Gauge } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
+import { Clock, Languages, Gauge, Cloud, Cpu, Server } from "lucide-react";
 import { formatDuration, useMeetingStore } from "../../../stores/meetingStore";
 import { useRecordingConfigStore } from "../../../stores/recordingConfigStore";
 import { useSettings } from "../../../hooks/useSettings";
@@ -13,8 +14,13 @@ import { MeetingTitleEditor } from "../MeetingTitleEditor";
  */
 export const RecordingMetaBar: React.FC = () => {
   const { t } = useTranslation();
-  const { recordingDuration, currentSession } = useMeetingStore();
-  const { recordingQuality } = useRecordingConfigStore();
+  const { recordingDuration, currentSession } = useMeetingStore(
+    useShallow((s) => ({
+      recordingDuration: s.recordingDuration,
+      currentSession: s.currentSession,
+    })),
+  );
+  const { recordingQuality, sttEngine } = useRecordingConfigStore();
   const { getSetting } = useSettings();
 
   const languageValue = getSetting("selected_language") || "auto";
@@ -50,6 +56,37 @@ export const RecordingMetaBar: React.FC = () => {
         <div className="flex items-center gap-1.5 text-sm text-text/70">
           <Gauge width={14} height={14} />
           <span>{qualityLabel}</span>
+        </div>
+        <div
+          className={`flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
+            sttEngine === "soniox"
+              ? "bg-blue-500/15 text-blue-400"
+              : sttEngine === "funasr"
+                ? "bg-emerald-500/15 text-emerald-500"
+              : "bg-mid-gray/20 text-text/50"
+          }`}
+          title={
+            sttEngine === "soniox"
+              ? "Soniox cloud STT"
+              : sttEngine === "funasr"
+                ? "FunASR local batch STT after recording stops"
+                : "Whisper local STT"
+          }
+        >
+          {sttEngine === "soniox" ? (
+            <Cloud width={11} height={11} />
+          ) : sttEngine === "funasr" ? (
+            <Server width={11} height={11} />
+          ) : (
+            <Cpu width={11} height={11} />
+          )}
+          <span>
+            {sttEngine === "soniox"
+              ? "Soniox"
+              : sttEngine === "funasr"
+                ? "FunASR"
+                : "Whisper"}
+          </span>
         </div>
       </div>
     </div>

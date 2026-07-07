@@ -466,6 +466,20 @@ impl ShortcutAction for TestAction {
     }
 }
 
+// Meeting shortcuts simply emit a Tauri event; the frontend `meetingStore`
+// handles toggling state. Keeping orchestration in JS avoids duplicating
+// the start/stop/pause logic between Rust and React.
+struct EmitEventAction(&'static str);
+
+impl ShortcutAction for EmitEventAction {
+    fn start(&self, app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+        if let Err(e) = tauri::Emitter::emit(app, self.0, ()) {
+            error!("Failed to emit '{}': {}", self.0, e);
+        }
+    }
+    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {}
+}
+
 // Static Action Map
 pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::new(|| {
     let mut map = HashMap::new();
@@ -480,6 +494,18 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
     map.insert(
         "test".to_string(),
         Arc::new(TestAction) as Arc<dyn ShortcutAction>,
+    );
+    map.insert(
+        "start_stop_recording".to_string(),
+        Arc::new(EmitEventAction("shortcut_start_stop_recording")) as Arc<dyn ShortcutAction>,
+    );
+    map.insert(
+        "pause_resume".to_string(),
+        Arc::new(EmitEventAction("shortcut_pause_resume")) as Arc<dyn ShortcutAction>,
+    );
+    map.insert(
+        "quick_note".to_string(),
+        Arc::new(EmitEventAction("shortcut_quick_note")) as Arc<dyn ShortcutAction>,
     );
     map
 });

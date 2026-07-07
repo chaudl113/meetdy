@@ -124,6 +124,11 @@ fn build_apple_intelligence_bridge() {
     println!("cargo:rerun-if-changed={REAL_SWIFT_FILE}");
     println!("cargo:rerun-if-changed={STUB_SWIFT_FILE}");
     println!("cargo:rerun-if-changed={BRIDGE_HEADER}");
+    println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+    println!("cargo:rerun-if-env-changed=SDKROOT");
+    println!("cargo:rerun-if-env-changed=TOOLCHAINS");
+    println!("cargo:rerun-if-env-changed=XCRUN_DEVELOPER_DIR");
+    println!("cargo:rerun-if-env-changed=MEETDY_DISABLE_APPLE_INTELLIGENCE");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     let object_path = out_dir.join("apple_intelligence.o");

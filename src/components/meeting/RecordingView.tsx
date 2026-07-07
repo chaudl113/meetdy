@@ -15,6 +15,7 @@ import { QuickNotesCard } from "./recording/QuickNotesCard";
 import { BottomControlsBar } from "./recording/BottomControlsBar";
 import { RecordingFooter } from "./recording/RecordingFooter";
 import { AddNoteModal } from "./recording/AddNoteModal";
+import { useShallow } from "zustand/react/shallow";
 import { useMeetingStore } from "../../stores/meetingStore";
 
 /**
@@ -33,7 +34,26 @@ export const RecordingView: React.FC = () => {
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [noteTimestamp, setNoteTimestamp] = useState(0);
 
-  const { addNote, recordingDuration } = useMeetingStore();
+  const {
+    addNote,
+    recordingDuration,
+    currentSession,
+    participants,
+    activeSpeakerId,
+    setActiveSpeakerId,
+    addParticipantToStore,
+  } = useMeetingStore(
+    useShallow((s) => ({
+      addNote: s.addNote,
+      recordingDuration: s.recordingDuration,
+      currentSession: s.currentSession,
+      participants: s.participants,
+      activeSpeakerId: s.activeSpeakerId,
+      setActiveSpeakerId: s.setActiveSpeakerId,
+      addParticipantToStore: s.addParticipantToStore,
+    })),
+  );
+  const sessionId = currentSession?.id ?? "";
 
   const openAddNote = () => {
     // Pin the note to the moment the button was clicked, not to the moment
@@ -49,7 +69,15 @@ export const RecordingView: React.FC = () => {
   const renderPanel = () => {
     switch (activeTab) {
       case "transcript":
-        return <LiveTranscriptPanel />;
+        return (
+          <LiveTranscriptPanel
+            sessionId={sessionId ?? ""}
+            participants={participants}
+            activeSpeakerId={activeSpeakerId}
+            onActiveSpeakerChange={setActiveSpeakerId}
+            onParticipantAdded={addParticipantToStore}
+          />
+        );
       case "summary":
         return <AISummaryPanel />;
       case "notes":

@@ -22,6 +22,22 @@ enum Cmd {
     Shutdown,
 }
 
+/// Lightweight scalar audio statistics emitted by `AudioRecorder` while a
+/// stream is open. Values are computed on the consumer thread from the raw
+/// device samples (pre-resample, pre-VAD).
+#[derive(Clone, Copy, Debug)]
+pub struct AudioStats {
+    /// Root-mean-square amplitude, in linear scale [0.0, ~1.0].
+    pub rms: f32,
+    /// Peak absolute amplitude in the latest frame, in linear scale [0.0, ~1.0].
+    pub peak: f32,
+    /// Signal-to-noise ratio in decibels, computed against a slow-moving
+    /// noise-floor estimate. May be `0.0` until enough frames have arrived.
+    pub snr_db: f32,
+    /// Noise floor estimate in decibels (negative dBFS).
+    pub noise_floor_db: f32,
+}
+
 pub struct AudioRecorder {
     device: Option<Device>,
     cmd_tx: Option<mpsc::Sender<Cmd>>,
@@ -30,6 +46,7 @@ pub struct AudioRecorder {
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     error_cb: Option<Arc<dyn Fn(String) + Send + Sync + 'static>>,
+    audio_stats_cb: Option<Arc<dyn Fn(AudioStats) + Send + Sync + 'static>>,
 }
 
 impl AudioRecorder {
@@ -42,6 +59,7 @@ impl AudioRecorder {
             level_cb: None,
             sample_cb: None,
             error_cb: None,
+            audio_stats_cb: None,
         })
     }
 
@@ -77,6 +95,16 @@ impl AudioRecorder {
         self
     }
 
+    /// Sets a callback to receive scalar audio statistics (RMS, peak, SNR,
+    /// noise floor). Invoked at the cadence of the device callback (~30ms).
+    pub fn with_audio_stats_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(AudioStats) + Send + Sync + 'static,
+    {
+        self.audio_stats_cb = Some(Arc::new(cb));
+        self
+    }
+
     pub fn open(&mut self, device: Option<Device>) -> Result<(), Box<dyn std::error::Error>> {
         if self.worker_handle.is_some() {
             return Ok(()); // already open
@@ -101,6 +129,8 @@ impl AudioRecorder {
         let sample_cb = self.sample_cb.clone();
         // Move the optional error callback into the worker thread
         let error_cb = self.error_cb.clone();
+        // Move the optional audio-stats callback into the worker thread
+        let audio_stats_cb = self.audio_stats_cb.clone();
 
         let worker = std::thread::spawn(move || {
             let config = AudioRecorder::get_preferred_config(&thread_device)
@@ -164,7 +194,15 @@ impl AudioRecorder {
             stream.play().expect("failed to start stream");
 
             // keep the stream alive while we process samples
-            run_consumer(sample_rate, vad, sample_rx, cmd_rx, level_cb, sample_cb);
+            run_consumer(
+                sample_rate,
+                vad,
+                sample_rx,
+                cmd_rx,
+                level_cb,
+                sample_cb,
+                audio_stats_cb,
+            );
             // stream is dropped here, after run_consumer returns
         });
 
@@ -298,6 +336,7 @@ fn run_consumer(
     cmd_rx: mpsc::Receiver<Cmd>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     sample_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    audio_stats_cb: Option<Arc<dyn Fn(AudioStats) + Send + Sync + 'static>>,
 ) {
     let mut frame_resampler = FrameResampler::new(
         in_sample_rate as usize,
@@ -307,6 +346,17 @@ fn run_consumer(
 
     let mut processed_samples = Vec::<f32>::new();
     let mut recording = false;
+
+    // ---------- audio-stats running state ------------------------------- //
+    // Smoothed RMS (one-pole low-pass) and a slow noise-floor estimator.
+    // The noise-floor follows the rms with a fast decay (signal dropping)
+    // and a slow attack (signal rising) so it represents background noise.
+    let mut smoothed_rms: f32 = 0.0;
+    let mut noise_floor: f32 = 1e-4; // ~ -80 dBFS
+                                     // Throttle stat emission so we don't flood the UI thread. The device
+                                     // callback typically arrives every ~10-30ms; we emit ~10Hz.
+    let mut last_stats_emit = std::time::Instant::now();
+    let stats_interval = Duration::from_millis(100);
 
     // ---------- spectrum visualisation setup ---------------------------- //
     const BUCKETS: usize = 16;
@@ -356,6 +406,48 @@ fn run_consumer(
             Ok(s) => s,
             Err(_) => break, // stream closed
         };
+
+        // ---------- scalar audio stats ----------------------------------- //
+        if audio_stats_cb.is_some() && !raw.is_empty() {
+            let mut sum_sq = 0.0f32;
+            let mut peak = 0.0f32;
+            for &s in &raw {
+                sum_sq += s * s;
+                let a = s.abs();
+                if a > peak {
+                    peak = a;
+                }
+            }
+            let rms = (sum_sq / raw.len() as f32).sqrt();
+            // One-pole smoothing (~200ms time constant at 30ms frames).
+            smoothed_rms = 0.85 * smoothed_rms + 0.15 * rms;
+
+            // Noise floor: fast attack toward smoothed_rms when it drops,
+            // slow rise when it grows. Keeps the floor near the quietest
+            // recent level so SNR reflects how far above background we are.
+            if smoothed_rms < noise_floor {
+                noise_floor = 0.95 * noise_floor + 0.05 * smoothed_rms;
+            } else {
+                noise_floor = 0.999 * noise_floor + 0.001 * smoothed_rms;
+            }
+            // Clamp away from zero so log10 stays finite.
+            let nf = noise_floor.max(1e-6);
+            let rms_log = smoothed_rms.max(1e-6);
+            let noise_floor_db = 20.0 * nf.log10();
+            let snr_db = (20.0 * rms_log.log10() - noise_floor_db).max(0.0);
+
+            if last_stats_emit.elapsed() >= stats_interval {
+                last_stats_emit = std::time::Instant::now();
+                if let Some(cb) = &audio_stats_cb {
+                    cb(AudioStats {
+                        rms: smoothed_rms,
+                        peak,
+                        snr_db,
+                        noise_floor_db,
+                    });
+                }
+            }
+        }
 
         // ---------- spectrum processing ---------------------------------- //
         if recording {

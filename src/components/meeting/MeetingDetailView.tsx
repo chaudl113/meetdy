@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   X,
@@ -11,23 +11,51 @@ import {
   AlertCircle,
   Trash2,
   Loader2,
+  Languages,
+  Search,
 } from "lucide-react";
-import { commands, type MeetingSession } from "@/bindings";
+import { TTSButton } from "./TTSButton";
+import { useShallow } from "zustand/react/shallow";
+import { commands, type MeetingSession, type Participant, type TranscriptSegment } from "@/bindings";
 import { formatDuration, useMeetingStore } from "../../stores/meetingStore";
-import { AudioPlayer } from "../ui/AudioPlayer";
+import { AudioPlayer, type AudioPlayerHandle } from "../ui/AudioPlayer";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { MeetingSummary } from "./MeetingSummary";
+import { MeetingInsightsPanel } from "./MeetingInsightsPanel";
 import { useSettings } from "../../hooks/useSettings";
 import { isAiConfigured } from "../../lib/utils/aiConfig";
-import { MeetingDeleteDialog } from "./MeetingDeleteDialog";
-import { TranslationSection, TranslationLanguageSelect } from "./TranslationSection";
-import { SummarySection } from "./SummarySection";
+import { SpeakerSegment } from "./recording/SpeakerSegment";
+import {
+  useSpeakerColors,
+  UNKNOWN_SPEAKER_COLOR,
+} from "../../hooks/useSpeakerColors";
 
 interface MeetingDetailViewProps {
   session: MeetingSession;
   onClose: () => void;
 }
 
+const TRANSLATE_LANGUAGES: { code: string; label: string }[] = [
+  { code: "en", label: "English" },
+  { code: "vi", label: "Tiếng Việt" },
+  { code: "zh-CN", label: "中文 (简体)" },
+  { code: "zh-TW", label: "中文 (繁體)" },
+  { code: "ja", label: "日本語" },
+  { code: "ko", label: "한국어" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "es", label: "Español" },
+  { code: "it", label: "Italiano" },
+  { code: "pt", label: "Português" },
+  { code: "ru", label: "Русский" },
+  { code: "th", label: "ภาษาไทย" },
+  { code: "id", label: "Bahasa Indonesia" },
+];
+
+/**
+ * Formats a Unix timestamp to a localized date/time string
+ */
 function formatDateTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
@@ -40,7 +68,12 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
-  const { fetchSessions, retryTranscription } = useMeetingStore();
+  const { fetchSessions, retryTranscription } = useMeetingStore(
+    useShallow((s) => ({
+      fetchSessions: s.fetchSessions,
+      retryTranscription: s.retryTranscription,
+    })),
+  );
   const { settings } = useSettings();
   const aiConfigured = isAiConfigured(settings);
   const [transcript, setTranscript] = useState<string | null>(null);
@@ -52,9 +85,57 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [currentSession, setCurrentSession] = useState(session);
+  const [audioTime, setAudioTime] = useState(0);
+  const [transcriptSearch, setTranscriptSearch] = useState("");
+
+  const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
+  const [transcriptParticipants, setTranscriptParticipants] = useState<Participant[]>([]);
+  const audioPlayerRef = useRef<AudioPlayerHandle>(null);
+  const segmentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const segSpeakerColors = useSpeakerColors(transcriptParticipants);
+  const segParticipantMap = Object.fromEntries(
+    transcriptParticipants.map((p) => [p.id, p.name]),
+  );
+  const transcriptQuery = transcriptSearch.trim().toLowerCase();
+  const hasTimedSegments = transcriptSegments.some(
+    (segment) => segment.start_ms > 0 || segment.end_ms > 0,
+  );
+  const canSeekSegment = (segment: TranscriptSegment) =>
+    !!audioUrl && segment.end_ms > segment.start_ms;
+  const visibleTranscriptSegments = useMemo(() => {
+    if (!transcriptQuery) return transcriptSegments;
+    return transcriptSegments.filter((segment) =>
+      segment.text.toLowerCase().includes(transcriptQuery),
+    );
+  }, [transcriptQuery, transcriptSegments]);
+  const plainTranscriptMatches =
+    !transcriptQuery || (transcript ?? "").toLowerCase().includes(transcriptQuery);
+  const activeSegmentId = useMemo(() => {
+    if (!hasTimedSegments || transcriptSegments.length === 0) return null;
+    const currentMs = audioTime * 1000;
+    for (let index = 0; index < transcriptSegments.length; index += 1) {
+      const segment = transcriptSegments[index];
+      if (!canSeekSegment(segment)) continue;
+      const next = transcriptSegments[index + 1];
+      const startMs = Math.max(0, segment.start_ms);
+      const endMs =
+        segment.end_ms > startMs
+          ? segment.end_ms
+          : next?.start_ms && next.start_ms > startMs
+            ? next.start_ms
+            : startMs + 8000;
+      if (currentMs >= startMs && currentMs < endMs) return segment.id;
+    }
+    return null;
+  }, [audioTime, audioUrl, hasTimedSegments, transcriptSegments]);
 
   // Translation state
   const [translateTarget, setTranslateTarget] = useState<string>("");
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+  const [translatedCopied, setTranslatedCopied] = useState(false);
 
   // Ref for focus trap
   const modalRef = useRef<HTMLDivElement>(null);
@@ -131,6 +212,22 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
         }
       }
 
+      // Load transcript segments for speaker-colored display
+      try {
+        const segResult = await commands.getMeetingTranscriptSegments(
+          currentSession.id,
+        );
+        if (segResult.status === "ok" && segResult.data.length > 0) {
+          setTranscriptSegments(segResult.data);
+          const pResult = await commands.listMeetingParticipants(
+            currentSession.id,
+          );
+          if (pResult.status === "ok") setTranscriptParticipants(pResult.data);
+        }
+      } catch {
+        // Segments not available, fall back to plain transcript
+      }
+
       // Load summary
       if (currentSession.summary_path) {
         try {
@@ -200,6 +297,19 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
     };
   }, [currentSession.id]);
 
+  useEffect(() => {
+    if (!activeSegmentId || transcriptQuery) return;
+    segmentRefs.current[activeSegmentId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }, [activeSegmentId, transcriptQuery]);
+
+  const handleSegmentSeek = (segment: TranscriptSegment) => {
+    if (!canSeekSegment(segment)) return;
+    audioPlayerRef.current?.seekTo(Math.max(0, segment.start_ms / 1000), true);
+  };
+
   const handleCopyTranscript = async () => {
     if (!transcript) return;
     try {
@@ -210,6 +320,61 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
       console.error("Failed to copy:", err);
     }
   };
+
+  const handleCopyTranslated = async () => {
+    if (!translatedText) return;
+    try {
+      await navigator.clipboard.writeText(translatedText);
+      setTranslatedCopied(true);
+      setTimeout(() => setTranslatedCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  const handleTranslate = useCallback(
+    async (targetLang: string) => {
+      if (!transcript || !targetLang) {
+        setTranslatedText(null);
+        setTranslateError(null);
+        return;
+      }
+      setIsTranslating(true);
+      setTranslateError(null);
+      try {
+        const result = await commands.translateText(
+          transcript,
+          "auto",
+          targetLang,
+        );
+        if (result.status === "ok") {
+          setTranslatedText(result.data);
+        } else {
+          setTranslateError(result.error);
+          setTranslatedText(null);
+        }
+      } catch (err) {
+        setTranslateError(
+          err instanceof Error ? err.message : "Translation failed",
+        );
+        setTranslatedText(null);
+      } finally {
+        setIsTranslating(false);
+      }
+    },
+    [transcript],
+  );
+
+  // Re-translate when transcript changes if a target language was already selected
+  useEffect(() => {
+    if (translateTarget && transcript) {
+      handleTranslate(translateTarget);
+    } else {
+      setTranslatedText(null);
+      setTranslateError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcript]);
 
   const handleDelete = async () => {
     console.log("Delete button clicked, session:", currentSession.id);
@@ -286,7 +451,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
       aria-modal="true"
       aria-labelledby="meeting-detail-title"
     >
-      <div className="bg-background border border-mid-gray/30 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+      <div className="bg-background border border-mid-gray/30 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-mid-gray/20">
           <h2
@@ -394,13 +559,18 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 <FileText className="h-4 w-4" />
                 {t("meeting.detail.audio", "Audio Recording")}
               </h3>
-              <AudioPlayer src={audioUrl} className="w-full" />
+              <AudioPlayer
+                ref={audioPlayerRef}
+                src={audioUrl}
+                className="w-full"
+                onTimeChange={setAudioTime}
+              />
             </div>
           )}
 
           {/* AI Summary - only shown when AI post-processing is configured */}
           {currentSession.status === "completed" && aiConfigured && (
-            <SummarySection
+            <MeetingSummary
               sessionId={currentSession.id}
               summary={summary}
               hasSummary={!!currentSession.summary_path}
@@ -412,6 +582,14 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                   summary_path: `${currentSession.id}/summary.md`,
                 });
               }}
+            />
+          )}
+
+          {/* AI Insights - structured key points, action items, participants, tags */}
+          {currentSession.status === "completed" && (
+            <MeetingInsightsPanel
+              sessionId={currentSession.id}
+              hasTranscript={!!transcript}
             />
           )}
 
@@ -427,9 +605,43 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                   {t("meeting.detail.transcript", "Transcript")}
                 </h3>
                 <div className="flex items-center gap-2">
-                  <TranslationLanguageSelect
-                    value={translateTarget}
-                    onChange={(val) => setTranslateTarget(val)}
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mid-gray" />
+                    <input
+                      type="search"
+                      value={transcriptSearch}
+                      onChange={(event) => setTranscriptSearch(event.target.value)}
+                      placeholder={t("meeting.detail.searchTranscript", "Search transcript")}
+                      className="h-7 w-44 rounded border border-mid-gray/30 bg-dark-gray/50 pl-7 pr-2 text-xs text-white placeholder:text-mid-gray focus:border-logo-primary focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-mid-gray">
+                    <Languages className="h-3.5 w-3.5" />
+                    <select
+                      value={translateTarget}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setTranslateTarget(val);
+                        handleTranslate(val);
+                      }}
+                      className="bg-dark-gray/50 border border-mid-gray/30 rounded px-2 py-1 text-xs text-white hover:border-mid-gray/60 focus:outline-none focus:border-logo-primary"
+                    >
+                      <option value="">
+                        {t("meeting.detail.translate.none", "No translation")}
+                      </option>
+                      {TRANSLATE_LANGUAGES.map((lang) => (
+                        <option key={lang.code} value={lang.code}>
+                          {lang.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <TTSButton
+                    getText={() =>
+                      transcriptSegments.length > 0
+                        ? transcriptSegments.map((s) => s.text).join(" ")
+                        : transcript ?? ""
+                    }
                   />
                   <button
                     onClick={handleCopyTranscript}
@@ -449,7 +661,123 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                   </button>
                 </div>
               </div>
-              <TranslationSection transcript={transcript} translateTarget={translateTarget} />
+              {translateTarget ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="bg-dark-gray/30 rounded-lg p-4">
+                    <p className="text-xs text-mid-gray mb-2 uppercase tracking-wide">
+                      {t("meeting.detail.translate.original", "Original")}
+                    </p>
+                    <p className="text-sm whitespace-pre-wrap">{transcript}</p>
+                  </div>
+                  <div className="bg-dark-gray/30 rounded-lg p-4 relative">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs text-mid-gray uppercase tracking-wide">
+                        {TRANSLATE_LANGUAGES.find(
+                          (l) => l.code === translateTarget,
+                        )?.label ?? translateTarget}
+                      </p>
+                      {translatedText && !isTranslating && (
+                        <button
+                          onClick={handleCopyTranslated}
+                          className="inline-flex items-center gap-1 text-[10px] text-mid-gray hover:text-white transition-colors"
+                        >
+                          {translatedCopied ? (
+                            <Check className="h-3 w-3" />
+                          ) : (
+                            <Copy className="h-3 w-3" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    {isTranslating ? (
+                      <div className="flex items-center gap-2 text-sm text-mid-gray">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {t(
+                          "meeting.detail.translate.loading",
+                          "Translating...",
+                        )}
+                      </div>
+                    ) : translateError ? (
+                      <p className="text-sm text-red-400">{translateError}</p>
+                    ) : translatedText ? (
+                      <p className="text-sm whitespace-pre-wrap">
+                        {translatedText}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-mid-gray italic">
+                        {t(
+                          "meeting.detail.translate.empty",
+                          "No translation yet",
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-dark-gray/30 rounded-lg p-4">
+                  {transcriptSegments.length > 0 ? (
+                    <div className="flex flex-col">
+                      {visibleTranscriptSegments.length === 0 ? (
+                        <p className="py-6 text-center text-sm text-mid-gray">
+                          {t(
+                            "meeting.detail.noTranscriptMatches",
+                            "No transcript matches",
+                          )}
+                        </p>
+                      ) : (
+                        visibleTranscriptSegments.map((seg, index) => {
+                          const sourceIndex = transcriptSegments.findIndex(
+                            (segment) => segment.id === seg.id,
+                          );
+                        const prevSpeakerId =
+                          sourceIndex > 0
+                            ? transcriptSegments[sourceIndex - 1].speaker_id
+                            : undefined;
+                        const showLabel = seg.speaker_id !== prevSpeakerId;
+                        const color = seg.speaker_id
+                          ? (segSpeakerColors[seg.speaker_id] ??
+                            UNKNOWN_SPEAKER_COLOR)
+                          : UNKNOWN_SPEAKER_COLOR;
+                        return (
+                          <div
+                            key={seg.id}
+                            ref={(node) => {
+                              segmentRefs.current[seg.id] = node;
+                            }}
+                          >
+                            <SpeakerSegment
+                              text={seg.text}
+                              startMs={seg.start_ms}
+                              speakerName={
+                                seg.speaker_id
+                                  ? segParticipantMap[seg.speaker_id]
+                                  : null
+                              }
+                              color={color}
+                              showSpeakerLabel={showLabel}
+                              active={activeSegmentId === seg.id}
+                              disabled={!canSeekSegment(seg)}
+                              onClick={() => handleSegmentSeek(seg)}
+                            />
+                          </div>
+                        );
+                        })
+                      )}
+                    </div>
+                  ) : plainTranscriptMatches ? (
+                    <p className="text-sm text-text/70 whitespace-pre-wrap leading-relaxed">
+                      {transcript}
+                    </p>
+                  ) : (
+                    <p className="py-6 text-center text-sm text-mid-gray">
+                      {t(
+                        "meeting.detail.noTranscriptMatches",
+                        "No transcript matches",
+                      )}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           ) : currentSession.status === "completed" ? (
             <div className="text-center py-8 text-mid-gray">
@@ -466,10 +794,40 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
 
       {/* Delete Confirmation Dialog */}
       {showDeleteConfirm && (
-        <MeetingDeleteDialog
-          onCancel={() => setShowDeleteConfirm(false)}
-          onConfirm={confirmDelete}
-        />
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+          <div className="bg-background border border-mid-gray/30 rounded-xl p-6 max-w-sm w-full mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-500/20 rounded-full">
+                <Trash2 className="h-5 w-5 text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold">
+                {t("meeting.detail.deleteTitle", "Delete Meeting")}
+              </h3>
+            </div>
+            <p className="text-mid-gray mb-6">
+              {t(
+                "meeting.detail.confirmDelete",
+                "Are you sure you want to delete this meeting? This action cannot be undone.",
+              )}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 rounded-lg border border-mid-gray/30 hover:bg-mid-gray/20 transition-colors"
+              >
+                {t("common.cancel", "Cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >
+                {t("common.delete", "Delete")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

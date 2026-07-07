@@ -13,6 +13,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+const MAIN_WINDOW_LABEL: &str = "main";
+
 const LOGIN_WINDOW_LABEL: &str = "chatgpt_login";
 const LOGIN_URL: &str = "https://chatgpt.com/";
 
@@ -115,7 +117,10 @@ pub async fn complete_chatgpt_login(app: AppHandle, access_token: String) -> Res
         return Err("Empty access token".to_string());
     }
 
-    app.emit(
+    // Emit only to the main window to prevent the token from leaking to
+    // other webview windows (e.g. recording_overlay).
+    app.emit_to(
+        MAIN_WINDOW_LABEL,
         "chatgpt-login-success",
         ChatgptLoginEvent { access_token },
     )

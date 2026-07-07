@@ -41,9 +41,10 @@ fn paste_via_clipboard(
 
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    clipboard
-        .write_text(&clipboard_content)
-        .map_err(|e| format!("Failed to restore clipboard: {}", e))?;
+    // Restore clipboard content; log on failure but don't crash the whole paste
+    if let Err(e) = clipboard.write_text(&clipboard_content) {
+        log::warn!("Failed to restore clipboard after paste: {}", e);
+    }
 
     Ok(())
 }

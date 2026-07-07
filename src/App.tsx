@@ -1,49 +1,20 @@
-import { useEffect, useState, useCallback, lazy, Suspense } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Toaster, toast } from "sonner";
-import { Loader2 } from "lucide-react";
 import "./App.css";
 import AccessibilityPermissions from "./components/AccessibilityPermissions";
 import Footer from "./components/footer";
 import Onboarding from "./components/onboarding";
-import { Sidebar, SidebarSection } from "./components/Sidebar";
+import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
 import { useSettings } from "./hooks/useSettings";
 import { commands } from "@/bindings";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useMeetingStore } from "@/stores/meetingStore";
 
-const GeneralSettings = lazy(() => import("./components/settings/general/GeneralSettings").then(m => ({ default: m.GeneralSettings })));
-const MeetingMode = lazy(() => import("./components/meeting/MeetingMode").then(m => ({ default: m.MeetingMode })));
-const ModelsSettings = lazy(() => import("./components/settings/models/ModelsSettings").then(m => ({ default: m.ModelsSettings })));
-const AdvancedSettings = lazy(() => import("./components/settings/advanced/AdvancedSettings").then(m => ({ default: m.AdvancedSettings })));
-const PostProcessingSettings = lazy(() => import("./components/settings/post-processing/PostProcessingSettings").then(m => ({ default: m.PostProcessingSettings })));
-const HistorySettings = lazy(() => import("./components/settings/history/HistorySettings").then(m => ({ default: m.HistorySettings })));
-const DebugSettings = lazy(() => import("./components/settings/debug/DebugSettings").then(m => ({ default: m.DebugSettings })));
-const AboutSettings = lazy(() => import("./components/settings/about/AboutSettings").then(m => ({ default: m.AboutSettings })));
-
-const LoadingSpinner = () => (
-  <div className="flex items-center justify-center py-12">
-    <Loader2 className="h-6 w-6 animate-spin text-text/50" />
-  </div>
-);
-
-const sectionComponents: Record<SidebarSection, React.LazyExoticComponent<React.ComponentType<object>>> = {
-  general: GeneralSettings,
-  meeting: MeetingMode,
-  models: ModelsSettings,
-  advanced: AdvancedSettings,
-  postprocessing: PostProcessingSettings,
-  recordings: HistorySettings,
-  debug: DebugSettings,
-  about: AboutSettings,
-};
-
 const renderSettingsContent = (section: SidebarSection) => {
-  const ActiveComponent = sectionComponents[section] || GeneralSettings;
-  return (
-    <Suspense fallback={<LoadingSpinner />}>
-      <ActiveComponent />
-    </Suspense>
-  );
+  const ActiveComponent =
+    SECTIONS_CONFIG[section]?.component || SECTIONS_CONFIG.general.component;
+  return <ActiveComponent />;
 };
 
 function App() {
@@ -55,7 +26,12 @@ function App() {
   // Mode switching stores
   const { currentMode, setCurrentMode, isDictationRecording } =
     useSettingsStore();
-  const { sessionStatus, stopMeeting } = useMeetingStore();
+  const { sessionStatus, stopMeeting } = useMeetingStore(
+    useShallow((s) => ({
+      sessionStatus: s.sessionStatus,
+      stopMeeting: s.stopMeeting,
+    })),
+  );
 
   useEffect(() => {
     checkOnboardingStatus();
@@ -72,9 +48,24 @@ function App() {
     };
   }, []);
 
+  // Cross-component navigation: components can dispatch
+  // `window.dispatchEvent(new CustomEvent("app:navigate", { detail: "general" }))`
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail && detail in SECTIONS_CONFIG) {
+        setCurrentSection(detail as SidebarSection);
+      }
+    };
+    window.addEventListener("app:navigate", handler as EventListener);
+    return () =>
+      window.removeEventListener("app:navigate", handler as EventListener);
+  }, []);
+
   // Handle keyboard shortcuts for debug mode toggle
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Check for Ctrl+Shift+D (Windows/Linux) or Cmd+Shift+D (macOS)
       const isDebugShortcut =
         event.shiftKey &&
         event.key.toLowerCase() === "d" &&
@@ -82,18 +73,19 @@ function App() {
 
       if (isDebugShortcut) {
         event.preventDefault();
-        const { settings } = useSettingsStore.getState();
         const currentDebugMode = settings?.debug_mode ?? false;
         updateSetting("debug_mode", !currentDebugMode);
       }
     };
 
+    // Add event listener when component mounts
     document.addEventListener("keydown", handleKeyDown);
 
+    // Cleanup event listener when component unmounts
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [updateSetting]);
+  }, [settings?.debug_mode, updateSetting]);
 
   const checkOnboardingStatus = async () => {
     try {
@@ -199,7 +191,7 @@ function App() {
         {/* Scrollable content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto">
-            <div className="flex flex-col items-center p-4 gap-4">
+            <div className="flex flex-col p-4 gap-4 w-full">
               <AccessibilityPermissions />
               {renderSettingsContent(currentSection)}
             </div>

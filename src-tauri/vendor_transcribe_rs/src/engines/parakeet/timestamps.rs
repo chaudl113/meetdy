@@ -84,6 +84,7 @@ fn convert_to_raw_token_segments(
             start: timestamp,
             end: end_timestamp,
             text: token.clone(), // Raw token text, including spaces and subword pieces
+            speaker_id: None,
         });
     }
 
@@ -332,6 +333,7 @@ fn extract_word_segments(utterance: &Utterance) -> Vec<TranscriptionSegment> {
                     start: word.t_start,
                     end: word.t_end,
                     text: word.text.clone(),
+                    speaker_id: None,
                 });
             }
         }
@@ -349,6 +351,7 @@ fn extract_segment_segments(utterance: &Utterance) -> Vec<TranscriptionSegment> 
             start: segment.t_start,
             end: segment.t_end,
             text: segment.text.clone(),
+            speaker_id: None,
         })
         .collect()
 }

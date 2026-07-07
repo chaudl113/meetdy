@@ -1,9 +1,9 @@
 //! Data models for meeting sessions.
 
+use super::wav_writer::WavWriterHandle;
 use crate::audio_toolkit::MixedAudioRecorder;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use super::wav_writer::WavWriterHandle;
 
 /// Represents the lifecycle status of a meeting session.
 ///
@@ -99,6 +99,22 @@ pub struct MeetingSession {
     /// Template ID if this meeting was created from a template
     #[serde(default)]
     pub template_id: Option<String>,
+
+    #[serde(default = "default_stt_engine")]
+    pub stt_engine: String,
+
+    #[serde(default)]
+    pub funasr_base_url: Option<String>,
+
+    #[serde(default)]
+    pub funasr_model: Option<String>,
+
+    #[serde(default)]
+    pub transcription_language: Option<String>,
+}
+
+fn default_stt_engine() -> String {
+    "whisper".to_string()
 }
 
 /// A short, timestamped note attached to a meeting session.
@@ -143,6 +159,10 @@ impl MeetingSession {
             audio_source: AudioSourceType::default(),
             summary_path: None,
             template_id: None,
+            stt_engine: default_stt_engine(),
+            funasr_base_url: None,
+            funasr_model: None,
+            transcription_language: None,
         }
     }
 
@@ -165,6 +185,10 @@ impl MeetingSession {
             audio_source,
             summary_path: None,
             template_id: None,
+            stt_engine: default_stt_engine(),
+            funasr_base_url: None,
+            funasr_model: None,
+            transcription_language: None,
         }
     }
 
@@ -188,8 +212,114 @@ impl MeetingSession {
             audio_source,
             summary_path: None,
             template_id,
+            stt_engine: default_stt_engine(),
+            funasr_base_url: None,
+            funasr_model: None,
+            transcription_language: None,
         }
     }
+}
+
+/// Status of an action item.
+#[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionItemStatus {
+    Todo,
+    InProgress,
+    Done,
+    Blocked,
+}
+
+impl Default for ActionItemStatus {
+    fn default() -> Self {
+        ActionItemStatus::Todo
+    }
+}
+
+/// A task extracted from (or added to) a meeting.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct ActionItem {
+    pub id: String,
+    pub session_id: String,
+    pub task: String,
+    pub assignee: Option<String>,
+    /// Free-form due date string (e.g. "Cuối tháng", "Tuần này", "2025-06-01").
+    /// Kept as text so AI-extracted relative dates are preserved.
+    pub due_date: Option<String>,
+    pub status: ActionItemStatus,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+/// A discussion bullet/point. `category` groups multiple points under a heading.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct KeyPoint {
+    pub id: String,
+    pub session_id: String,
+    pub category: Option<String>,
+    pub content: String,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+/// A person attached to a meeting (extracted from transcript or added manually).
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct Participant {
+    pub id: String,
+    pub session_id: String,
+    pub name: String,
+    /// Free-form role/team label, e.g. "Marketing", "Sales".
+    pub role: Option<String>,
+    pub sort_order: i64,
+    pub created_at: i64,
+    /// Index into the SPEAKER_COLORS palette (0-7). -1 = unassigned.
+    #[serde(default = "default_color_index")]
+    pub color_index: i64,
+}
+
+fn default_color_index() -> i64 {
+    -1
+}
+
+/// A structured transcript segment with optional speaker attribution.
+/// Stored in the `transcript_segments` table.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct TranscriptSegment {
+    pub id: String,
+    pub meeting_id: String,
+    /// Start time in milliseconds from the beginning of the recording.
+    pub start_ms: i64,
+    /// End time in milliseconds from the beginning of the recording.
+    pub end_ms: i64,
+    /// The transcribed text for this segment.
+    pub text: String,
+    /// Optional participant ID of the speaker. None = unassigned.
+    pub speaker_id: Option<String>,
+    /// Monotonically increasing sequence number for ordering.
+    pub sequence: i64,
+    /// Unix timestamp (ms) when the segment was created.
+    pub created_at: i64,
+}
+
+/// A tag for filtering/organizing meetings.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct Tag {
+    pub id: String,
+    pub session_id: String,
+    pub label: String,
+    /// Optional Tailwind-compatible color token (e.g. "blue", "amber").
+    pub color: Option<String>,
+    pub created_at: i64,
+}
+
+/// Bundle of AI-extracted structured data for a meeting.
+/// Used as the return type of `extract_meeting_insights`.
+#[derive(Clone, Debug, Serialize, Deserialize, Type, Default)]
+pub struct MeetingInsights {
+    pub key_points: Vec<KeyPoint>,
+    pub action_items: Vec<ActionItem>,
+    pub participants: Vec<Participant>,
+    pub tags: Vec<Tag>,
 }
 
 /// Internal state for the MeetingSessionManager.

@@ -9,26 +9,41 @@ use hound::{WavReader, WavSpec, WavWriter};
 use log::{debug, error, info};
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager};
+use tempfile::NamedTempFile;
 use uuid::Uuid;
 
-use crate::audio_toolkit::{AudioSourceConfig, MixedAudioRecorder};
+use crate::audio_toolkit::{
+    vad::{SmoothedVad, VadFrame},
+    AudioSourceConfig, MixedAudioRecorder, SileroVad, VoiceActivityDetector,
+};
 use crate::managers::meeting_logger::{
     log_meeting_event, log_performance_metric, MeetingLogContext, MeetingTimer,
 };
+use crate::settings::get_settings;
 
 use super::db::{init_meeting_database, DbPool, SqliteConnectionManager};
 use super::models::{
-    AudioSourceType, MeetingManagerState, MeetingNote, MeetingSession, MeetingStatus,
+    ActionItem, ActionItemStatus, AudioSourceType, KeyPoint, MeetingManagerState, MeetingNote,
+    MeetingSession, MeetingStatus, Participant, Tag, TranscriptSegment,
 };
 use super::wav_writer::WavWriterHandle;
 
+const MEETING_SESSION_SELECT: &str = "id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id, stt_engine, funasr_base_url, funasr_model, transcription_language";
+
+#[derive(Default)]
+struct MeetingPauseState {
+    is_paused: bool,
+    paused_started_at: Option<i64>,
+    total_paused_secs: i64,
+}
 
 /// Manager for meeting sessions.
 ///
@@ -58,6 +73,13 @@ pub struct MeetingSessionManager {
     db_path: PathBuf,
     /// Transcription manager for STT processing
     transcription_manager: Arc<crate::managers::transcription::TranscriptionManager>,
+    /// Cumulative live transcripts keyed by session id. Used to complete a
+    /// recording immediately on stop without re-running full-file STT.
+    live_transcripts: Arc<Mutex<HashMap<String, String>>>,
+    pause_state: Arc<Mutex<MeetingPauseState>>,
+    /// Currently active speaker: (participant_id, timestamp_secs).
+    /// None = no speaker assigned. Updated by set_active_speaker command.
+    active_speaker: Arc<Mutex<Option<(String, f32)>>>,
 }
 
 impl MeetingSessionManager {
@@ -107,6 +129,9 @@ impl MeetingSessionManager {
             db_pool,
             db_path,
             transcription_manager,
+            live_transcripts: Arc::new(Mutex::new(HashMap::new())),
+            pause_state: Arc::new(Mutex::new(MeetingPauseState::default())),
+            active_speaker: Arc::new(Mutex::new(None)),
         };
 
         info!("MeetingSessionManager initialized successfully");
@@ -127,6 +152,32 @@ impl MeetingSessionManager {
     #[allow(dead_code)]
     pub fn get_db_path(&self) -> &PathBuf {
         &self.db_path
+    }
+
+    /// Sets the active speaker for the current recording session.
+    /// All transcript segments emitted after this call will be attributed to the
+    /// given participant until another call changes the active speaker.
+    ///
+    /// `timestamp_secs` should be the current recording duration in seconds.
+    pub fn set_active_speaker(&self, participant_id: String, timestamp_secs: f32) {
+        if let Ok(mut speaker) = self.active_speaker.lock() {
+            *speaker = Some((participant_id, timestamp_secs));
+        }
+    }
+
+    /// Clears the active speaker (marks subsequent segments as unassigned).
+    pub fn clear_active_speaker(&self) {
+        if let Ok(mut speaker) = self.active_speaker.lock() {
+            *speaker = None;
+        }
+    }
+
+    /// Returns the current active speaker ID, if any.
+    pub fn get_active_speaker_id(&self) -> Option<String> {
+        self.active_speaker
+            .lock()
+            .ok()
+            .and_then(|s| s.as_ref().map(|(id, _)| id.clone()))
     }
 
     /// Gets the current session status atomically.
@@ -345,11 +396,9 @@ impl MeetingSessionManager {
     /// * `error_msg` - The error message describing the failure
     fn handle_transcription_failure(&self, session_id: &str, error_msg: &str) {
         // Update status to Failed in database
-        if let Err(update_err) = self.update_session_status_with_error(
-            session_id,
-            MeetingStatus::Failed,
-            error_msg,
-        ) {
+        if let Err(update_err) =
+            self.update_session_status_with_error(session_id, MeetingStatus::Failed, error_msg)
+        {
             error!(
                 "Failed to update session {} status to Failed: {}",
                 session_id, update_err
@@ -432,6 +481,17 @@ impl MeetingSessionManager {
         &self,
         audio_source: AudioSourceType,
     ) -> Result<MeetingSession> {
+        self.create_session_with_stt_config(audio_source, "whisper".to_string(), None, None, None)
+    }
+
+    fn create_session_with_stt_config(
+        &self,
+        audio_source: AudioSourceType,
+        stt_engine: String,
+        funasr_base_url: Option<String>,
+        funasr_model: Option<String>,
+        transcription_language: Option<String>,
+    ) -> Result<MeetingSession> {
         let id = Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().timestamp();
         let title = self.format_meeting_title(created_at);
@@ -442,24 +502,32 @@ impl MeetingSessionManager {
         debug!("Created session folder: {:?}", session_dir);
 
         // Create the session object
-        let session = MeetingSession::new_with_audio_source(
+        let mut session = MeetingSession::new_with_audio_source(
             id.clone(),
             title.clone(),
             created_at,
             audio_source.clone(),
         );
+        session.stt_engine = stt_engine;
+        session.funasr_base_url = funasr_base_url;
+        session.funasr_model = funasr_model;
+        session.transcription_language = transcription_language;
 
         // Insert into database
         let conn = self.get_connection()?;
         conn.execute(
-            "INSERT INTO meeting_sessions (id, title, created_at, status, audio_source, template_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO meeting_sessions (id, title, created_at, status, audio_source, template_id, stt_engine, funasr_base_url, funasr_model, transcription_language) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 session.id,
                 session.title,
                 session.created_at,
                 self.status_to_string(&session.status),
                 self.audio_source_to_string(&audio_source),
-                session.template_id
+                session.template_id,
+                session.stt_engine,
+                session.funasr_base_url,
+                session.funasr_model,
+                session.transcription_language
             ],
         )?;
 
@@ -482,13 +550,12 @@ impl MeetingSessionManager {
     /// * `Err` - If database query fails
     pub fn get_session(&self, session_id: &str) -> Result<Option<MeetingSession>> {
         let conn = self.get_connection()?;
+        let query = format!(
+            "SELECT {} FROM meeting_sessions WHERE id = ?1",
+            MEETING_SESSION_SELECT
+        );
         let session = conn
-            .query_row(
-                "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id
-                 FROM meeting_sessions WHERE id = ?1",
-                params![session_id],
-                |row| self.row_to_session(row),
-            )
+            .query_row(&query, params![session_id], |row| self.row_to_session(row))
             .optional()?;
 
         Ok(session)
@@ -564,10 +631,11 @@ impl MeetingSessionManager {
     /// * `Err` - If database query fails
     pub fn list_sessions(&self) -> Result<Vec<MeetingSession>> {
         let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id
-             FROM meeting_sessions ORDER BY created_at DESC",
-        )?;
+        let query = format!(
+            "SELECT {} FROM meeting_sessions ORDER BY created_at DESC",
+            MEETING_SESSION_SELECT
+        );
+        let mut stmt = conn.prepare(&query)?;
 
         let rows = stmt.query_map([], |row| self.row_to_session(row))?;
 
@@ -626,6 +694,61 @@ impl MeetingSessionManager {
         Ok(())
     }
 
+    /// Deletes every meeting session and all managed meeting files.
+    pub fn delete_all_sessions(&self) -> Result<()> {
+        info!("Deleting all meeting sessions");
+
+        {
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            if state
+                .current_session
+                .as_ref()
+                .map(|session| {
+                    session.status == MeetingStatus::Recording
+                        || session.status == MeetingStatus::Processing
+                })
+                .unwrap_or(false)
+            {
+                return Err(anyhow::anyhow!(
+                    "Cannot clear history while a meeting is recording or processing"
+                ));
+            }
+        }
+
+        if self.meetings_dir.exists() {
+            fs::remove_dir_all(&self.meetings_dir)?;
+        }
+        fs::create_dir_all(&self.meetings_dir)?;
+
+        let conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+        for table in [
+            "transcript_segments",
+            "meeting_tags",
+            "meeting_participants",
+            "meeting_key_points",
+            "meeting_action_items",
+            "meeting_notes",
+            "meeting_sessions",
+        ] {
+            tx.execute(&format!("DELETE FROM {}", table), [])?;
+        }
+        tx.commit()?;
+
+        self.live_transcripts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+
+        {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.current_session = None;
+        }
+
+        info!("Deleted all meeting sessions and files");
+        Ok(())
+    }
+
     // --- Notes -----------------------------------------------------------
 
     /// Adds a note to the given meeting session.
@@ -678,6 +801,196 @@ impl MeetingSessionManager {
             return Err(anyhow::anyhow!("Note not found: {}", note_id));
         }
         info!("Deleted note {}", note_id);
+        Ok(())
+    }
+
+    // --- Action items ----------------------------------------------------
+
+    pub fn add_action_item(
+        &self,
+        session_id: &str,
+        task: String,
+        assignee: Option<String>,
+        due_date: Option<String>,
+        status: ActionItemStatus,
+    ) -> Result<ActionItem> {
+        let task = task.trim().to_string();
+        if task.is_empty() {
+            return Err(anyhow::anyhow!("Task cannot be empty"));
+        }
+        if self.get_session(session_id)?.is_none() {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+        let existing = super::db::list_action_items_by_session(&self.db_path, session_id)?;
+        let next_order = existing.iter().map(|i| i.sort_order).max().unwrap_or(-1) + 1;
+        let item = ActionItem {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            task,
+            assignee: assignee.filter(|s| !s.trim().is_empty()),
+            due_date: due_date.filter(|s| !s.trim().is_empty()),
+            status,
+            sort_order: next_order,
+            created_at: chrono::Utc::now().timestamp(),
+        };
+        super::db::insert_action_item(&self.db_path, &item)?;
+        Ok(item)
+    }
+
+    pub fn list_action_items(&self, session_id: &str) -> Result<Vec<ActionItem>> {
+        super::db::list_action_items_by_session(&self.db_path, session_id)
+    }
+
+    pub fn update_action_item(&self, item: &ActionItem) -> Result<()> {
+        super::db::update_action_item(&self.db_path, item)
+    }
+
+    pub fn delete_action_item(&self, id: &str) -> Result<()> {
+        let deleted = super::db::delete_action_item(&self.db_path, id)?;
+        if !deleted {
+            return Err(anyhow::anyhow!("Action item not found: {}", id));
+        }
+        Ok(())
+    }
+
+    // --- Key points ------------------------------------------------------
+
+    pub fn add_key_point(
+        &self,
+        session_id: &str,
+        category: Option<String>,
+        content: String,
+    ) -> Result<KeyPoint> {
+        let content = content.trim().to_string();
+        if content.is_empty() {
+            return Err(anyhow::anyhow!("Key point cannot be empty"));
+        }
+        if self.get_session(session_id)?.is_none() {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+        let existing = super::db::list_key_points_by_session(&self.db_path, session_id)?;
+        let next_order = existing.iter().map(|i| i.sort_order).max().unwrap_or(-1) + 1;
+        let kp = KeyPoint {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            category: category.filter(|s| !s.trim().is_empty()),
+            content,
+            sort_order: next_order,
+            created_at: chrono::Utc::now().timestamp(),
+        };
+        super::db::insert_key_point(&self.db_path, &kp)?;
+        Ok(kp)
+    }
+
+    pub fn list_key_points(&self, session_id: &str) -> Result<Vec<KeyPoint>> {
+        super::db::list_key_points_by_session(&self.db_path, session_id)
+    }
+
+    // --- Participants ----------------------------------------------------
+
+    pub fn add_participant(
+        &self,
+        session_id: &str,
+        name: String,
+        role: Option<String>,
+    ) -> Result<Participant> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(anyhow::anyhow!("Participant name cannot be empty"));
+        }
+        if self.get_session(session_id)?.is_none() {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+        let existing = super::db::list_participants_by_session(&self.db_path, session_id)?;
+        let next_order = existing.iter().map(|p| p.sort_order).max().unwrap_or(-1) + 1;
+        let p = Participant {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            name,
+            role: role.filter(|s| !s.trim().is_empty()),
+            sort_order: next_order,
+            created_at: chrono::Utc::now().timestamp(),
+            color_index: -1,
+        };
+        super::db::insert_participant(&self.db_path, &p)?;
+        Ok(p)
+    }
+
+    pub fn list_participants(&self, session_id: &str) -> Result<Vec<Participant>> {
+        super::db::list_participants_by_session(&self.db_path, session_id)
+    }
+
+    pub fn update_participant(&self, p: &Participant) -> Result<()> {
+        super::db::update_participant(&self.db_path, p)
+    }
+
+    pub fn delete_participant(&self, id: &str) -> Result<()> {
+        let deleted = super::db::delete_participant(&self.db_path, id)?;
+        if !deleted {
+            return Err(anyhow::anyhow!("Participant not found: {}", id));
+        }
+        Ok(())
+    }
+
+    // --- Tags ------------------------------------------------------------
+
+    pub fn add_tag(&self, session_id: &str, label: String, color: Option<String>) -> Result<Tag> {
+        let label = label.trim().to_string();
+        if label.is_empty() {
+            return Err(anyhow::anyhow!("Tag label cannot be empty"));
+        }
+        if self.get_session(session_id)?.is_none() {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+        let t = Tag {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            label,
+            color: color.filter(|s| !s.trim().is_empty()),
+            created_at: chrono::Utc::now().timestamp(),
+        };
+        super::db::insert_tag(&self.db_path, &t)?;
+        Ok(t)
+    }
+
+    pub fn list_tags(&self, session_id: &str) -> Result<Vec<Tag>> {
+        super::db::list_tags_by_session(&self.db_path, session_id)
+    }
+
+    pub fn delete_tag(&self, id: &str) -> Result<()> {
+        let deleted = super::db::delete_tag(&self.db_path, id)?;
+        if !deleted {
+            return Err(anyhow::anyhow!("Tag not found: {}", id));
+        }
+        Ok(())
+    }
+
+    pub fn list_all_tag_labels(&self) -> Result<Vec<String>> {
+        super::db::list_all_tag_labels(&self.db_path)
+    }
+
+    /// Replaces all AI-extracted insights for a session.
+    /// Wipes previous action items/key points/participants (but keeps
+    /// manually-added tags) and inserts the new ones.
+    pub fn replace_insights(
+        &self,
+        session_id: &str,
+        action_items: Vec<ActionItem>,
+        key_points: Vec<KeyPoint>,
+        participants: Vec<Participant>,
+    ) -> Result<()> {
+        super::db::delete_action_items_by_session(&self.db_path, session_id)?;
+        super::db::delete_key_points_by_session(&self.db_path, session_id)?;
+        super::db::delete_participants_by_session(&self.db_path, session_id)?;
+        for item in action_items {
+            super::db::insert_action_item(&self.db_path, &item)?;
+        }
+        for kp in key_points {
+            super::db::insert_key_point(&self.db_path, &kp)?;
+        }
+        for p in participants {
+            super::db::insert_participant(&self.db_path, &p)?;
+        }
         Ok(())
     }
 
@@ -766,6 +1079,12 @@ impl MeetingSessionManager {
             audio_source: self.string_to_audio_source(&audio_source_str),
             summary_path,
             template_id,
+            stt_engine: row
+                .get("stt_engine")
+                .unwrap_or_else(|_| "whisper".to_string()),
+            funasr_base_url: row.get("funasr_base_url").unwrap_or(None),
+            funasr_model: row.get("funasr_model").unwrap_or(None),
+            transcription_language: row.get("transcription_language").unwrap_or(None),
         })
     }
 
@@ -800,11 +1119,20 @@ impl MeetingSessionManager {
     ///
     /// # Arguments
     /// * `audio_source` - The audio source configuration (MicrophoneOnly, SystemOnly, or Mixed)
+    /// * `stt_engine` - STT engine to use: "whisper" (local), "soniox" (cloud), or "funasr" (local service)
+    /// * `soniox_api_key` - Soniox API key, required when stt_engine = "soniox"
     ///
     /// # Returns
     /// * `Ok(MeetingSession)` - The newly created and active session
     /// * `Err` - If state guard fails, session creation, recorder initialization, or audio capture fails
-    pub fn start_recording(&self, audio_source: AudioSourceType) -> Result<MeetingSession> {
+    pub fn start_recording(
+        &self,
+        audio_source: AudioSourceType,
+        stt_engine: String,
+        soniox_api_key: Option<String>,
+        source_language: Option<String>,
+        target_language: Option<String>,
+    ) -> Result<MeetingSession> {
         let timer = MeetingTimer::start();
 
         // State machine guard: validate transition from Idle -> Recording
@@ -850,8 +1178,34 @@ impl MeetingSessionManager {
             audio_source
         );
 
-        // Create a new session with the specified audio source
-        let session = self.create_session_with_audio_source(audio_source.clone())?;
+        let settings = get_settings(&self.app_handle);
+        let funasr_base_url = if stt_engine == "funasr" {
+            Some(settings.funasr_base_url.clone())
+        } else {
+            None
+        };
+        let funasr_model = if stt_engine == "funasr" {
+            Some(settings.funasr_model.clone())
+        } else {
+            None
+        };
+
+        // Create a new session with the specified audio and STT config.
+        let session = self.create_session_with_stt_config(
+            audio_source.clone(),
+            stt_engine.clone(),
+            funasr_base_url,
+            funasr_model,
+            source_language.clone(),
+        )?;
+        {
+            let mut pause = self.pause_state.lock().unwrap_or_else(|p| p.into_inner());
+            *pause = MeetingPauseState::default();
+        }
+        self.live_transcripts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(session.id.clone(), String::new());
 
         let log_ctx = MeetingLogContext::new(&session.id, "start_recording");
         log_ctx.log_start();
@@ -888,12 +1242,925 @@ impl MeetingSessionManager {
         // Wrap in WavWriterHandle for timeout-based finalization
         let wav_handle = WavWriterHandle::new(wav_writer);
 
-        // Add sample callback for incremental WAV writing
+        // Live transcript event payload. Emitted while recording as chunks are
+        // transcribed; the final transcript is still produced after stop.
+        #[derive(Clone, Serialize)]
+        struct MeetingLiveTranscriptPayload {
+            session_id: String,
+            text: String,
+            chunk_text: String,
+            is_final: bool,
+            // --- Speaker attribution (new) ---
+            /// Participant ID of the active speaker. None = unassigned.
+            speaker_id: Option<String>,
+            /// Segment start time in milliseconds.
+            start_ms: i64,
+            /// Segment end time in milliseconds.
+            end_ms: i64,
+        }
+
+        let (live_tx, live_rx) = mpsc::channel::<Vec<f32>>();
+
+        // --- Soniox cloud STT path ---
+        if stt_engine == "soniox" {
+            let api_key = soniox_api_key.clone().unwrap_or_default();
+            let soniox_source_lang = source_language.clone();
+            let soniox_target_lang = target_language.clone();
+            let app_handle_soniox = self.app_handle.clone();
+            let session_id_soniox = session.id.clone();
+            let active_speaker_soniox = self.active_speaker.clone();
+            let manager_soniox = self.clone();
+            let live_transcripts_soniox = self.live_transcripts.clone();
+            thread::spawn(move || {
+                // Build a single-threaded tokio runtime for this worker thread
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::error!("Soniox: failed to build tokio runtime: {}", e);
+                        return;
+                    }
+                };
+
+                rt.block_on(async move {
+                    use futures_util::{SinkExt, StreamExt};
+                    use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+                    const SONIOX_ENDPOINT: &str =
+                        "wss://stt-rt.soniox.com/transcribe-websocket";
+
+                    #[derive(serde::Serialize, Clone)]
+                    struct SttErrorPayload {
+                        session_id: String,
+                        message: String,
+                    }
+
+                    let emit_error = |app: &AppHandle, sid: &str, msg: String| {
+                        log::error!("Soniox STT error: {}", msg);
+                        let _ = app.emit(
+                            "meeting_stt_error",
+                            SttErrorPayload {
+                                session_id: sid.to_string(),
+                                message: msg,
+                            },
+                        );
+                    };
+
+                    let ws = match connect_async(SONIOX_ENDPOINT).await {
+                        Ok((ws, _)) => ws,
+                        Err(e) => {
+                            emit_error(
+                                &app_handle_soniox,
+                                &session_id_soniox,
+                                format!("Cannot connect to Soniox: {}", e),
+                            );
+                            return;
+                        }
+                    };
+                    let (mut ws_sink, mut ws_stream) = ws.split();
+
+                    let mut config_msg = serde_json::json!({
+                        "api_key": api_key,
+                        "model": "stt-rt-v4",
+                        "audio_format": "pcm_s16le",
+                        "sample_rate": 16000,
+                        "num_channels": 1,
+                        "enable_endpoint_detection": true,
+                        "max_endpoint_delay_ms": 3000,
+                        "enable_speaker_diarization": true,
+                    });
+
+                    // Language hints (skip "auto" — let Soniox detect)
+                    if let Some(ref lang) = soniox_source_lang {
+                        if !lang.is_empty() && lang != "auto" {
+                            config_msg["language_hints"] = serde_json::json!([lang]);
+                        }
+                    }
+
+                    // Realtime translation
+                    if let Some(ref tgt) = soniox_target_lang {
+                        if !tgt.is_empty() {
+                            config_msg["translation"] = serde_json::json!({
+                                "type": "one_way",
+                                "target_language": tgt,
+                            });
+                        }
+                    }
+
+                    if let Err(e) = ws_sink
+                        .send(Message::Text(config_msg.to_string().into()))
+                        .await
+                    {
+                        emit_error(
+                            &app_handle_soniox,
+                            &session_id_soniox,
+                            format!("Failed to send config to Soniox: {}", e),
+                        );
+                        return;
+                    }
+
+                    // Channel to bridge std mpsc → tokio
+                    let (pcm_tx, mut pcm_rx) =
+                        tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+
+                    // Spawn a blocking reader thread that converts f32 samples → i16 PCM
+                    // and forwards them into the async channel.
+                    {
+                        let pcm_tx = pcm_tx.clone();
+                        let should_continue = {
+                            let manager = manager_soniox.clone();
+                            let sid = session_id_soniox.clone();
+                            move || {
+                                let state =
+                                    manager.state.lock().unwrap_or_else(|p| p.into_inner());
+                                state
+                                    .current_session
+                                    .as_ref()
+                                    .map(|s| {
+                                        s.id == sid
+                                            && s.status == MeetingStatus::Recording
+                                    })
+                                    .unwrap_or(false)
+                            }
+                        };
+                        thread::spawn(move || loop {
+                            match live_rx.recv_timeout(Duration::from_millis(500)) {
+                                Ok(samples) => {
+                                    // Convert f32 [-1,1] to i16 LE PCM
+                                    let pcm: Vec<u8> = samples
+                                        .iter()
+                                        .flat_map(|&s| {
+                                            let v = (s * 32767.0)
+                                                .clamp(-32768.0, 32767.0)
+                                                as i16;
+                                            v.to_le_bytes()
+                                        })
+                                        .collect();
+                                    if pcm_tx.send(pcm).is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(mpsc::RecvTimeoutError::Timeout) => {
+                                    if !should_continue() {
+                                        break;
+                                    }
+                                }
+                                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            }
+                        });
+                    }
+
+                    let mut full_text = String::new();
+                    let mut transcript_parts: Vec<String> = Vec::new();
+                    // Maps Soniox speaker label (e.g. "S1") → participant id in DB
+                    let mut speaker_map: std::collections::HashMap<String, String> =
+                        std::collections::HashMap::new();
+
+                    loop {
+                        tokio::select! {
+                            biased;
+
+                            pcm = pcm_rx.recv() => {
+                                match pcm {
+                                    Some(bytes) => {
+                                        if let Err(e) = ws_sink
+                                            .send(Message::Binary(bytes.into()))
+                                            .await
+                                        {
+                                            log::warn!("Soniox: send audio error: {}", e);
+                                            break;
+                                        }
+                                    }
+                                    None => {
+                                        // Converter thread finished — flush + close
+                                        let _ = ws_sink
+                                            .send(Message::Binary(vec![].into()))
+                                            .await;
+                                        let _ = ws_sink.send(Message::Close(None)).await;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            msg = ws_stream.next() => {
+                                match msg {
+                                    Some(Ok(Message::Text(text))) => {
+                                        // Parse Soniox token response
+                                        if let Ok(value) =
+                                            serde_json::from_str::<serde_json::Value>(&text)
+                                        {
+                                            // Soniox error response
+                                            if let Some(code) = value.get("error_code") {
+                                                let msg = value
+                                                    .get("error_message")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("Unknown error");
+                                                emit_error(
+                                                    &app_handle_soniox,
+                                                    &session_id_soniox,
+                                                    format!("Soniox error {}: {}", code, msg),
+                                                );
+                                                break;
+                                            }
+                                            if let Some(tokens) =
+                                                value.get("tokens").and_then(|v| v.as_array())
+                                            {
+                                                let mut chunk_text = String::new();
+                                                let mut has_end = false;
+                                                let mut soniox_speaker: Option<String> = None;
+                                                for token in tokens {
+                                                    let tok = token
+                                                        .get("text")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    if tok == "<end>" {
+                                                        has_end = true;
+                                                        continue;
+                                                    }
+                                                    let is_final = token
+                                                        .get("is_final")
+                                                        .and_then(|v| v.as_bool())
+                                                        .unwrap_or(false);
+                                                    if is_final {
+                                                        chunk_text.push_str(tok);
+                                                        if soniox_speaker.is_none() {
+                                                            soniox_speaker = token
+                                                                .get("speaker")
+                                                                .and_then(|v| v.as_str())
+                                                                .map(|s| s.to_string());
+                                                        }
+                                                    }
+                                                }
+
+                                                // Resolve Soniox speaker label → participant id
+                                                let resolved_speaker_id: Option<String> =
+                                                    if let Some(ref label) = soniox_speaker {
+                                                        if let Some(pid) = speaker_map.get(label) {
+                                                            Some(pid.clone())
+                                                        } else {
+                                                            // Create a new participant for this speaker
+                                                            let participant_name =
+                                                                format!("Speaker {}", label);
+                                                            match manager_soniox.add_participant(
+                                                                &session_id_soniox,
+                                                                participant_name,
+                                                                None,
+                                                            ) {
+                                                                Ok(p) => {
+                                                                    // Emit event so FE updates participant list
+                                                                    let _ = app_handle_soniox.emit(
+                                                                        "meeting_participant_added",
+                                                                        p.clone(),
+                                                                    );
+                                                                    speaker_map.insert(
+                                                                        label.clone(),
+                                                                        p.id.clone(),
+                                                                    );
+                                                                    Some(p.id)
+                                                                }
+                                                                Err(e) => {
+                                                                    log::warn!(
+                                                                        "Soniox: failed to create participant for {}: {}",
+                                                                        label, e
+                                                                    );
+                                                                    None
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        // Fall back to manually set active speaker
+                                                        active_speaker_soniox
+                                                            .lock()
+                                                            .ok()
+                                                            .and_then(|s| {
+                                                                s.as_ref().map(|(id, _)| id.clone())
+                                                            })
+                                                    };
+
+                                                if !chunk_text.is_empty() {
+                                                    if !full_text.is_empty() {
+                                                        full_text.push(' ');
+                                                    }
+                                                    full_text.push_str(&chunk_text);
+                                                    transcript_parts.push(chunk_text.clone());
+                                                    live_transcripts_soniox
+                                                        .lock()
+                                                        .unwrap_or_else(|p| p.into_inner())
+                                                        .insert(
+                                                            session_id_soniox.clone(),
+                                                            full_text.clone(),
+                                                        );
+                                                    #[derive(Clone, serde::Serialize)]
+                                                    struct LivePayload {
+                                                        session_id: String,
+                                                        text: String,
+                                                        chunk_text: String,
+                                                        is_final: bool,
+                                                        speaker_id: Option<String>,
+                                                        start_ms: i64,
+                                                        end_ms: i64,
+                                                    }
+                                                    let payload = LivePayload {
+                                                        session_id: session_id_soniox.clone(),
+                                                        text: full_text.clone(),
+                                                        chunk_text,
+                                                        is_final: has_end,
+                                                        speaker_id: resolved_speaker_id,
+                                                        start_ms: 0,
+                                                        end_ms: 0,
+                                                    };
+                                                     // Persist segment to DB (best-effort)
+                                                    {
+                                                        let db_path = manager_soniox.db_path.clone();
+                                                        let seg_session = session_id_soniox.clone();
+                                                        let seg_speaker = payload.speaker_id.clone();
+                                                        let seg_text = payload.chunk_text.clone();
+                                                        thread::spawn(move || {
+                                                            let segment = TranscriptSegment {
+                                                                id: uuid::Uuid::new_v4().to_string(),
+                                                                meeting_id: seg_session,
+                                                                start_ms: 0,
+                                                                end_ms: 0,
+                                                                text: seg_text,
+                                                                speaker_id: seg_speaker,
+                                                                sequence: 0,
+                                                                created_at: chrono::Utc::now().timestamp_millis(),
+                                                            };
+                                                            match rusqlite::Connection::open(&db_path) {
+                                                                Ok(conn) => {
+                                                                    if let Err(e) = super::db::insert_transcript_segment(&conn, &segment) {
+                                                                        log::warn!("Soniox: failed to save segment: {}", e);
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    log::warn!("Soniox: DB open failed: {}", e);
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                    if let Err(e) = app_handle_soniox
+                                                        .emit("meeting_live_transcript", payload)
+                                                    {
+                                                        log::warn!(
+                                                            "Soniox: emit transcript failed: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Some(Ok(Message::Close(_))) | None => break,
+                                    Some(Err(e)) => {
+                                        emit_error(
+                                            &app_handle_soniox,
+                                            &session_id_soniox,
+                                            format!("Soniox connection lost: {}", e),
+                                        );
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+        } else if stt_engine == "funasr" {
+            // FunASR's managed OpenAI-compatible server is batch-oriented. For
+            // meeting UX we run near-realtime chunk transcription against the
+            // same local server while still doing a final full-file pass after
+            // stop_recording().
+            let manager = self.clone();
+            let app_handle = self.app_handle.clone();
+            let session_id = session.id.clone();
+            let active_speaker_clone = self.active_speaker.clone();
+            let base_url = session
+                .funasr_base_url
+                .clone()
+                .unwrap_or_else(|| "http://localhost:8000".to_string());
+            let model = session
+                .funasr_model
+                .clone()
+                .unwrap_or_else(|| "fun-asr-nano".to_string());
+            let language = session.transcription_language.clone();
+
+            thread::spawn(move || {
+                const SAMPLE_RATE: usize = 16_000;
+                const CHUNK_SAMPLES: usize = SAMPLE_RATE * 8;
+                const MIN_CHUNK_SAMPLES: usize = SAMPLE_RATE * 2;
+                const MIN_CHUNK_RMS: f32 = 0.003;
+
+                let should_continue = || {
+                    let state = manager.state.lock().unwrap_or_else(|p| p.into_inner());
+                    state
+                        .current_session
+                        .as_ref()
+                        .map(|s| s.id == session_id && s.status == MeetingStatus::Recording)
+                        .unwrap_or(false)
+                };
+
+                let write_chunk_wav = |samples: &[f32]| -> Result<NamedTempFile> {
+                    let temp_file = NamedTempFile::with_suffix(".wav")?;
+                    let spec = WavSpec {
+                        channels: 1,
+                        sample_rate: 16000,
+                        bits_per_sample: 16,
+                        sample_format: hound::SampleFormat::Int,
+                    };
+                    {
+                        let mut writer = WavWriter::new(temp_file.reopen()?, spec)?;
+                        for sample in samples {
+                            let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+                            writer.write_sample(value)?;
+                        }
+                        writer.finalize()?;
+                    }
+                    Ok(temp_file)
+                };
+
+                let transcribe_chunk =
+                    |samples: Vec<f32>,
+                     start_ms: i64,
+                     end_ms: i64,
+                     transcript_parts: &mut Vec<String>| {
+                        if samples.len() < MIN_CHUNK_SAMPLES {
+                            return;
+                        }
+
+                        let rms = (samples.iter().map(|s| s * s).sum::<f32>()
+                            / samples.len() as f32)
+                            .sqrt();
+                        if rms < MIN_CHUNK_RMS {
+                            log::debug!(
+                                "[FUNASR_STT] live chunk skipped low energy: session={} rms={:.4} samples={}",
+                                session_id,
+                                rms,
+                                samples.len()
+                            );
+                            return;
+                        }
+
+                        let temp_wav = match write_chunk_wav(&samples) {
+                            Ok(file) => file,
+                            Err(e) => {
+                                log::warn!("[FUNASR_STT] failed to write live chunk wav: {}", e);
+                                return;
+                            }
+                        };
+
+                        log::info!(
+                            "[FUNASR_STT] session={} live chunk start: {:.1}s rms={:.4}",
+                            session_id,
+                            samples.len() as f32 / SAMPLE_RATE as f32,
+                            rms
+                        );
+
+                        let text = match tauri::async_runtime::block_on(
+                            crate::funasr_client::transcribe_file(
+                                &app_handle,
+                                &base_url,
+                                &model,
+                                language.as_deref(),
+                                temp_wav.path(),
+                            ),
+                        ) {
+                            Ok(text) => text.trim().to_string(),
+                            Err(e) => {
+                                log::warn!("[FUNASR_STT] live chunk failed: {}", e);
+                                return;
+                            }
+                        };
+
+                        if text.is_empty() {
+                            return;
+                        }
+
+                        transcript_parts.push(text.clone());
+                        let full_text = transcript_parts.join(" ");
+                        manager
+                            .live_transcripts
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .insert(session_id.clone(), full_text.clone());
+
+                        let payload = MeetingLiveTranscriptPayload {
+                            session_id: session_id.clone(),
+                            text: full_text,
+                            chunk_text: text.clone(),
+                            is_final: false,
+                            speaker_id: active_speaker_clone
+                                .lock()
+                                .ok()
+                                .and_then(|s| s.as_ref().map(|(id, _)| id.clone())),
+                            start_ms,
+                            end_ms,
+                        };
+
+                        {
+                            let db_path = manager.db_path.clone();
+                            let seg_session = session_id.clone();
+                            let seg_speaker = payload.speaker_id.clone();
+                            let seg_text = payload.chunk_text.clone();
+                            thread::spawn(move || {
+                                let segment = TranscriptSegment {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    meeting_id: seg_session,
+                                    start_ms,
+                                    end_ms,
+                                    text: seg_text,
+                                    speaker_id: seg_speaker,
+                                    sequence: 0,
+                                    created_at: chrono::Utc::now().timestamp_millis(),
+                                };
+                                match rusqlite::Connection::open(&db_path) {
+                                    Ok(conn) => {
+                                        if let Err(e) =
+                                            super::db::insert_transcript_segment(&conn, &segment)
+                                        {
+                                            log::warn!(
+                                                "[FUNASR_STT] failed to save live segment: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!(
+                                            "[FUNASR_STT] failed to open DB for live segment: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                            });
+                        }
+
+                        if let Err(e) = app_handle.emit("meeting_live_transcript", payload) {
+                            log::warn!("[FUNASR_STT] failed to emit live transcript: {}", e);
+                        } else {
+                            log::info!(
+                                "[FUNASR_STT] session={} live chunk completed: chars={}",
+                                session_id,
+                                text.chars().count()
+                            );
+                        }
+                    };
+
+                let mut pending = Vec::<f32>::new();
+                let mut transcript_parts = Vec::<String>::new();
+                let mut timeline_samples = 0usize;
+
+                loop {
+                    match live_rx.recv_timeout(Duration::from_millis(500)) {
+                        Ok(samples) => {
+                            pending.extend(samples);
+                            while pending.len() >= CHUNK_SAMPLES {
+                                let chunk: Vec<f32> = pending.drain(..CHUNK_SAMPLES).collect();
+                                let start_ms = (timeline_samples as f64 / SAMPLE_RATE as f64
+                                    * 1000.0)
+                                    .round() as i64;
+                                timeline_samples += chunk.len();
+                                let end_ms = (timeline_samples as f64 / SAMPLE_RATE as f64 * 1000.0)
+                                    .round() as i64;
+                                transcribe_chunk(chunk, start_ms, end_ms, &mut transcript_parts);
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if !should_continue() {
+                                break;
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+
+                if pending.len() >= MIN_CHUNK_SAMPLES {
+                    let start_ms =
+                        (timeline_samples as f64 / SAMPLE_RATE as f64 * 1000.0).round() as i64;
+                    timeline_samples += pending.len();
+                    let end_ms =
+                        (timeline_samples as f64 / SAMPLE_RATE as f64 * 1000.0).round() as i64;
+                    transcribe_chunk(pending, start_ms, end_ms, &mut transcript_parts);
+                }
+
+                if !transcript_parts.is_empty() {
+                    let payload = MeetingLiveTranscriptPayload {
+                        session_id,
+                        text: transcript_parts.join(" "),
+                        chunk_text: String::new(),
+                        is_final: true,
+                        speaker_id: active_speaker_clone
+                            .lock()
+                            .ok()
+                            .and_then(|s| s.as_ref().map(|(id, _)| id.clone())),
+                        start_ms: 0,
+                        end_ms: 0,
+                    };
+                    if let Err(e) = app_handle.emit("meeting_live_transcript", payload) {
+                        log::warn!("[FUNASR_STT] failed to emit final live transcript: {}", e);
+                    }
+                }
+            });
+        } else {
+            // --- Whisper (local) STT path ---
+            let manager = self.clone();
+            let app_handle = self.app_handle.clone();
+            let session_id = session.id.clone();
+            let active_speaker_clone = self.active_speaker.clone();
+            let vad_path = self
+                .app_handle
+                .path()
+                .resolve(
+                    "resources/models/silero_vad_v4.onnx",
+                    BaseDirectory::Resource,
+                )
+                .map_err(|e| anyhow::anyhow!("Failed to resolve VAD path: {}", e))?;
+            thread::spawn(move || {
+                const SAMPLE_RATE: usize = 16_000;
+                const VAD_FRAME_SAMPLES: usize = SAMPLE_RATE * 30 / 1000;
+                // Minimum utterance length to send to Whisper. Too short and
+                // we waste cycles on noise; too long and live feel suffers.
+                const MIN_FINAL_SAMPLES: usize = SAMPLE_RATE * 8 / 10;
+                const MAX_UTTERANCE_SAMPLES: usize = SAMPLE_RATE * 10;
+                // RMS gate applied per VAD frame BEFORE Silero. If a 30ms
+                // frame is quieter than this, force it to Noise. Prevents
+                // Silero false-positives on background hiss.
+                // Lowered from 0.01 to accommodate built-in mic without headphones
+                // (voice captured further from mic, lower signal level).
+                const FRAME_RMS_GATE: f32 = 0.004;
+                // Minimum mean RMS over an entire utterance to actually
+                // send it to Whisper. Lowered from 0.012 for same reason.
+                const UTTERANCE_RMS_MIN: f32 = 0.005;
+
+                let mut input_pending = Vec::<f32>::new();
+                let mut utterance = Vec::<f32>::new();
+                let mut transcript_parts = Vec::<String>::new();
+
+                // SmoothedVad params tuned for live UX:
+                //  - prefill 8 frames (~240ms) so utterance start isn't clipped
+                //  - hangover 15 frames (~450ms) so brief pauses don't split words
+                //  - onset 3 frames (~90ms) to start quickly but avoid 1-frame
+                //    glitches firing utterances on noise
+                // Silero threshold lowered from 0.55 to 0.35 so speech is detected
+                // even when signal is weaker (no headphones, built-in mic).
+                let mut live_vad = match SileroVad::new(&vad_path, 0.35)
+                    .map(|silero| SmoothedVad::new(Box::new(silero), 8, 15, 3))
+                {
+                    Ok(vad) => Some(vad),
+                    Err(e) => {
+                        log::warn!(
+                            "Meeting live VAD unavailable, falling back to fixed chunks: {}",
+                            e
+                        );
+                        None
+                    }
+                };
+
+                let should_continue = || {
+                    let state = manager.state.lock().unwrap_or_else(|p| p.into_inner());
+                    state
+                        .current_session
+                        .as_ref()
+                        .map(|s| s.id == session_id && s.status == MeetingStatus::Recording)
+                        .unwrap_or(false)
+                };
+
+                let transcribe_chunk = |audio: Vec<f32>, transcript_parts: &mut Vec<String>| {
+                    if audio.is_empty() {
+                        return;
+                    }
+
+                    let rms =
+                        (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
+                    if rms < UTTERANCE_RMS_MIN {
+                        log::debug!(
+                            "Live: dropping low-energy utterance (rms={:.4}, samples={})",
+                            rms,
+                            audio.len()
+                        );
+                        return;
+                    }
+
+                    log::info!(
+                        "Live: flushing utterance ({} samples, {:.1}s, rms={:.4})",
+                        audio.len(),
+                        audio.len() as f32 / 16_000.0,
+                        rms
+                    );
+
+                    match manager.transcription_manager.transcribe_live(audio) {
+                        Ok(text) => {
+                            let chunk_text = text.trim().to_string();
+                            if chunk_text.is_empty() {
+                                return;
+                            }
+                            if chunk_text
+                                .chars()
+                                .all(|c| c.is_ascii_punctuation() || c.is_whitespace())
+                            {
+                                return;
+                            }
+                            let lower = chunk_text.to_lowercase();
+                            if matches!(lower.as_str(), "music" | "thank you" | "you") {
+                                return;
+                            }
+                            transcript_parts.push(chunk_text.clone());
+                            let full_text = transcript_parts.join(" ");
+                            manager
+                                .live_transcripts
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .insert(session_id.clone(), full_text.clone());
+                            let payload = MeetingLiveTranscriptPayload {
+                                session_id: session_id.clone(),
+                                text: full_text,
+                                chunk_text,
+                                is_final: false,
+                                speaker_id: active_speaker_clone
+                                    .lock()
+                                    .ok()
+                                    .and_then(|s| s.as_ref().map(|(id, _)| id.clone())),
+                                start_ms: 0,
+                                end_ms: 0,
+                            };
+                            // Save segment to DB asynchronously (best-effort, don't block audio thread)
+                            {
+                                let db_path = manager.db_path.clone();
+                                let seg_session = session_id.clone();
+                                let seg_speaker = payload.speaker_id.clone();
+                                let seg_text = payload.chunk_text.clone();
+                                let seg_start = payload.start_ms;
+                                let seg_end = payload.end_ms;
+                                std::thread::spawn(move || {
+                                    let segment = TranscriptSegment {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        meeting_id: seg_session,
+                                        start_ms: seg_start,
+                                        end_ms: seg_end,
+                                        text: seg_text,
+                                        speaker_id: seg_speaker,
+                                        sequence: 0,
+                                        created_at: chrono::Utc::now().timestamp_millis(),
+                                    };
+                                    match rusqlite::Connection::open(&db_path) {
+                                        Ok(conn) => {
+                                            if let Err(e) = super::db::insert_transcript_segment(
+                                                &conn, &segment,
+                                            ) {
+                                                log::warn!(
+                                                    "Failed to save transcript segment: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::warn!(
+                                                "Failed to open DB for transcript segment: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                });
+                            }
+                            if let Err(e) = app_handle.emit("meeting_live_transcript", payload) {
+                                log::warn!("Failed to emit meeting_live_transcript: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Live transcript chunk failed: {}", e);
+                        }
+                    }
+                };
+
+                let flush_utterance =
+                    |utterance: &mut Vec<f32>, transcript_parts: &mut Vec<String>| {
+                        if utterance.len() >= MIN_FINAL_SAMPLES {
+                            let audio = std::mem::take(utterance);
+                            transcribe_chunk(audio, transcript_parts);
+                        } else {
+                            utterance.clear();
+                        }
+                    };
+
+                loop {
+                    match live_rx.recv_timeout(Duration::from_millis(500)) {
+                        Ok(samples) => {
+                            input_pending.extend(samples);
+                            if let Some(vad) = live_vad.as_mut() {
+                                while input_pending.len() >= VAD_FRAME_SAMPLES {
+                                    let frame: Vec<f32> =
+                                        input_pending.drain(..VAD_FRAME_SAMPLES).collect();
+                                    // Cheap RMS gate before invoking Silero:
+                                    // skip truly quiet frames entirely so
+                                    // Silero can't false-positive on hiss.
+                                    // While in an ongoing utterance we still
+                                    // feed the frame so SmoothedVad's
+                                    // hangover ends naturally.
+                                    let frame_rms = (frame.iter().map(|s| s * s).sum::<f32>()
+                                        / frame.len() as f32)
+                                        .sqrt();
+                                    if frame_rms < FRAME_RMS_GATE && utterance.is_empty() {
+                                        continue;
+                                    }
+                                    match vad.push_frame(&frame) {
+                                        Ok(VadFrame::Speech(speech)) => {
+                                            utterance.extend_from_slice(speech);
+                                            // Hard-cap very long utterances so
+                                            // we don't make the user wait
+                                            // forever for a flush.
+                                            if utterance.len() >= MAX_UTTERANCE_SAMPLES {
+                                                flush_utterance(
+                                                    &mut utterance,
+                                                    &mut transcript_parts,
+                                                );
+                                            }
+                                        }
+                                        Ok(VadFrame::Noise) => {
+                                            // SmoothedVad already applied
+                                            // its hangover; flush the
+                                            // utterance now (end-of-speech).
+                                            if !utterance.is_empty() {
+                                                flush_utterance(
+                                                    &mut utterance,
+                                                    &mut transcript_parts,
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::warn!(
+                                                "Meeting live VAD failed, using fixed chunks: {}",
+                                                e
+                                            );
+                                            live_vad = None;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if live_vad.is_none() {
+                                while input_pending.len() >= SAMPLE_RATE * 5 {
+                                    let chunk: Vec<f32> =
+                                        input_pending.drain(..SAMPLE_RATE * 5).collect();
+                                    transcribe_chunk(chunk, &mut transcript_parts);
+                                }
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if !should_continue() {
+                                break;
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+
+                if !input_pending.is_empty() {
+                    utterance.extend(input_pending);
+                }
+                if !utterance.is_empty() {
+                    flush_utterance(&mut utterance, &mut transcript_parts);
+                }
+
+                if !transcript_parts.is_empty() {
+                    let payload = MeetingLiveTranscriptPayload {
+                        session_id,
+                        text: transcript_parts.join(" "),
+                        chunk_text: String::new(),
+                        is_final: true,
+                        speaker_id: active_speaker_clone
+                            .lock()
+                            .ok()
+                            .and_then(|s| s.as_ref().map(|(id, _)| id.clone())),
+                        start_ms: 0,
+                        end_ms: 0,
+                    };
+                    if let Err(e) = app_handle.emit("meeting_live_transcript", payload) {
+                        log::warn!("Failed to emit final meeting_live_transcript: {}", e);
+                    }
+                }
+            });
+        }
+
+        // Add sample callback for incremental WAV writing and live transcript
+        // chunking. Sending to the live worker is non-blocking enough for the
+        // unbounded std channel and avoids doing Whisper work on the audio
+        // callback path.
         let wav_handle_clone = wav_handle.clone();
+        let pause_state_for_samples = self.pause_state.clone();
         let sample_callback = move |samples: Vec<f32>| {
+            if pause_state_for_samples
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_paused
+            {
+                return;
+            }
             if let Err(e) = wav_handle_clone.write_samples(&samples) {
                 error!("Failed to write audio samples: {}", e);
             }
+            let _ = live_tx.send(samples);
         };
 
         debug!(
@@ -926,6 +2193,36 @@ impl MeetingSessionManager {
                 tauri::async_runtime::spawn(async move {
                     manager.handle_mic_disconnect(&error_msg);
                 });
+            }
+        });
+
+        // Forward live audio statistics to the frontend. The callback is
+        // invoked on the audio worker thread at ~10Hz; we emit a Tauri event
+        // so the RecordingView can render real-time RMS / peak / SNR.
+        #[derive(Clone, Serialize)]
+        struct MeetingAudioStatsPayload {
+            session_id: String,
+            rms: f32,
+            peak: f32,
+            snr_db: f32,
+            noise_floor_db: f32,
+            audio_source: AudioSourceType,
+        }
+
+        let stats_app_handle = self.app_handle.clone();
+        let stats_session_id = session.id.clone();
+        let stats_audio_source = session.audio_source.clone();
+        mixed_recorder = mixed_recorder.with_audio_stats_callback(move |stats| {
+            let payload = MeetingAudioStatsPayload {
+                session_id: stats_session_id.clone(),
+                rms: stats.rms,
+                peak: stats.peak,
+                snr_db: stats.snr_db,
+                noise_floor_db: stats.noise_floor_db,
+                audio_source: stats_audio_source.clone(),
+            };
+            if let Err(e) = stats_app_handle.emit("meeting_audio_stats", payload) {
+                log::warn!("Failed to emit meeting_audio_stats: {}", e);
             }
         });
 
@@ -1119,7 +2416,18 @@ impl MeetingSessionManager {
             anyhow::anyhow!("Session {} not found after stopping recording", session_id)
         })?;
 
-        let duration = chrono::Utc::now().timestamp() - current_session.created_at;
+        let now_ts = chrono::Utc::now().timestamp();
+        let paused_secs = {
+            let mut pause = self.pause_state.lock().unwrap_or_else(|p| p.into_inner());
+            if pause.is_paused {
+                if let Some(started_at) = pause.paused_started_at.take() {
+                    pause.total_paused_secs += now_ts - started_at;
+                }
+                pause.is_paused = false;
+            }
+            pause.total_paused_secs
+        };
+        let duration = now_ts - current_session.created_at - paused_secs;
         if duration < 0 {
             log_ctx.log_error(&format!(
                 "Invalid duration: created_at {} > now {}",
@@ -1140,6 +2448,94 @@ impl MeetingSessionManager {
             duration as f64,
             "seconds",
         );
+
+        let live_transcript = self
+            .live_transcripts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&session_id)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        if let Some(live_transcript) = live_transcript {
+            let should_complete_from_live = current_session.stt_engine != "funasr";
+            if !should_complete_from_live {
+                log_ctx.log_debug(
+                    "Live FunASR transcript exists; keeping session in processing so the final batch pass can refine transcript.txt",
+                );
+            } else {
+                log_ctx.log_state_transition("Recording", "Completed");
+
+                // Persist duration first; save_transcript_and_update_status will
+                // persist transcript_path + Completed status. This skips the old
+                // Processing state because live transcript already produced the
+                // transcript while recording.
+                let conn = self.get_connection()?;
+                conn.execute(
+                    "UPDATE meeting_sessions SET duration = ?1 WHERE id = ?2",
+                    params![duration, session_id],
+                )?;
+
+                {
+                    let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+                    if let Some(session) = state.current_session.as_mut() {
+                        session.duration = Some(duration);
+                    }
+                }
+
+                let session_for_stopped = self.get_session(&session_id)?.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Session {} not found when emitting meeting_stopped",
+                        session_id
+                    )
+                })?;
+
+                if let Err(e) = self
+                    .app_handle
+                    .emit("meeting_stopped", session_for_stopped.clone())
+                {
+                    log_ctx.log_error(&format!("Failed to emit meeting_stopped event: {}", e));
+                } else {
+                    log_ctx.log_debug("Emitted meeting_stopped event");
+                }
+
+                self.save_transcript_and_update_status(&session_id, &live_transcript)?;
+
+                if let Ok(Some(session_data)) = self.get_session(&session_id) {
+                    if let Err(e) = self
+                        .app_handle
+                        .emit("meeting_completed", session_data.clone())
+                    {
+                        log_ctx
+                            .log_error(&format!("Failed to emit meeting_completed event: {}", e));
+                    } else {
+                        log_ctx.log_debug("Emitted meeting_completed event from live transcript");
+                    }
+                }
+
+                self.live_transcripts
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&session_id);
+
+                let total_time = timer.elapsed_ms();
+                log_ctx.log_success_with_duration(
+                    total_time,
+                    &format!(
+                        "Recording stopped using live transcript - duration={}s, audio={}",
+                        duration, audio_path_opt
+                    ),
+                );
+
+                log_meeting_event(
+                    &session_id,
+                    "recording_stopped_live_completed",
+                    &format!("duration={}s path={}", duration, audio_path_opt),
+                );
+
+                return Ok(audio_path_opt);
+            }
+        }
 
         // Validate state transition before updating
         {
@@ -1162,6 +2558,21 @@ impl MeetingSessionManager {
                 session_id
             )
         })?;
+
+        if session_for_event.stt_engine == "funasr" {
+            info!(
+                "[FUNASR_STT] session={} queued for batch transcription after stop: model={} base_url={}",
+                session_id,
+                session_for_event
+                    .funasr_model
+                    .as_deref()
+                    .unwrap_or("fun-asr-nano"),
+                session_for_event
+                    .funasr_base_url
+                    .as_deref()
+                    .unwrap_or("http://localhost:8000")
+            );
+        }
 
         if let Err(e) = self
             .app_handle
@@ -1233,7 +2644,7 @@ impl MeetingSessionManager {
             );
 
             // Process transcription in background
-            match manager_clone.process_transcription(&audio_path_clone) {
+            match manager_clone.process_transcription(&session_id_clone, &audio_path_clone) {
                 Ok(transcription_text) => {
                     debug!(
                         "Background transcription succeeded for session {}: {} bytes",
@@ -1258,7 +2669,8 @@ impl MeetingSessionManager {
                         );
 
                         // Emit meeting_completed event
-                        if let Ok(Some(session_data)) = manager_clone.get_session(&session_id_clone) {
+                        if let Ok(Some(session_data)) = manager_clone.get_session(&session_id_clone)
+                        {
                             if let Err(emit_err) = manager_clone
                                 .app_handle
                                 .emit("meeting_completed", session_data.clone())
@@ -1282,9 +2694,77 @@ impl MeetingSessionManager {
                     manager_clone.handle_transcription_failure(&session_id_clone, &error_msg);
                 }
             }
+
+            manager_clone
+                .live_transcripts
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&session_id_clone);
         });
 
         Ok(audio_path_opt)
+    }
+
+    pub fn pause_recording(&self) -> Result<MeetingSession> {
+        let session = {
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state
+                .current_session
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("Cannot pause recording: no active session"))?
+        };
+
+        if session.status != MeetingStatus::Recording {
+            return Err(anyhow::anyhow!(
+                "Cannot pause recording: session is not recording"
+            ));
+        }
+
+        {
+            let mut pause = self.pause_state.lock().unwrap_or_else(|p| p.into_inner());
+            if !pause.is_paused {
+                pause.is_paused = true;
+                pause.paused_started_at = Some(chrono::Utc::now().timestamp());
+            }
+        }
+
+        if let Err(e) = self.app_handle.emit("meeting_paused", session.clone()) {
+            log::warn!("Failed to emit meeting_paused: {}", e);
+        }
+
+        Ok(session)
+    }
+
+    pub fn resume_recording(&self) -> Result<MeetingSession> {
+        let session = {
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state
+                .current_session
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("Cannot resume recording: no active session"))?
+        };
+
+        if session.status != MeetingStatus::Recording {
+            return Err(anyhow::anyhow!(
+                "Cannot resume recording: session is not recording"
+            ));
+        }
+
+        {
+            let mut pause = self.pause_state.lock().unwrap_or_else(|p| p.into_inner());
+            if pause.is_paused {
+                if let Some(started_at) = pause.paused_started_at.take() {
+                    pause.total_paused_secs += chrono::Utc::now().timestamp() - started_at;
+                }
+                pause.is_paused = false;
+            }
+        }
+
+        if let Err(e) = self.app_handle.emit("meeting_resumed", session.clone()) {
+            log::warn!("Failed to emit meeting_resumed: {}", e);
+        }
+
+        Ok(session)
     }
 
     /// Handles microphone disconnect or audio stream error during recording.
@@ -1579,8 +3059,11 @@ impl MeetingSessionManager {
     /// # Returns
     /// * `Ok(String)` - The transcribed text
     /// * `Err` - If file not found, reading fails, or transcription fails (including model not loaded)
-    pub fn process_transcription(&self, audio_path: &str) -> Result<String> {
+    pub fn process_transcription(&self, session_id: &str, audio_path: &str) -> Result<String> {
         debug!("Processing transcription for audio: {}", audio_path);
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
 
         // Build full path to audio file
         let full_audio_path = self.meetings_dir.join(audio_path);
@@ -1626,11 +3109,85 @@ impl MeetingSessionManager {
             full_audio_path
         );
 
+        // Diagnostic: audio level summary to identify silent-input regressions
+        // ("Music"/"Thank you" hallucinations typically mean Whisper saw silence).
+        if !samples.is_empty() {
+            let mut sum_sq = 0.0f64;
+            let mut peak = 0.0f32;
+            let mut nonzero = 0usize;
+            for &s in &samples {
+                sum_sq += (s as f64) * (s as f64);
+                let a = s.abs();
+                if a > peak {
+                    peak = a;
+                }
+                if s != 0.0 {
+                    nonzero += 1;
+                }
+            }
+            let rms = (sum_sq / samples.len() as f64).sqrt() as f32;
+            let duration_s = samples.len() as f32 / 16_000.0;
+            log::info!(
+                "[transcribe-audio] {:?}: samples={} duration={:.2}s peak={:.4} rms={:.4} nonzero_pct={:.1}%",
+                full_audio_path.file_name().unwrap_or_default(),
+                samples.len(),
+                duration_s,
+                peak,
+                rms,
+                100.0 * nonzero as f32 / samples.len() as f32,
+            );
+        }
+
         if samples.is_empty() {
             return Err(anyhow::anyhow!(
                 "Audio file contains no samples: {:?}",
                 full_audio_path
             ));
+        }
+
+        if session.stt_engine == "funasr" {
+            let full_audio_path_clone = full_audio_path.clone();
+            let base_url = session
+                .funasr_base_url
+                .clone()
+                .unwrap_or_else(|| "http://localhost:8000".to_string());
+            let model = session
+                .funasr_model
+                .clone()
+                .unwrap_or_else(|| "fun-asr-nano".to_string());
+            let language = session.transcription_language.clone();
+
+            log::info!(
+                "[FUNASR_STT] session={} starting batch transcription: model={} base_url={} audio={}",
+                session.id,
+                model,
+                base_url,
+                full_audio_path_clone.display()
+            );
+
+            let transcript = tauri::async_runtime::block_on(crate::funasr_client::transcribe_file(
+                &self.app_handle,
+                &base_url,
+                &model,
+                language.as_deref(),
+                &full_audio_path_clone,
+            ))
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "FunASR transcription failed for {:?}: {}. Start FunASR with: funasr-server --model {} --device cpu --port 8000",
+                    full_audio_path,
+                    e,
+                    model
+                )
+            })?;
+
+            log::info!(
+                "[FUNASR_STT] session={} completed batch transcription: chars={}",
+                session.id,
+                transcript.chars().count()
+            );
+
+            return Ok(transcript);
         }
 
         // Call TranscriptionManager to process audio
@@ -1858,10 +3415,11 @@ impl MeetingSessionManager {
         }
 
         // Query for all interrupted sessions
-        let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, duration, status, audio_path, transcript_path, error_message, audio_source, summary_path, template_id
-             FROM meeting_sessions WHERE status = ?1 ORDER BY created_at DESC",
-        )?;
+        let query = format!(
+            "SELECT {} FROM meeting_sessions WHERE status = ?1 ORDER BY created_at DESC",
+            MEETING_SESSION_SELECT
+        );
+        let mut stmt = conn.prepare(&query)?;
 
         let rows = stmt.query_map(
             params![self.status_to_string(&MeetingStatus::Interrupted)],
@@ -1891,4 +3449,3 @@ impl MeetingSessionManager {
         Ok(sessions)
     }
 }
-

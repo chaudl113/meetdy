@@ -6,10 +6,11 @@ import { useSettings } from "../../hooks/useSettings";
 interface PushToTalkProps {
   descriptionMode?: "inline" | "tooltip";
   grouped?: boolean;
+  icon?: React.ReactNode;
 }
 
 export const PushToTalk: React.FC<PushToTalkProps> = React.memo(
-  ({ descriptionMode = "tooltip", grouped = false }) => {
+  ({ descriptionMode = "tooltip", grouped = false, icon }) => {
     const { t } = useTranslation();
     const { getSetting, updateSetting, isUpdating } = useSettings();
 
@@ -24,6 +25,7 @@ export const PushToTalk: React.FC<PushToTalkProps> = React.memo(
         description={t("settings.general.pushToTalk.description")}
         descriptionMode={descriptionMode}
         grouped={grouped}
+        icon={icon}
       />
     );
   },

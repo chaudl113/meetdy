@@ -115,7 +115,11 @@ fn get_ollama_version(binary_path: &str) -> Option<String> {
                 if ver.is_empty() {
                     // Some versions print to stderr
                     let ver2 = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    if ver2.is_empty() { None } else { Some(ver2) }
+                    if ver2.is_empty() {
+                        None
+                    } else {
+                        Some(ver2)
+                    }
                 } else {
                     Some(ver)
                 }
@@ -258,8 +262,9 @@ pub async fn check_ollama_status() -> OllamaStatusResponse {
 #[tauri::command]
 #[specta::specta]
 pub async fn start_ollama() -> Result<bool, String> {
-    let binary = find_ollama_binary()
-        .ok_or_else(|| "Ollama is not installed. Please install from https://ollama.com".to_string())?;
+    let binary = find_ollama_binary().ok_or_else(|| {
+        "Ollama is not installed. Please install from https://ollama.com".to_string()
+    })?;
 
     // Check if already running
     if check_ollama_health("http://localhost:11434").await {

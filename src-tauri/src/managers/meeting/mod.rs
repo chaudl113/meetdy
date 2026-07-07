@@ -16,7 +16,10 @@ mod models;
 mod wav_writer;
 
 // Re-export public types
-pub use models::{AudioSourceType, MeetingNote, MeetingSession, MeetingStatus};
+pub use models::{
+    ActionItem, ActionItemStatus, AudioSourceType, KeyPoint, MeetingInsights, MeetingNote,
+    MeetingSession, MeetingStatus, Participant, Tag, TranscriptSegment,
+};
 
 // Re-export the manager
 pub use manager::MeetingSessionManager;

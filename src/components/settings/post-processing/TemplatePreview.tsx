@@ -51,11 +51,20 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
     }
   };
 
-  const highlightPlaceholder = (text: string) => {
-    return text.replace(
-      /\$\{output\}/g,
-      '<code class="px-1 py-0.5 bg-primary/10 text-primary rounded text-sm font-mono">${output}</code>',
-    );
+  // Render template.prompt safely — split on ${output} and insert a <code>
+  // element in between. Never use dangerouslySetInnerHTML with user content.
+  const renderWithPlaceholder = (text: string) => {
+    const parts = text.split("${output}");
+    return parts.map((part, i) => (
+      <span key={i}>
+        {part}
+        {i < parts.length - 1 && (
+          <code className="px-1 py-0.5 bg-primary/10 text-primary rounded text-sm font-mono">
+            {"${output}"}
+          </code>
+        )}
+      </span>
+    ));
   };
 
   return (
@@ -86,12 +95,9 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({
               <label className="text-sm font-semibold block mb-2">
                 {t("settings.postProcessing.prompts.promptInstructions")}
               </label>
-              <div
-                className="px-3 py-2 bg-background rounded border border-mid-gray/20 text-sm whitespace-pre-wrap"
-                dangerouslySetInnerHTML={{
-                  __html: highlightPlaceholder(template.prompt),
-                }}
-              />
+              <div className="px-3 py-2 bg-background rounded border border-mid-gray/20 text-sm whitespace-pre-wrap">
+                {renderWithPlaceholder(template.prompt)}
+              </div>
             </div>
 
             <p className="text-xs text-mid-gray/70">

@@ -10,6 +10,7 @@ import { LANGUAGES } from "../../lib/constants/languages";
 interface LanguageSelectorProps {
   descriptionMode?: "inline" | "tooltip";
   grouped?: boolean;
+  icon?: React.ReactNode;
 }
 
 const unsupportedModels = ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"];
@@ -17,6 +18,7 @@ const unsupportedModels = ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v3"];
 export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   descriptionMode = "tooltip",
   grouped = false,
+  icon,
 }) => {
   const { t } = useTranslation();
   const { getSetting, updateSetting, resetSetting, isUpdating } = useSettings();
@@ -116,15 +118,16 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
       descriptionMode={descriptionMode}
       grouped={grouped}
       disabled={isUnsupported}
+      icon={icon}
     >
       <div className="flex items-center space-x-1">
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
-            className={`px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 rounded min-w-[200px] text-left flex items-center justify-between transition-all duration-150 ${
+            className={`h-8 px-3 text-sm font-medium bg-background border border-mid-gray/30 rounded-lg min-w-[180px] text-left flex items-center justify-between transition-all duration-150 ${
               isUpdating("selected_language") || isUnsupported
                 ? "opacity-50 cursor-not-allowed"
-                : "hover:bg-logo-primary/10 cursor-pointer hover:border-logo-primary"
+                : "hover:border-logo-primary cursor-pointer"
             }`}
             onClick={handleToggle}
             disabled={isUpdating("selected_language") || isUnsupported}

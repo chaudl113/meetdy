@@ -8,10 +8,11 @@ import { SoundPicker } from "./SoundPicker";
 interface AudioFeedbackProps {
   descriptionMode?: "inline" | "tooltip";
   grouped?: boolean;
+  icon?: React.ReactNode;
 }
 
 export const AudioFeedback: React.FC<AudioFeedbackProps> = React.memo(
-  ({ descriptionMode = "tooltip", grouped = false }) => {
+  ({ descriptionMode = "tooltip", grouped = false, icon }) => {
     const { t } = useTranslation();
     const { getSetting, updateSetting, isUpdating } = useSettings();
     const audioFeedbackEnabled = getSetting("audio_feedback") || false;
@@ -26,6 +27,7 @@ export const AudioFeedback: React.FC<AudioFeedbackProps> = React.memo(
           description={t("settings.sound.audioFeedback.description")}
           descriptionMode={descriptionMode}
           grouped={grouped}
+          icon={icon}
         />
       </div>
     );

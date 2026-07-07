@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Slider } from "../ui/Slider";
 import { useSettings } from "../../hooks/useSettings";
 
-export const VolumeSlider: React.FC<{ disabled?: boolean }> = ({
-  disabled = false,
-}) => {
+export const VolumeSlider: React.FC<{
+  disabled?: boolean;
+  icon?: React.ReactNode;
+}> = ({ disabled = false, icon }) => {
   const { t } = useTranslation();
   const { getSetting, updateSetting } = useSettings();
   const audioFeedbackVolume = getSetting("audio_feedback_volume") ?? 0.5;
@@ -25,6 +26,7 @@ export const VolumeSlider: React.FC<{ disabled?: boolean }> = ({
       grouped
       formatValue={(value) => `${Math.round(value * 100)}%`}
       disabled={disabled}
+      icon={icon}
     />
   );
 };

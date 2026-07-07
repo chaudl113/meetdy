@@ -41,6 +41,12 @@
         "description": "Record both system audio and your microphone."
       }
     },
+    "funasrModels": {
+      "sensevoice": "sensevoice",
+      "paraformer": "paraformer",
+      "paraformerEn": "paraformer-en",
+      "funAsrNano": "fun-asr-nano"
+    },
     "recordingQuality": "Recording Quality",
     "quality": {
       "low": "Low",
@@ -126,6 +132,12 @@
     "transcript": {
       "emptyTitle": "Live transcript not available yet",
       "emptyMessage": "Real-time transcription will appear here once enabled. Final transcript is generated after the recording stops."
+    },
+    "speaker": {
+      "label": "Speaker",
+      "add": "Add",
+      "namePlaceholder": "Name…",
+      "active": "Speaking"
     },
     "summary": {
       "emptyTitle": "AI Summary will appear here",
@@ -447,7 +459,9 @@
         "promptLabelPlaceholder": "Enter prompt name",
         "promptInstructions": "Prompt Instructions",
         "promptInstructionsPlaceholder": "Write the instructions to run after transcription. Example: Improve grammar and clarity for the following text: ${output}",
-        "promptTip": "Tip: Use <code>${output}</code> to insert the transcribed text in your prompt.",
+        "promptTip": "Tip: Use ${output} to insert the transcribed text in your prompt.",
+        "promptTipPrefix": "Tip: Use",
+        "promptTipSuffix": "to insert the transcribed text in your prompt.",
         "updatePrompt": "Update Prompt",
         "deletePrompt": "Delete Prompt",
         "createPrompt": "Create Prompt",

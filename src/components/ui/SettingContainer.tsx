@@ -9,7 +9,14 @@ interface SettingContainerProps {
   layout?: "horizontal" | "stacked";
   disabled?: boolean;
   tooltipPosition?: "top" | "bottom";
+  icon?: React.ReactNode;
 }
+
+const IconBadge: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="w-8 h-8 rounded-md bg-logo-primary/10 text-logo-primary flex items-center justify-center shrink-0">
+    {children}
+  </span>
+);
 
 export const SettingContainer: React.FC<SettingContainerProps> = ({
   title,
@@ -20,6 +27,7 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
   layout = "horizontal",
   disabled = false,
   tooltipPosition = "top",
+  icon,
 }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -127,7 +135,8 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
   if (descriptionMode === "tooltip") {
     return (
       <div className={horizontalContainerClasses}>
-        <div className="max-w-2/3">
+        <div className="max-w-2/3 flex items-center gap-3">
+          {icon && <IconBadge>{icon}</IconBadge>}
           <div className="flex items-center gap-2">
             <h3
               className={`text-sm font-medium ${disabled ? "opacity-50" : ""}`}
@@ -185,13 +194,18 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
 
   return (
     <div className={horizontalContainerClasses}>
-      <div className="max-w-2/3">
-        <h3 className={`text-sm font-medium ${disabled ? "opacity-50" : ""}`}>
-          {title}
-        </h3>
-        <p className={`text-sm ${disabled ? "opacity-50" : ""}`}>
-          {description}
-        </p>
+      <div className="max-w-2/3 flex items-center gap-3">
+        {icon && <IconBadge>{icon}</IconBadge>}
+        <div>
+          <h3 className={`text-sm font-medium ${disabled ? "opacity-50" : ""}`}>
+            {title}
+          </h3>
+          <p
+            className={`text-xs text-mid-gray ${disabled ? "opacity-50" : ""}`}
+          >
+            {description}
+          </p>
+        </div>
       </div>
       <div className="relative">{children}</div>
     </div>
