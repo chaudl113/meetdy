@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
+import { toast } from "sonner";
 import { commands } from "@/bindings";
 
 // Popular Vietnamese voices
@@ -26,9 +27,10 @@ export function useEdgeTTS() {
       audioRef.current = null;
     }
 
-    setIsLoading(true);
-    try {
-      const result = await commands.edgeTtsSpeak(text, voice, rate);
+    const FALLBACK_VOICE = "en-US-JennyNeural";
+
+    const tryPlay = async (v: string): Promise<boolean> => {
+      const result = await commands.edgeTtsSpeak(text, v, rate);
       if (result.status === "ok") {
         const mp3Base64 = result.data;
         const audio = new Audio(`data:audio/mp3;base64,${mp3Base64}`);
@@ -43,11 +45,25 @@ export function useEdgeTTS() {
         };
         setIsPlaying(true);
         await audio.play();
-      } else {
-        console.warn("Edge TTS failed:", result.error);
+        return true;
+      }
+      return false;
+    };
+
+    setIsLoading(true);
+    try {
+      const ok = await tryPlay(voice);
+      if (!ok && voice !== FALLBACK_VOICE) {
+        toast.warning(`TTS voice "${voice}" failed, trying English fallback.`);
+        const fallbackOk = await tryPlay(FALLBACK_VOICE);
+        if (!fallbackOk) {
+          toast.error("TTS failed: could not play audio.");
+        }
+      } else if (!ok) {
+        toast.error("TTS failed: could not play audio.");
       }
     } catch (err) {
-      console.warn("Edge TTS error:", err);
+      toast.error(`TTS error: ${err}`);
     } finally {
       setIsLoading(false);
     }

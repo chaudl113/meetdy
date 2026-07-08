@@ -27,16 +27,6 @@ impl MeetingLogContext {
         );
     }
 
-    /// Log successful completion
-    #[allow(dead_code)]
-    pub fn log_success(&self, message: impl AsRef<str>) {
-        info!(
-            "[MEETING] [{}] {} - Success: {}",
-            self.session_id,
-            self.operation,
-            message.as_ref()
-        );
-    }
 
     /// Log operation with timing
     pub fn log_success_with_duration(&self, duration_ms: u128, message: impl AsRef<str>) {
@@ -160,25 +150,6 @@ pub fn log_performance_metric(
     );
 }
 
-/// Log audio statistics
-#[allow(dead_code)]
-pub fn log_audio_stats(
-    session_id: impl AsRef<str>,
-    sample_rate: u32,
-    channels: u16,
-    samples_written: u64,
-    duration_sec: f64,
-) {
-    info!(
-        "[MEETING_AUDIO] session={} sample_rate={} channels={} samples={} duration_sec={:.2}",
-        session_id.as_ref(),
-        sample_rate,
-        channels,
-        samples_written,
-        duration_sec
-    );
-}
-
 /// Timer utility for measuring operation duration
 pub struct MeetingTimer {
     start: std::time::Instant,
@@ -195,8 +166,4 @@ impl MeetingTimer {
         self.start.elapsed().as_millis()
     }
 
-    #[allow(dead_code)]
-    pub fn elapsed_sec(&self) -> f64 {
-        self.start.elapsed().as_secs_f64()
-    }
 }

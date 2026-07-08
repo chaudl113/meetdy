@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type } from "@tauri-apps/plugin-os";
 import {
-  getKeyName,
   formatKeyCombination,
+  getKeyName,
   normalizeKey,
   type OSType,
 } from "../../lib/utils/keyboard";

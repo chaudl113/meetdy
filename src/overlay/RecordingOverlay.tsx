@@ -2,9 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  CancelIcon,
   MicrophoneIcon,
   TranscriptionIcon,
-  CancelIcon,
 } from "../components/icons";
 import "./RecordingOverlay.css";
 import { commands } from "@/bindings";

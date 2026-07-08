@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
-  useModelEventStore,
   type DownloadProgress,
-  type ModelStateEvent,
   type DownloadStats,
+  type ModelStateEvent,
+  useModelEventStore,
 } from "@/stores/modelEventStore";
 
 let globalUnlistenPromises: Promise<() => void>[] | null = null;

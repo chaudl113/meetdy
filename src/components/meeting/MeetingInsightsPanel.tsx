@@ -1,26 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Sparkles,
-  Loader2,
+  CheckSquare,
   ChevronDown,
   ChevronUp,
-  RefreshCw,
-  Plus,
-  Trash2,
-  CheckSquare,
-  Square,
   ListChecks,
-  Users,
   ListTree,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Square,
   Tag as TagIcon,
+  Trash2,
+  Users,
   X,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import {
-  commands,
   type ActionItem,
   type ActionItemStatus,
+  commands,
   type KeyPoint,
   type MeetingInsights,
   type Participant,

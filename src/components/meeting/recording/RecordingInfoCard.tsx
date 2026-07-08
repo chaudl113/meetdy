@@ -2,8 +2,9 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { Info } from "lucide-react";
-import { useMeetingStore, formatDuration } from "../../../stores/meetingStore";
+import { formatDuration, useMeetingStore } from "../../../stores/meetingStore";
 import { useRecordingConfigStore } from "../../../stores/recordingConfigStore";
+import { useSettings } from "../../../hooks/useSettings";
 
 /**
  * Formats a byte count as a human readable string (KB / MB / GB).
@@ -39,9 +40,9 @@ export const RecordingInfoCard: React.FC = () => {
       recordingDuration: s.recordingDuration,
     })),
   );
-  const { saveLocation, autoTranscribe, autoSummary, sttEngine } =
-    useRecordingConfigStore();
-  const isFunasr = sttEngine === "funasr";
+  const { saveLocation, autoTranscribe, autoSummary } = useRecordingConfigStore();
+  const { getSetting } = useSettings();
+  const isFunasr = (getSetting("meeting_stt_engine") ?? "whisper") === "funasr";
 
   // WAV PCM 16-bit mono @ 16 kHz ≈ 32 000 bytes/sec.
   const estimatedSize = recordingDuration * 32_000;

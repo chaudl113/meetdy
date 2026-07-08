@@ -1,10 +1,11 @@
 use crate::funasr_client::FunasrRuntimeStatus;
-use crate::managers::model::{ModelInfo, ModelManager};
+use crate::managers::diarization::SpeakerDiarizationManager;
+use crate::managers::model::{EngineType, ModelInfo, ModelManager};
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, write_settings};
 use std::fs;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 #[specta::specta]
@@ -12,7 +13,7 @@ pub async fn get_available_models(
     model_manager: State<'_, Arc<ModelManager>>,
 ) -> Result<Vec<ModelInfo>, String> {
     let models = model_manager.get_available_models();
-    Ok(models.values().cloned().collect())
+    Ok(models)
 }
 
 #[tauri::command]
@@ -27,13 +28,27 @@ pub async fn get_model_info(
 #[tauri::command]
 #[specta::specta]
 pub async fn download_model(
+    app_handle: AppHandle,
     model_manager: State<'_, Arc<ModelManager>>,
     model_id: String,
 ) -> Result<(), String> {
+    let engine_type = model_manager
+        .get_model_info(&model_id)
+        .map(|m| m.engine_type);
+
     model_manager
         .download_model(&model_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // After downloading a diarization model, reload availability
+    if matches!(engine_type, Some(EngineType::Diarization)) {
+        if let Some(diarization_manager) = app_handle.try_state::<Arc<SpeakerDiarizationManager>>() {
+            diarization_manager.reload_availability();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -106,7 +121,9 @@ pub async fn has_any_models_available(
     model_manager: State<'_, Arc<ModelManager>>,
 ) -> Result<bool, String> {
     let models = model_manager.get_available_models();
-    Ok(models.values().any(|m| m.is_downloaded))
+    Ok(models
+        .iter()
+        .any(|m| m.is_downloaded && !matches!(m.engine_type, EngineType::Diarization)))
 }
 
 #[tauri::command]
@@ -115,8 +132,10 @@ pub async fn has_any_models_or_downloads(
     model_manager: State<'_, Arc<ModelManager>>,
 ) -> Result<bool, String> {
     let models = model_manager.get_available_models();
-    // Return true if any models are downloaded OR if any downloads are in progress
-    Ok(models.values().any(|m| m.is_downloaded))
+    // Return true if any STT models are downloaded (exclude diarization)
+    Ok(models
+        .iter()
+        .any(|m| m.is_downloaded && !matches!(m.engine_type, EngineType::Diarization)))
 }
 
 #[tauri::command]

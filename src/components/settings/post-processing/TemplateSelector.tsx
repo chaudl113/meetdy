@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PromptTemplate, BUILTIN_TEMPLATES } from "@/constants/promptTemplates";
+import { BUILTIN_TEMPLATES, PromptTemplate } from "@/constants/promptTemplates";
 import { TemplateDropdown } from "./TemplateDropdown";
 import { TemplatePreview } from "./TemplatePreview";
 import { Button } from "@/components/ui/Button";

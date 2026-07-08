@@ -1,0 +1,16 @@
+{
+  "nextId": 2,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Phase 8 Summary UX improvements",
+      "description": "Implement Phase 8 Summary UX improvements for Meetdy desktop app:\n- 8.1: Editable Summary (backend command + frontend UI)\n- 8.2: Auto Language Detection for Summary generation",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480641787,
+      "updatedAt": 1783481401099
+    }
+  ]
+}

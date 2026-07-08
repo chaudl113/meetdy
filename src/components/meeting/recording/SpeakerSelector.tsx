@@ -1,11 +1,11 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, X, UserRound } from "lucide-react";
+import { Plus, UserRound, X } from "lucide-react";
 import type { Participant } from "@/bindings";
 import { commands } from "@/bindings";
 import {
-  useSpeakerColors,
   UNKNOWN_SPEAKER_COLOR,
+  useSpeakerColors,
 } from "../../../hooks/useSpeakerColors";
 
 interface SpeakerSelectorProps {

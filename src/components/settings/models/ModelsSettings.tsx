@@ -1,462 +1,29 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { listen } from "@tauri-apps/api/event";
-import {
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  Download,
-  Info,
-  Loader2,
-  MoreVertical,
-  Server,
-  Trash2,
-} from "lucide-react";
-import { commands, type FunasrRuntimeStatus, type ModelInfo } from "@/bindings";
-import { useSettings } from "@/hooks/useSettings";
+import { Check, Download, Trash2 } from "lucide-react";
+import { commands, type ModelInfo } from "@/bindings";
+import { SettingsGroup } from "../../ui/SettingsGroup";
 import { ProgressBar } from "../../shared";
 import { formatModelSize } from "../../../lib/utils/format";
 import {
   getTranslatedModelDescription,
   getTranslatedModelName,
 } from "../../../lib/utils/modelTranslation";
-
-const FUNASR_MODEL_OPTIONS = [
-  {
-    value: "sensevoice",
-    label: "SenseVoice",
-    description: "Fast for Chinese/English/Japanese/Korean; can drift on Vietnamese",
-  },
-  {
-    value: "paraformer",
-    label: "Paraformer",
-    description: "Chinese-focused general ASR",
-  },
-  {
-    value: "paraformer-en",
-    label: "Paraformer EN",
-    description: "English-focused ASR",
-  },
-  {
-    value: "fun-asr-nano",
-    label: "FunASR Nano",
-    description: "Recommended for Vietnamese and multilingual meetings",
-  },
-];
-
-interface DownloadProgress {
-  model_id: string;
-  downloaded: number;
-  total: number;
-  percentage: number;
-}
-
-interface ModelStateEvent {
-  event_type: string;
-  model_id?: string;
-  model_name?: string;
-  error?: string;
-}
-
-const SectionHeader: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => (
-  <h2 className="px-1 text-xs font-medium text-logo-primary uppercase tracking-wide">
-    {children}
-  </h2>
-);
-
-const InstalledModelCard: React.FC<{
-  model: ModelInfo;
-  isActive: boolean;
-  isBusy: boolean;
-  onActivate: () => void;
-  onDelete: () => void;
-}> = ({ model, isActive, isBusy, onActivate, onDelete }) => {
-  const { t } = useTranslation();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
-
-  return (
-    <div className="flex items-start justify-between gap-4 p-4 rounded-lg border border-mid-gray/20 bg-background">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-semibold truncate">
-            {getTranslatedModelName(model, t)}
-          </p>
-          {isActive && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-logo-primary bg-logo-primary/10 px-2 py-0.5 rounded">
-              <Check size={12} />
-              {t("modelSelector.active", "Active")}
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-text/60 italic mt-1">
-          {getTranslatedModelDescription(model, t)}
-        </p>
-        <div className="flex items-center gap-4 mt-2 text-xs text-text/50 tabular-nums">
-          <span>{formatModelSize(Number(model.size_mb))}</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 bg-emerald-500/10 px-2 py-1 rounded">
-          <CheckCircle2 size={12} />
-          {t("models.upToDate", "Up to date")}
-        </span>
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            disabled={isBusy}
-            className="w-8 h-8 flex items-center justify-center rounded-lg border border-mid-gray/30 bg-background text-text/70 hover:text-logo-primary hover:border-logo-primary disabled:opacity-50"
-            aria-label="More actions"
-          >
-            <MoreVertical size={14} />
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 min-w-[160px] rounded-lg border border-mid-gray/20 bg-background shadow-lg z-20 overflow-hidden">
-              {!isActive && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onActivate();
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-logo-primary/10 flex items-center gap-2"
-                >
-                  <Check size={14} />
-                  {t("models.setActive", "Set as active")}
-                </button>
-              )}
-              {!isActive && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onDelete();
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 flex items-center gap-2"
-                >
-                  <Trash2 size={14} />
-                  {t("modelSelector.delete", "Delete")}
-                </button>
-              )}
-              {isActive && (
-                <div className="px-3 py-2 text-xs text-text/50">
-                  {t(
-                    "models.activeCannotDelete",
-                    "Active model cannot be deleted.",
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const DownloadableModelCard: React.FC<{
-  model: ModelInfo;
-  progress?: DownloadProgress;
-  isExtracting: boolean;
-  onDownload: () => void;
-}> = ({ model, progress, isExtracting, onDownload }) => {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-  const isDownloading = !!progress;
-
-  return (
-    <div className="rounded-lg border border-mid-gray/20 bg-background">
-      <div className="flex items-start justify-between gap-4 p-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold truncate">
-            {getTranslatedModelName(model, t)}
-          </p>
-          <p className="text-xs text-text/60 italic mt-1">
-            {getTranslatedModelDescription(model, t)}
-          </p>
-          <p className="text-xs text-text/50 mt-2 tabular-nums">
-            {t("modelSelector.downloadSize", "Download size")} ·{" "}
-            {formatModelSize(Number(model.size_mb))}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            disabled={isDownloading || isExtracting}
-            onClick={onDownload}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 h-8 rounded-lg bg-logo-primary hover:bg-logo-primary/90 text-white transition-colors disabled:opacity-50"
-          >
-            <Download size={12} />
-            {isDownloading
-              ? `${Math.max(0, Math.min(100, Math.round(progress.percentage)))}%`
-              : isExtracting
-                ? t("modelSelector.extractingGeneric", "Extracting…")
-                : t("modelSelector.download", "Download")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="w-8 h-8 flex items-center justify-center rounded-lg border border-mid-gray/30 bg-background text-text/70 hover:text-logo-primary hover:border-logo-primary"
-            aria-label={expanded ? "Collapse details" : "Expand details"}
-            aria-expanded={expanded}
-          >
-            <ChevronDown
-              size={14}
-              className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-            />
-          </button>
-        </div>
-      </div>
-      {isDownloading && (
-        <div className="px-4 pb-3">
-          <ProgressBar
-            progress={[
-              {
-                id: model.id,
-                percentage: progress.percentage,
-                label: getTranslatedModelName(model, t),
-              },
-            ]}
-            size="small"
-          />
-        </div>
-      )}
-      {expanded && (
-        <div className="px-4 pb-4 pt-2 border-t border-mid-gray/10 text-xs text-text/70 space-y-1">
-          <div>
-            <span className="text-text/50">{t("models.idLabel")}</span>{" "}
-            <span className="font-mono">{model.id}</span>
-          </div>
-          <div>
-            <span className="text-text/50">
-              {t("models.engine", "Engine")}:
-            </span>{" "}
-            {model.engine_type}
-          </div>
-          <div className="flex gap-4">
-            <span>
-              <span className="text-text/50">
-                {t("models.accuracy", "Accuracy")}:
-              </span>{" "}
-              {model.accuracy_score}/10
-            </span>
-            <span>
-              <span className="text-text/50">
-                {t("models.speed", "Speed")}:
-              </span>{" "}
-              {model.speed_score}/10
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const FunasrRuntimeCard: React.FC<{
-  status: FunasrRuntimeStatus | null;
-  setupStatus: string | null;
-  isSettingUp: boolean;
-  selectedModel: string;
-  onModelChange: (model: string) => void;
-  onSetup: () => void;
-  onDelete: () => void;
-}> = ({
-  status,
-  setupStatus,
-  isSettingUp,
-  selectedModel,
-  onModelChange,
-  onSetup,
-  onDelete,
-}) => {
-  const { t } = useTranslation();
-  const installed = status?.installed ?? false;
-  const serverRunning = status?.server_running ?? false;
-  const downloadPercentage = status?.download_percentage ?? null;
-  const clampedPercentage =
-    downloadPercentage === null
-      ? null
-      : Math.max(0, Math.min(100, downloadPercentage));
-  const roundedPercentage =
-    clampedPercentage === null ? null : Math.round(clampedPercentage);
-  const selectedModelInfo =
-    FUNASR_MODEL_OPTIONS.find((option) => option.value === selectedModel) ??
-    FUNASR_MODEL_OPTIONS[0];
-
-  return (
-    <div className="rounded-lg border border-mid-gray/20 bg-background p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <Server size={16} className="text-logo-primary" />
-            <p className="text-sm font-semibold">
-              {t("models.funasr.title", "FunASR Local Runtime")}
-            </p>
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded ${
-                installed
-                  ? "bg-emerald-500/10 text-emerald-600"
-                  : "bg-mid-gray/20 text-text/50"
-              }`}
-            >
-              {installed
-                ? t("models.funasr.installed", "Installed")
-                : t("models.funasr.notInstalled", "Not installed")}
-            </span>
-          </div>
-          <p className="text-xs text-text/60 italic mt-1">
-            {t(
-              "models.funasr.description",
-              "Local batch transcription service for Meeting mode. Download/setup this before selecting FunASR in meetings.",
-            )}
-          </p>
-          <div className="mt-3 grid gap-3">
-            <label className="grid gap-1.5 max-w-sm">
-              <span className="text-xs font-medium text-text/70">
-                {t("models.funasr.model", "Model")}
-              </span>
-              <select
-                value={selectedModel}
-                disabled={isSettingUp}
-                onChange={(event) => onModelChange(event.target.value)}
-                className="w-full appearance-none rounded-lg border border-mid-gray/30 bg-background px-3 py-2 text-sm text-text focus:outline-none focus:border-logo-primary disabled:opacity-50"
-              >
-                {FUNASR_MODEL_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label} - {option.value}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-text/50">
-                {selectedModelInfo.description}
-              </span>
-              {selectedModel === "sensevoice" && (
-                <span className="text-xs text-amber-600">
-                  {t(
-                    "models.funasr.senseVoiceVietnameseWarning",
-                    "Not recommended for Vietnamese: it can auto-detect speech as Chinese.",
-                  )}
-                </span>
-              )}
-              <span className="text-xs text-text/50">
-                {t(
-                  "models.funasr.modelSetupHint",
-                  "After changing model, press Start/Verify to download or load that selected model.",
-                )}
-              </span>
-            </label>
-          </div>
-          <div className="mt-3 text-xs text-text/50 space-y-1">
-            <div>
-              {t("models.funasr.server", "Server")}:{" "}
-              <span className={serverRunning ? "text-emerald-600" : ""}>
-                {serverRunning
-                  ? t("models.funasr.running", "Running")
-                  : t("models.funasr.stopped", "Stopped")}
-              </span>
-            </div>
-            {status?.log_path && (
-              <div className="break-all">
-                {t("models.funasr.log", "Log")}:{" "}
-                <span className="font-mono">{status.log_path}</span>
-              </div>
-            )}
-            {(setupStatus || status?.message) && (
-              <div className="text-logo-primary">
-                {setupStatus || status?.message}
-              </div>
-            )}
-            {clampedPercentage !== null && !serverRunning && (
-              <div className="pt-2 space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-medium text-text/70">
-                    {t("models.funasr.downloading", "Downloading model")}
-                  </span>
-                  <span className="rounded bg-logo-primary/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-logo-primary">
-                    {roundedPercentage}%
-                  </span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-mid-gray/20">
-                  <div
-                    className="h-full rounded-full bg-logo-primary transition-[width] duration-300"
-                    style={{ width: `${clampedPercentage}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {installed && (
-            <button
-              type="button"
-              disabled={isSettingUp}
-              onClick={onDelete}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 h-8 rounded-lg border border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-50"
-            >
-              <Trash2 size={12} />
-              {t("modelSelector.delete", "Delete")}
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={isSettingUp}
-            onClick={onSetup}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 h-8 rounded-lg bg-logo-primary hover:bg-logo-primary/90 text-white transition-colors disabled:opacity-50"
-          >
-            {isSettingUp ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <Download size={12} />
-            )}
-            {installed
-              ? serverRunning
-                ? t("models.funasr.verify", "Verify")
-                : t("models.funasr.start", "Start")
-              : t("models.funasr.setup", "Setup")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+import { useModelEvents } from "@/hooks/useModelEvents";
+import { type DownloadProgress, useModelEventStore } from "@/stores/modelEventStore";
 
 export const ModelsSettings: React.FC = () => {
   const { t } = useTranslation();
-  const { getSetting, updateSetting } = useSettings();
+
+  useModelEvents();
+
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [currentModelId, setCurrentModelId] = useState<string>("");
-  const [downloadProgress, setDownloadProgress] = useState<
-    Map<string, DownloadProgress>
-  >(new Map());
-  const [extractingModels, setExtractingModels] = useState<Set<string>>(
-    new Set(),
-  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
-  const [funasrStatus, setFunasrStatus] = useState<FunasrRuntimeStatus | null>(
-    null,
-  );
-  const [funasrSetupStatus, setFunasrSetupStatus] = useState<string | null>(
-    null,
-  );
-  const [isFunasrSettingUp, setIsFunasrSettingUp] = useState(false);
-  const selectedFunasrModel = getSetting("funasr_model") || "fun-asr-nano";
+
+  const currentModelId = useModelEventStore((s) => s.currentModelId);
+  const downloadProgress = useModelEventStore((s) => s.downloadProgress);
+  const extractingModels = useModelEventStore((s) => s.extractingModels);
 
   const loadModels = async () => {
     const result = await commands.getAvailableModels();
@@ -468,124 +35,14 @@ export const ModelsSettings: React.FC = () => {
   const loadCurrentModel = async () => {
     const result = await commands.getCurrentModel();
     if (result.status === "ok") {
-      setCurrentModelId(result.data ?? "");
-    }
-  };
-
-  const loadFunasrStatus = async () => {
-    const result = await commands.getFunasrRuntimeStatus();
-    if (result.status === "ok") {
-      setFunasrStatus(result.data);
+      useModelEventStore.getState().setCurrentModelId(result.data ?? "");
     }
   };
 
   useEffect(() => {
     loadModels();
     loadCurrentModel();
-    loadFunasrStatus();
-
-    const stateUnlisten = listen<ModelStateEvent>(
-      "model-state-changed",
-      (event) => {
-        const { event_type, model_id, error } = event.payload;
-        if (event_type === "loading_completed" && model_id) {
-          setCurrentModelId(model_id);
-          setBusyModelId(null);
-          setErrorMessage(null);
-        } else if (event_type === "loading_failed") {
-          setErrorMessage(error || "Failed to load model");
-          setBusyModelId(null);
-        }
-      },
-    );
-
-    const progressUnlisten = listen<DownloadProgress>(
-      "model-download-progress",
-      (event) => {
-        const progress = event.payload;
-        setDownloadProgress((prev) => {
-          const next = new Map(prev);
-          next.set(progress.model_id, progress);
-          return next;
-        });
-      },
-    );
-
-    const completeUnlisten = listen<string>(
-      "model-download-complete",
-      (event) => {
-        const modelId = event.payload;
-        setDownloadProgress((prev) => {
-          const next = new Map(prev);
-          next.delete(modelId);
-          return next;
-        });
-        loadModels();
-      },
-    );
-
-    const extractStartUnlisten = listen<string>(
-      "model-extraction-started",
-      (event) => {
-        setExtractingModels((prev) => new Set(prev).add(event.payload));
-      },
-    );
-
-    const extractDoneUnlisten = listen<string>(
-      "model-extraction-completed",
-      (event) => {
-        setExtractingModels((prev) => {
-          const next = new Set(prev);
-          next.delete(event.payload);
-          return next;
-        });
-        loadModels();
-      },
-    );
-
-    const extractFailUnlisten = listen<{ model_id: string; error: string }>(
-      "model-extraction-failed",
-      (event) => {
-        setExtractingModels((prev) => {
-          const next = new Set(prev);
-          next.delete(event.payload.model_id);
-          return next;
-        });
-        setErrorMessage(`Failed to extract model: ${event.payload.error}`);
-      },
-    );
-
-    const funasrSetupUnlisten = listen<string>(
-      "funasr_setup_status",
-      (event) => {
-        setFunasrSetupStatus(event.payload);
-      },
-    );
-
-    return () => {
-      stateUnlisten.then((fn) => fn());
-      progressUnlisten.then((fn) => fn());
-      completeUnlisten.then((fn) => fn());
-      extractStartUnlisten.then((fn) => fn());
-      extractDoneUnlisten.then((fn) => fn());
-      extractFailUnlisten.then((fn) => fn());
-      funasrSetupUnlisten.then((fn) => fn());
-    };
   }, []);
-
-  const shouldPollFunasrStatus =
-    isFunasrSettingUp ||
-    (funasrStatus?.download_percentage !== null &&
-      funasrStatus?.download_percentage !== undefined &&
-      !funasrStatus?.server_running);
-
-  useEffect(() => {
-    if (!shouldPollFunasrStatus) return;
-    const interval = window.setInterval(() => {
-      loadFunasrStatus();
-    }, 2000);
-    return () => window.clearInterval(interval);
-  }, [shouldPollFunasrStatus]);
 
   const handleSelect = async (modelId: string) => {
     if (modelId === currentModelId) return;
@@ -596,7 +53,7 @@ export const ModelsSettings: React.FC = () => {
       setErrorMessage(result.error);
       setBusyModelId(null);
     } else {
-      setCurrentModelId(modelId);
+      useModelEventStore.getState().setCurrentModelId(modelId);
     }
   };
 
@@ -614,154 +71,318 @@ export const ModelsSettings: React.FC = () => {
     if (result.status === "ok") {
       await loadModels();
       if (modelId === currentModelId) {
-        setCurrentModelId("");
+        useModelEventStore.getState().setCurrentModelId("");
       }
     } else {
       setErrorMessage(result.error);
     }
   };
 
-  const handleSetupFunasr = async () => {
-    setErrorMessage(null);
-    setFunasrSetupStatus(
-      funasrStatus?.server_running
-        ? `Verifying FunASR model '${selectedFunasrModel}'...`
-        : `Starting FunASR with model '${selectedFunasrModel}'...`,
+  const downloadedModels = models.filter((m) => m.is_downloaded && m.engine_type !== "Diarization");
+  const recommendedDownloaded = downloadedModels.filter((m) => m.is_recommended);
+  const downloadableModels = models.filter((m) => !m.is_downloaded && m.engine_type !== "Diarization");
+  const diarizationModels = models.filter((m) => m.engine_type === "Diarization");
+
+  const getModelCategory = (model: ModelInfo): "vi" | "multi" | "en" => {
+    const langs = model.supported_languages;
+    if (langs.includes("vi")) return "vi";
+    if (langs.length > 1) return "multi";
+    return "en";
+  };
+
+  const groupModels = (list: ModelInfo[]) => ({
+    vi: list.filter((m) => getModelCategory(m) === "vi"),
+    multi: list.filter((m) => getModelCategory(m) === "multi"),
+    en: list.filter((m) => getModelCategory(m) === "en"),
+  });
+
+  const renderDownloadedModel = (model: ModelInfo) => {
+    const isActive = model.id === currentModelId;
+    const isBusy = busyModelId === model.id;
+    const isExtracting = extractingModels.has(model.id);
+
+    return (
+      <div
+        key={model.id}
+        className="flex items-center justify-between p-4 gap-4"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium truncate">
+              {getTranslatedModelName(model, t)}
+            </p>
+            {isActive && (
+              <span className="inline-flex items-center gap-1 text-xs text-logo-primary bg-logo-primary/10 px-2 py-0.5 rounded">
+                <Check size={12} />
+                {t("modelSelector.active")}
+              </span>
+            )}
+            {model.is_recommended && (
+              <span className="text-xs bg-logo-primary/10 text-logo-primary px-1.5 py-0.5 rounded">
+                {t("modelSelector.recommended", "Recommended")}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-text/60 italic mt-0.5">
+            {getTranslatedModelDescription(model, t)}
+          </p>
+          <p className="text-xs text-text/40 mt-1 tabular-nums">
+            {formatModelSize(Number(model.size_mb))}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!isActive && (
+            <button
+              type="button"
+              disabled={isBusy || isExtracting}
+              onClick={() => handleSelect(model.id)}
+              className="text-xs px-3 py-1.5 rounded-md border border-mid-gray/30 hover:bg-mid-gray/10 transition-colors disabled:opacity-50"
+            >
+              {isBusy
+                ? t("modelSelector.loadingGeneric")
+                : t("models.activate")}
+            </button>
+          )}
+          {!isActive && (
+            <button
+              type="button"
+              onClick={() => handleDelete(model.id)}
+              className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-md transition-colors"
+              title={t("modelSelector.deleteModel", {
+                modelName: getTranslatedModelName(model, t),
+              })}
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
     );
-    setIsFunasrSettingUp(true);
-    const result = await commands.setupFunasrRuntime();
-    if (result.status === "error") {
-      setErrorMessage(result.error);
-      setFunasrSetupStatus(`FunASR setup failed: ${result.error}`);
-    } else {
-      setFunasrSetupStatus(`FunASR verified with model '${selectedFunasrModel}'.`);
-    }
-    setIsFunasrSettingUp(false);
-    await loadFunasrStatus();
   };
 
-  const handleFunasrModelChange = async (model: string) => {
-    setErrorMessage(null);
-    setFunasrSetupStatus(
-      `Selected '${model}'. Press Start/Verify to load this model.`,
-    );
-    await updateSetting("funasr_model", model);
-    await loadFunasrStatus();
-  };
+  const renderDownloadableModel = (model: ModelInfo) => {
+    const progress = downloadProgress[model.id];
+    const isDownloading = !!progress;
+    const isExtracting = extractingModels.has(model.id);
 
-  const handleDeleteFunasr = async () => {
-    setErrorMessage(null);
-    const result = await commands.deleteFunasrRuntime();
-    if (result.status === "error") {
-      setErrorMessage(result.error);
-    }
-    setFunasrSetupStatus(null);
-    await loadFunasrStatus();
-  };
-
-  const downloadedModels = models.filter((m) => m.is_downloaded);
-  const downloadableModels = models.filter((m) => !m.is_downloaded);
-
-  const navigateToGeneral = () => {
-    window.dispatchEvent(
-      new CustomEvent("app:navigate", { detail: "general" }),
+    return (
+      <div key={model.id} className="p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium truncate">
+              {getTranslatedModelName(model, t)}
+            </p>
+            <p className="text-xs text-text/60 italic mt-0.5">
+              {getTranslatedModelDescription(model, t)}
+            </p>
+            <p className="text-xs text-text/40 mt-1 tabular-nums">
+              {t("modelSelector.downloadSize")} ·{" "}
+              {formatModelSize(Number(model.size_mb))}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={isDownloading || isExtracting}
+            onClick={() => handleDownload(model.id)}
+            className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-logo-primary/80 hover:bg-logo-primary text-white transition-colors disabled:opacity-50"
+          >
+            <Download size={12} />
+            {isDownloading
+              ? `${Math.max(0, Math.min(100, Math.round(progress.percentage)))}%`
+              : isExtracting
+                ? t("modelSelector.extractingGeneric")
+                : t("modelSelector.download")}
+          </button>
+        </div>
+        {isDownloading && (
+          <div className="mt-3">
+            <ProgressBar
+              progress={[
+                {
+                  id: model.id,
+                  percentage: progress.percentage,
+                  label: getTranslatedModelName(model, t),
+                },
+              ]}
+              size="small"
+            />
+          </div>
+        )}
+      </div>
     );
   };
 
   return (
-    <div className="w-full space-y-6">
-      <div className="px-1">
-        <h1 className="text-2xl font-semibold text-text">
-          {t("models.headerTitle", "Models")}
-        </h1>
-        <p className="text-sm text-mid-gray mt-1">
-          {t(
-            "models.headerSubtitle",
-            "Manage transcription models on your device. Higher quality models provide better accuracy but require more storage.",
-          )}
-        </p>
-      </div>
-
+    <div className="max-w-3xl w-full mx-auto space-y-6">
       {errorMessage && (
-        <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-500">
+        <div className="px-4 py-3 rounded-md bg-red-500/10 border border-red-500/30 text-sm text-red-400">
           {errorMessage}
         </div>
       )}
 
-      <div className="space-y-2">
-        <SectionHeader>
-          {t("models.installedTitle", "Installed Models")}
-        </SectionHeader>
-        {downloadedModels.length > 0 ? (
-          <div className="space-y-3">
-            {downloadedModels.map((m) => (
-              <InstalledModelCard
-                key={m.id}
-                model={m}
-                isActive={m.id === currentModelId}
-                isBusy={busyModelId === m.id}
-                onActivate={() => handleSelect(m.id)}
-                onDelete={() => handleDelete(m.id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="px-4 py-6 text-sm text-text/60 text-center rounded-lg border border-mid-gray/20 bg-background">
-            {t("models.noInstalled", "No models installed yet.")}
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <SectionHeader>
-          {t("models.availableTitle", "Available to Download")}
-        </SectionHeader>
-        <FunasrRuntimeCard
-          status={funasrStatus}
-          setupStatus={funasrSetupStatus}
-          isSettingUp={isFunasrSettingUp}
-          selectedModel={selectedFunasrModel}
-          onModelChange={handleFunasrModelChange}
-          onSetup={handleSetupFunasr}
-          onDelete={handleDeleteFunasr}
-        />
-        {downloadableModels.length > 0 ? (
-          <div className="space-y-3">
-            {downloadableModels.map((m) => (
-              <DownloadableModelCard
-                key={m.id}
-                model={m}
-                progress={downloadProgress.get(m.id)}
-                isExtracting={extractingModels.has(m.id)}
-                onDownload={() => handleDownload(m.id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="px-4 py-6 text-sm text-text/60 text-center rounded-lg border border-mid-gray/20 bg-background">
-            {t("models.noAvailable", "All available models are installed.")}
+      <SettingsGroup
+        title={t("models.installedTitle")}
+        description={t("models.installedDescription")}
+      >
+        {downloadedModels.length > 0 ? (() => {
+          const nonRecommended = downloadedModels.filter((m) => !m.is_recommended);
+          const groups = groupModels(nonRecommended);
+          return (
+            <>
+              {recommendedDownloaded.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1 text-xs text-text/40 font-medium">
+                    ⭐ {t("modelSelector.recommended", "Recommended")}
+                  </div>
+                  {recommendedDownloaded.map(renderDownloadedModel)}
+                </>
+              )}
+              {groups.vi.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                    🇻🇳 {t("modelSelector.groupVietnamese", "Tiếng Việt")}
+                  </div>
+                  {groups.vi.map(renderDownloadedModel)}
+                </>
+              )}
+              {groups.multi.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                    🌐 {t("modelSelector.groupMultilingual", "Đa ngôn ngữ")}
+                  </div>
+                  {groups.multi.map(renderDownloadedModel)}
+                </>
+              )}
+              {groups.en.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                    🇬🇧 {t("modelSelector.groupEnglish", "English only")}
+                  </div>
+                  {groups.en.map(renderDownloadedModel)}
+                </>
+              )}
+            </>
+          );
+        })() : (
+          <div className="px-4 py-6 text-sm text-text/60 text-center">
+            {t("models.noInstalled")}
           </div>
         )}
-      </div>
+      </SettingsGroup>
 
-      <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-logo-primary/5 border border-logo-primary/20 text-sm text-text/80">
-        <Info size={16} className="text-logo-primary shrink-0 mt-0.5" />
-        <p>
-          {t(
-            "models.footerInfo",
-            "Larger models deliver higher accuracy but take more time to download and require more storage.",
-          )}{" "}
-          {t("models.footerChangeIn", "You can change the active model in")}{" "}
-          <button
-            type="button"
-            onClick={navigateToGeneral}
-            className="text-logo-primary hover:underline font-medium"
-          >
-            {t("sidebar.general", "General")}
-          </button>{" "}
-          {t("models.footerSettings", "settings.")}
-        </p>
-      </div>
+      <SettingsGroup
+        title={t("models.availableTitle")}
+        description={t("models.availableDescription")}
+      >
+        {downloadableModels.length > 0 ? (() => {
+          const groups = groupModels(downloadableModels);
+          return (
+            <>
+              {groups.vi.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                    🇻🇳 {t("modelSelector.groupVietnamese", "Tiếng Việt")}
+                  </div>
+                  {groups.vi.map(renderDownloadableModel)}
+                </>
+              )}
+              {groups.multi.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                    🌐 {t("modelSelector.groupMultilingual", "Đa ngôn ngữ")}
+                  </div>
+                  {groups.multi.map(renderDownloadableModel)}
+                </>
+              )}
+              {groups.en.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                    🇬🇧 {t("modelSelector.groupEnglish", "English only")}
+                  </div>
+                  {groups.en.map(renderDownloadableModel)}
+                </>
+              )}
+            </>
+          );
+        })() : (
+          <div className="px-4 py-6 text-sm text-text/60 text-center">
+            {t("models.noAvailable")}
+          </div>
+        )}
+      </SettingsGroup>
+
+      {diarizationModels.length > 0 && (
+        <SettingsGroup
+          title={t("models.diarizationTitle", "Speaker Diarization")}
+          description={t("models.diarizationDescription", "Models for identifying and separating speakers in transcripts.")}
+        >
+          {diarizationModels.map((model) => {
+            const progress = downloadProgress[model.id];
+            const isDownloading = !!progress;
+            const isExtracting = extractingModels.has(model.id);
+            return (
+              <div key={model.id} className="p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">
+                      {getTranslatedModelName(model, t)}
+                    </p>
+                    <p className="text-xs text-text/60 italic mt-0.5">
+                      {getTranslatedModelDescription(model, t)}
+                    </p>
+                    <p className="text-xs text-text/40 mt-1 tabular-nums">
+                      {formatModelSize(Number(model.size_mb))}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!model.is_downloaded && (
+                      <button
+                        type="button"
+                        disabled={isDownloading || isExtracting}
+                        onClick={() => handleDownload(model.id)}
+                        className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-logo-primary/80 hover:bg-logo-primary text-white transition-colors disabled:opacity-50"
+                      >
+                        <Download size={12} />
+                        {isDownloading
+                          ? `${Math.max(0, Math.min(100, Math.round(progress.percentage)))}%`
+                          : isExtracting
+                            ? t("modelSelector.extractingGeneric")
+                            : t("modelSelector.download")}
+                      </button>
+                    )}
+                    {model.is_downloaded && !extractingModels.has(model.id) && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(model.id)}
+                        className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-md transition-colors"
+                        title={t("modelSelector.deleteModel", {
+                          modelName: getTranslatedModelName(model, t),
+                        })}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {isDownloading && (
+                  <div className="mt-3">
+                    <ProgressBar
+                      progress={[
+                        {
+                          id: model.id,
+                          percentage: progress.percentage,
+                          label: getTranslatedModelName(model, t),
+                        },
+                      ]}
+                      size="small"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </SettingsGroup>
+      )}
     </div>
   );
 };

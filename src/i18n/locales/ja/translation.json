@@ -235,7 +235,8 @@
     "errors": {
       "loadModels": "利用可能なモデルの読み込みに失敗しました",
       "downloadModel": "モデルのダウンロードに失敗しました: {{error}}"
-    }
+    },
+    "skipDownload": "スキップ — あとでダウンロード"
   },
   "modelSelector": {
     "welcome": "Handyへようこそ！",
@@ -385,6 +386,10 @@
         "placeholder": "単語を追加",
         "add": "追加",
         "remove": "{{word}}を削除"
+      },
+      "diarization": {
+        "label": "話者ダイアリゼーション",
+        "description": "会議の録音で誰がいつ話したかを識別します。ダイアリゼーションモデルのダウンロードが必要です。"
       }
     },
     "postProcessing": {
@@ -601,5 +606,13 @@
   },
   "overlay": {
     "transcribing": "文字起こし中..."
+  },
+  "app": {
+    "meetingGuard": {
+      "dictationWillStop": "Dictation will be stopped when you start a meeting.",
+      "stopTitle": "Stop meeting recording?",
+      "stopDescription": "Switching sections will stop the current recording.",
+      "stopAndSwitch": "Stop & Switch"
+    }
   }
 }

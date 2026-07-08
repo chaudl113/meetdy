@@ -3,6 +3,7 @@ pub mod chatgpt_auth;
 pub mod history;
 pub mod meeting;
 pub mod models;
+pub mod permissions;
 pub mod soniox;
 pub mod templates;
 pub mod transcription;

@@ -1,15 +1,32 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { commands, type ModelInfo } from "@/bindings";
 import ModelCard from "./ModelCard";
 import MeetdyTextLogo from "../icons/MeetdyTextLogo";
+import PermissionsStep from "./PermissionsStep";
 
 interface OnboardingProps {
   onModelSelected: () => void;
 }
 
+const getModelCategory = (model: ModelInfo): "vi" | "multi" | "en" => {
+  const langs = model.supported_languages;
+  if (langs.includes("vi")) return "vi";
+  if (langs.length > 1) return "multi";
+  return "en";
+};
+
+const groupModels = (list: ModelInfo[]) => ({
+  vi: list.filter((m) => getModelCategory(m) === "vi"),
+  multi: list.filter((m) => getModelCategory(m) === "multi"),
+  en: list.filter((m) => getModelCategory(m) === "en"),
+});
+
+type OnboardingStep = "permissions" | "model";
+
 const Onboarding: React.FC<OnboardingProps> = ({ onModelSelected }) => {
   const { t } = useTranslation();
+  const [step, setStep] = useState<OnboardingStep>("permissions");
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,8 +39,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onModelSelected }) => {
     try {
       const result = await commands.getAvailableModels();
       if (result.status === "ok") {
-        // Only show downloadable models for onboarding
-        setAvailableModels(result.data.filter((m) => !m.is_downloaded));
+        // Only show downloadable STT models for onboarding (exclude diarization)
+        setAvailableModels(
+          result.data.filter(
+            (m) => !m.is_downloaded && m.engine_type !== "Diarization"
+          )
+        );
       } else {
         setError(t("onboarding.errors.loadModels"));
       }
@@ -54,9 +75,22 @@ const Onboarding: React.FC<OnboardingProps> = ({ onModelSelected }) => {
     }
   };
 
-  const getRecommendedBadge = (modelId: string): boolean => {
-    return modelId === "parakeet-tdt-0.6b-v3";
-  };
+  const recommendedModels = availableModels.filter((m) => m.is_recommended);
+  const otherModels = availableModels.filter((m) => !m.is_recommended);
+  const otherGroups = groupModels(otherModels);
+
+  if (step === "permissions") {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center p-8">
+        <div className="w-full max-w-md">
+          <div className="flex flex-col items-center gap-2 mb-8">
+            <MeetdyTextLogo width={200} />
+          </div>
+          <PermissionsStep onContinue={() => setStep("model")} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col p-6 gap-4 inset-0">
@@ -74,31 +108,91 @@ const Onboarding: React.FC<OnboardingProps> = ({ onModelSelected }) => {
           </div>
         )}
 
-        {/*<div className="flex flex-col gap-4 bg-background-dark p-4 py-5 w-full rounded-2xl flex-1 overflow-y-auto min-h-0">*/}
-        <div className="flex flex-col gap-4 ">
-          {availableModels
-            .filter((model) => getRecommendedBadge(model.id))
-            .map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                variant="featured"
-                disabled={downloading}
-                onSelect={handleDownloadModel}
-              />
-            ))}
+        <div className="flex flex-col gap-4 overflow-y-auto min-h-0 flex-1 pr-1">
+          {/* Recommended models */}
+          {recommendedModels.map((model) => (
+            <ModelCard
+              key={model.id}
+              model={model}
+              variant="featured"
+              disabled={downloading}
+              onSelect={handleDownloadModel}
+            />
+          ))}
 
-          {availableModels
-            .filter((model) => !getRecommendedBadge(model.id))
-            .sort((a, b) => Number(a.size_mb) - Number(b.size_mb))
-            .map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                disabled={downloading}
-                onSelect={handleDownloadModel}
-              />
-            ))}
+          {/* Other models grouped by language */}
+          {otherGroups.vi.length > 0 && (
+            <>
+              <div className="text-xs text-text/40 text-left px-1">
+                🇻🇳 {t("modelSelector.groupVietnamese", "Tiếng Việt")}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {otherGroups.vi
+                  .sort((a, b) => Number(a.size_mb) - Number(b.size_mb))
+                  .map((model) => (
+                    <ModelCard
+                      key={model.id}
+                      model={model}
+                      disabled={downloading}
+                      onSelect={handleDownloadModel}
+                    />
+                  ))}
+              </div>
+            </>
+          )}
+
+          {otherGroups.multi.length > 0 && (
+            <>
+              <div className="text-xs text-text/40 text-left px-1">
+                🌐 {t("modelSelector.groupMultilingual", "Đa ngôn ngữ")}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {otherGroups.multi
+                  .sort((a, b) => Number(a.size_mb) - Number(b.size_mb))
+                  .map((model) => (
+                    <ModelCard
+                      key={model.id}
+                      model={model}
+                      disabled={downloading}
+                      onSelect={handleDownloadModel}
+                    />
+                  ))}
+              </div>
+            </>
+          )}
+
+          {otherGroups.en.length > 0 && (
+            <>
+              <div className="text-xs text-text/40 text-left px-1">
+                🇬🇧 {t("modelSelector.groupEnglish", "English only")}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {otherGroups.en
+                  .sort((a, b) => Number(a.size_mb) - Number(b.size_mb))
+                  .map((model) => (
+                    <ModelCard
+                      key={model.id}
+                      model={model}
+                      disabled={downloading}
+                      onSelect={handleDownloadModel}
+                    />
+                  ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="shrink-0 pt-2 flex flex-col items-center gap-1">
+          <button
+            type="button"
+            onClick={onModelSelected}
+            className="text-sm text-text/40 hover:text-text/60 transition-colors"
+          >
+            {t("onboarding.skipDownload", "Skip — download later")}
+          </button>
+          <p className="text-xs text-text/30">
+            {t("onboarding.skipNote", "You can download models later in Settings")}
+          </p>
         </div>
       </div>
     </div>

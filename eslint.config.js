@@ -23,7 +23,7 @@ export default [
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
       "@typescript-eslint/no-unused-vars": "warn",
-      "@typescript-eslint/prefer-const": "warn",
+      "prefer-const": "warn",
       "i18next/no-literal-string": [
         "error",
         {

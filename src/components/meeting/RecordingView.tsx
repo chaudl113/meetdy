@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { RecordingTopBar } from "./recording/RecordingTopBar";
 import { RecordingMetaBar } from "./recording/RecordingMetaBar";
 import {
-  RecordingTabs,
   type RecordingTab,
+  RecordingTabs,
 } from "./recording/RecordingTabs";
 import { LiveTranscriptPanel } from "./recording/LiveTranscriptPanel";
 import { AISummaryPanel } from "./recording/AISummaryPanel";

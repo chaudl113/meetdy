@@ -1,0 +1,16 @@
+{
+  "nextId": 2,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Phase 9 Robustness: macOS Permissions Onboarding + Virtualized Transcript",
+      "description": "Implement Phase 9 features:\n9.1 - macOS Permissions Onboarding Step (before model download step)\n9.2 - Virtualized Transcript using react-virtuoso",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480641966,
+      "updatedAt": 1783481380346
+    }
+  ]
+}

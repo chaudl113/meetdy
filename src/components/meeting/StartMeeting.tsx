@@ -1,33 +1,25 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Monitor,
-  Mic,
+  AlertCircle,
   Check,
+  CheckSquare,
   ChevronDown,
   FileText,
-  Sparkles,
-  CheckSquare,
-  StickyNote,
-  Lightbulb,
-  Calendar,
-  Play,
   LayoutTemplate,
-  Server,
-  AlertCircle,
+  Lightbulb,
+  Mic,
+  Monitor,
+  Play,
+  Sparkles,
+  StickyNote,
+  Upload,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { listen } from "@tauri-apps/api/event";
 import { useShallow } from "zustand/react/shallow";
 import { useMeetingStore } from "../../stores/meetingStore";
-import {
-  useRecordingConfigStore,
-  type RecordingQuality,
-  type SttEngine,
-} from "../../stores/recordingConfigStore";
-import { useSettings } from "../../hooks/useSettings";
-import { LANGUAGES } from "../../lib/constants/languages";
-import { commands, type MeetingTemplate, type AudioSourceType } from "@/bindings";
+import { useRecordingConfigStore } from "../../stores/recordingConfigStore";
+import { type AudioSourceType, commands, type MeetingSession, type MeetingTemplate } from "@/bindings";
 
 interface SourceOption {
   id: AudioSourceType;
@@ -87,77 +79,35 @@ const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({
   </div>
 );
 
-const Toggle: React.FC<{
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}> = ({ checked, onChange, disabled }) => (
-  <button
-    type="button"
-    role="switch"
-    aria-checked={checked}
-    disabled={disabled}
-    onClick={() => onChange(!checked)}
-    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-      checked ? "bg-logo-primary" : "bg-mid-gray/30"
-    } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-  >
-    <span
-      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-        checked ? "translate-x-5" : "translate-x-0.5"
-      }`}
-    />
-  </button>
-);
-
 export const StartMeeting: React.FC = () => {
   const { t } = useTranslation();
-  const { startMeeting, sessionStatus, isLoading, error } = useMeetingStore(
+  const { startMeeting, sessionStatus, isLoading, error, setCurrentSession, setSessionStatus, fetchSessions } = useMeetingStore(
     useShallow((s) => ({
       startMeeting: s.startMeeting,
       sessionStatus: s.sessionStatus,
       isLoading: s.isLoading,
       error: s.error,
+      setCurrentSession: s.setCurrentSession,
+      setSessionStatus: s.setSessionStatus,
+      fetchSessions: s.fetchSessions,
     })),
   );
-  const { getSetting, updateSetting, isUpdating } = useSettings();
 
-  // Persisted form state lives in `recordingConfigStore` so RecordingView can
-  // read the choices made here (quality, save location, toggles, ...).
   const {
     audioSource,
     setAudioSource,
-    recordingQuality,
-    setRecordingQuality,
-    autoTranscribe,
-    setAutoTranscribe,
-    autoSummary,
-    setAutoSummary,
     meetingTitle,
     setMeetingTitle,
     participants,
     setParticipants,
     tags,
     setTags,
-    saveLocation,
-    setSaveLocation,
-    sttEngine,
-    setSttEngine,
-    sonioxApiKey,
-    setSonioxApiKey,
-    funasrBaseUrl,
-    setFunasrBaseUrl,
-    funasrModel,
-    setFunasrModel,
   } = useRecordingConfigStore();
-
-  const language = getSetting("selected_language") || "auto";
-  const isLanguageUpdating = isUpdating("selected_language");
 
   const [templates, setTemplates] = useState<MeetingTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [savingTemplateId, setSavingTemplateId] = useState<string | null>(null);
-  const [funasrSetupStatus, setFunasrSetupStatus] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
     commands.listMeetingTemplates().then((r) => {
@@ -165,146 +115,59 @@ export const StartMeeting: React.FC = () => {
     });
   }, []);
 
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<string>("funasr_setup_status", (event) => {
-      setFunasrSetupStatus(event.payload);
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-
-  const handleTemplateSttChange = async (tpl: MeetingTemplate, engine: string) => {
-    setSavingTemplateId(tpl.id);
-    try {
-      const result = await commands.updateMeetingTemplate(
-        tpl.id, null, null, null, null, null, null,
-        engine || null,
-      );
-      if (result.status === "ok") {
-        setTemplates((prev) =>
-          prev.map((t) => (t.id === tpl.id ? result.data : t)),
-        );
-        // If this template is currently selected, apply new engine
-        if (selectedTemplateId === tpl.id && result.data.stt_engine) {
-          setSttEngine(result.data.stt_engine as SttEngine);
-        }
-      }
-    } finally {
-      setSavingTemplateId(null);
-    }
-  };
-
-  // Sync persisted stt settings into store when settings are loaded.
-  // initializeEventListeners also does this at app startup, but if the
-  // settings store loads after that (rare), this catches the gap.
-  useEffect(() => {
-    const engine = getSetting("meeting_stt_engine");
-    if (engine && engine !== sttEngine) setSttEngine(engine as SttEngine);
-    const key = getSetting("soniox_api_key");
-    if (key && key !== sonioxApiKey) setSonioxApiKey(key);
-    const funasrUrl = getSetting("funasr_base_url");
-    if (funasrUrl && funasrUrl !== funasrBaseUrl) setFunasrBaseUrl(funasrUrl);
-    const funasrModelSetting = getSetting("funasr_model");
-    if (funasrModelSetting && funasrModelSetting !== funasrModel) {
-      setFunasrModel(funasrModelSetting);
-    }
-  // Run whenever settings finish loading (getSetting returns a new value)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getSetting("meeting_stt_engine"), getSetting("soniox_api_key"), getSetting("funasr_base_url"), getSetting("funasr_model")]);
-
   const handleTemplateSelect = (tpl: MeetingTemplate | null) => {
     if (!tpl) {
       setSelectedTemplateId(null);
       return;
     }
     setSelectedTemplateId(tpl.id);
-    // Apply audio source
+    // Apply audio source from template
     const audioMap: Record<string, AudioSourceType> = {
       microphone_only: "microphone_only",
       system_only: "system_only",
       mixed: "mixed",
     };
     if (audioMap[tpl.audio_source]) setAudioSource(audioMap[tpl.audio_source]);
-    // Apply stt_engine if template specifies one
-    if (
-      tpl.stt_engine &&
-      (tpl.stt_engine === "whisper" ||
-        tpl.stt_engine === "soniox" ||
-        tpl.stt_engine === "funasr")
-    ) {
-      setSttEngine(tpl.stt_engine as SttEngine);
-    }
-  };
-
-  const handleSttEngineChange = async (engine: SttEngine) => {
-    setSttEngine(engine);
-    await updateSetting("meeting_stt_engine", engine);
-    if (engine === "funasr") {
-      if (language === "auto") {
-        await updateSetting("selected_language", "vi");
-      }
-      if (funasrModel === "sensevoice") {
-        setFunasrModel("fun-asr-nano");
-        await updateSetting("funasr_model", "fun-asr-nano");
-      }
-    }
-  };
-
-  const handleSonioxApiKeyChange = async (key: string) => {
-    setSonioxApiKey(key);
-    await updateSetting("soniox_api_key", key || null);
-  };
-
-  const handleFunasrBaseUrlChange = async (url: string) => {
-    setFunasrBaseUrl(url);
-    await updateSetting("funasr_base_url", url || "http://localhost:8000");
-  };
-
-  const handleFunasrModelChange = async (model: string) => {
-    setFunasrModel(model);
-    await updateSetting("funasr_model", model || "fun-asr-nano");
   };
 
   const isRecording = sessionStatus === "recording";
-  const sonioxKeyMissing = sttEngine === "soniox" && !sonioxApiKey.trim();
-  const funasrConfigMissing =
-    sttEngine === "funasr" && (!funasrBaseUrl.trim() || !funasrModel.trim());
-  const startDisabled = isLoading || isRecording || sonioxKeyMissing || funasrConfigMissing;
+  const startDisabled = isLoading || isRecording;
 
   const handleStart = async () => {
-    setFunasrSetupStatus(null);
-    await startMeeting(
-      audioSource,
-      selectedTemplateId ?? undefined,
-      sttEngine,
-      sttEngine === "soniox" ? sonioxApiKey : undefined,
-      sttEngine === "funasr" ? funasrBaseUrl : undefined,
-      sttEngine === "funasr" ? funasrModel : undefined,
-    );
+    await startMeeting(audioSource, selectedTemplateId ?? undefined);
   };
 
-  const handleLanguageChange = async (
-    e: React.ChangeEvent<HTMLSelectElement>,
-  ) => {
-    await updateSetting("selected_language", e.target.value);
-  };
-
-  const handleChangeSaveLocation = async () => {
+  const handleImportAudio = async () => {
+    setImportError(null);
+    const filePath = await open({
+      title: t("startMeeting.importAudio", "Import Audio File"),
+      multiple: false,
+      filters: [
+        {
+          name: t("startMeeting.importAudioDesc", "Audio Files"),
+          extensions: ["wav", "mp3", "m4a", "flac", "ogg"],
+        },
+      ],
+    });
+    if (!filePath) return;
+    setIsImporting(true);
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: t("startMeeting.selectFolderTitle"),
-      });
-      if (typeof selected === "string" && selected.length > 0) {
-        setSaveLocation(selected);
+      const result = await commands.importMeetingAudio(
+        filePath as string,
+        meetingTitle || null,
+      );
+      if (result.status === "ok") {
+        const session: MeetingSession = result.data;
+        await fetchSessions();
+        setCurrentSession(session);
+        setSessionStatus("processing");
+      } else {
+        setImportError(result.error);
       }
     } catch (err) {
-      console.error("Failed to open folder picker:", err);
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -362,8 +225,6 @@ export const StartMeeting: React.FC = () => {
               <div className="flex flex-col gap-2">
                 {templates.map((tpl) => {
                   const isSelected = selectedTemplateId === tpl.id;
-                  const isSaving = savingTemplateId === tpl.id;
-                  const currentEngine = tpl.stt_engine || "whisper";
                   return (
                     <div
                       key={tpl.id}
@@ -373,7 +234,6 @@ export const StartMeeting: React.FC = () => {
                           : "border-mid-gray/20"
                       }`}
                     >
-                      {/* Template row */}
                       <button
                         type="button"
                         onClick={() => handleTemplateSelect(isSelected ? null : tpl)}
@@ -387,62 +247,11 @@ export const StartMeeting: React.FC = () => {
                             {tpl.name}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
-                            currentEngine === "soniox"
-                              ? "bg-blue-500/15 text-blue-400"
-                              : currentEngine === "funasr"
-                                ? "bg-emerald-500/15 text-emerald-500"
-                              : "bg-mid-gray/20 text-text/50"
-                          }`}>
-                            {currentEngine === "soniox"
-                              ? "Soniox"
-                              : currentEngine === "funasr"
-                                ? "FunASR"
-                                : "Whisper"}
-                          </span>
-                          <ChevronDown
-                            width={14} height={14}
-                            className={`text-text/40 transition-transform ${isSelected ? "rotate-180" : ""}`}
-                          />
-                        </div>
+                        <ChevronDown
+                          width={14} height={14}
+                          className={`text-text/40 transition-transform ${isSelected ? "rotate-180" : ""}`}
+                        />
                       </button>
-
-                      {/* Expanded: STT engine picker */}
-                      {isSelected && (
-                        <div className="px-3 pb-3 border-t border-mid-gray/15 pt-2.5 flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-xs font-medium text-text/80">
-                              {t("startMeeting.template.sttEngine", "Transcription Engine")}
-                            </p>
-                            <p className="text-[11px] text-text/50 mt-0.5">
-                              {t("startMeeting.template.sttEngineDesc", "Saved to this template")}
-                            </p>
-                          </div>
-                          <div className="relative">
-                            <select
-                              value={currentEngine}
-                              disabled={isSaving}
-                              onChange={(e) => handleTemplateSttChange(tpl, e.target.value)}
-                              className="appearance-none bg-background border border-mid-gray/30 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-logo-primary cursor-pointer disabled:opacity-50"
-                            >
-                              <option value="whisper">
-                                {t("startMeeting.sttEngine.whisper", "Whisper (Local, Offline)")}
-                              </option>
-                            <option value="soniox">
-                              {t("startMeeting.sttEngine.soniox", "Soniox (Cloud, Realtime)")}
-                            </option>
-                            <option value="funasr">
-                              {t("startMeeting.sttEngine.funasr", "FunASR (Local Service)")}
-                            </option>
-                          </select>
-                            <ChevronDown
-                              width={13} height={13}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text/50"
-                            />
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -502,276 +311,21 @@ export const StartMeeting: React.FC = () => {
               })}
             </div>
             {audioSource !== "microphone_only" && (
-              <div className="mt-4 rounded-lg border border-yellow-500/25 bg-yellow-500/10 px-3 py-2 text-xs leading-relaxed text-yellow-700 dark:text-yellow-300">
+              <div className="mt-4 rounded-lg border border-yellow-500/25 bg-yellow-500/10 px-3 py-2 text-xs leading-relaxed text-yellow-700 dark:text-yellow-400">
                 {t(
                   "startMeeting.source.systemAudioWarning",
-                  "System audio capture can conflict with Bluetooth headsets on macOS and may make playback hard to hear. If that happens, use Microphone only or switch your microphone to the built-in Mac mic.",
+                  "System audio capture can conflict with Bluetooth headsets on macOS and may make playback hard to hear. If that happens, switch to Microphone Only.",
                 )}
               </div>
             )}
-          </Card>
-
-          {/* 2. Recording Settings */}
-          <Card>
-            <SectionHeader
-              index={2}
-              title={t("startMeeting.section.settings")}
-            />
-
-            <div className="mt-4 flex flex-col gap-4">
-              {/* Recording Quality */}
-              <div className="flex items-center justify-between gap-4">
-                <label className="text-sm font-medium">
-                  {t("startMeeting.recordingQuality")}
-                </label>
-                <div className="relative w-64">
-                  <select
-                    value={recordingQuality}
-                    onChange={(e) =>
-                      setRecordingQuality(e.target.value as RecordingQuality)
-                    }
-                    className="w-full appearance-none bg-background border border-mid-gray/30 rounded-lg px-3 py-2 text-sm pr-8 focus:outline-none focus:border-logo-primary cursor-pointer"
-                  >
-                    <option value="low">{t("startMeeting.quality.low")}</option>
-                    <option value="medium">
-                      {t("startMeeting.quality.medium")}
-                    </option>
-                    <option value="high">
-                      {t("startMeeting.quality.highRecommended")}
-                    </option>
-                  </select>
-                  <ChevronDown
-                    width={16}
-                    height={16}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text/60"
-                  />
-                </div>
-              </div>
-
-              {/* Language */}
-              <div className="flex items-center justify-between gap-4">
-                <label className="text-sm font-medium">
-                  {t("startMeeting.language")}
-                </label>
-                <div className="relative w-64">
-                  <select
-                    value={language}
-                    onChange={handleLanguageChange}
-                    disabled={isLanguageUpdating}
-                    className={`w-full appearance-none bg-background border border-mid-gray/30 rounded-lg px-3 py-2 text-sm pr-8 focus:outline-none focus:border-logo-primary ${
-                      isLanguageUpdating
-                        ? "opacity-50 cursor-not-allowed"
-                        : "cursor-pointer"
-                    }`}
-                  >
-                    {LANGUAGES.map((lang) => (
-                      <option key={lang.value} value={lang.value}>
-                        {lang.value === "auto"
-                          ? t("startMeeting.autoDetect")
-                          : lang.label}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    width={16}
-                    height={16}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text/60"
-                  />
-                </div>
-              </div>
-
-              {/* STT Engine */}
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-medium">
-                    {t("startMeeting.sttEngine", "Transcription Engine")}
-                  </div>
-                  <div className="text-xs text-text/60">
-                    {t(
-                      "startMeeting.sttEngineDesc",
-                      "Whisper runs offline; Soniox is cloud realtime; FunASR auto-starts a local server.",
-                    )}
-                  </div>
-                </div>
-                <div className="relative w-64">
-                  <select
-                    value={sttEngine}
-                    onChange={(e) => handleSttEngineChange(e.target.value as SttEngine)}
-                    className="w-full appearance-none bg-background border border-mid-gray/30 rounded-lg px-3 py-2 text-sm pr-8 focus:outline-none focus:border-logo-primary cursor-pointer"
-                  >
-                    <option value="whisper">
-                      {t("startMeeting.sttEngine.whisper", "Whisper (Local, Offline)")}
-                    </option>
-                    <option value="soniox">
-                      {t("startMeeting.sttEngine.soniox", "Soniox (Cloud, Realtime)")}
-                    </option>
-                    <option value="funasr">
-                      {t("startMeeting.sttEngine.funasr", "FunASR (Local Service)")}
-                    </option>
-                  </select>
-                  <ChevronDown
-                    width={16}
-                    height={16}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text/60"
-                  />
-                </div>
-              </div>
-
-              {/* Soniox API key (shown only when soniox engine selected) */}
-              {sttEngine === "soniox" && (
-                <div className="flex items-start justify-between gap-4">
-                  <label className="text-sm font-medium pt-2">
-                    {t("startMeeting.sonioxApiKey", "Soniox API Key")}
-                  </label>
-                  <div className="flex flex-col gap-1 w-64">
-                    <input
-                      type="password"
-                      value={sonioxApiKey}
-                      onChange={(e) => handleSonioxApiKeyChange(e.target.value)}
-                      placeholder={t(
-                        "startMeeting.sonioxApiKeyPlaceholder",
-                        "sk-...",
-                      )}
-                      className={`w-full bg-background border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-logo-primary ${
-                        sonioxKeyMissing
-                          ? "border-red-400"
-                          : "border-mid-gray/30"
-                      }`}
-                    />
-                    {sonioxKeyMissing && (
-                      <p className="text-xs text-red-400">
-                        {t(
-                          "startMeeting.sonioxApiKeyRequired",
-                          "API key required to use Soniox",
-                        )}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {sttEngine === "funasr" && (
-                <div className="flex items-start justify-between gap-4">
-                  <label className="text-sm font-medium pt-2 flex items-center gap-2">
-                    <Server width={14} height={14} />
-                    {t("startMeeting.funasrSettings", "FunASR Server")}
-                  </label>
-                  <div className="flex flex-col gap-2 w-64">
-                    <input
-                      value={funasrBaseUrl}
-                      onChange={(e) => handleFunasrBaseUrlChange(e.target.value)}
-                      placeholder="http://localhost:8000"
-                      className={`w-full bg-background border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-logo-primary ${
-                        funasrConfigMissing ? "border-red-400" : "border-mid-gray/30"
-                      }`}
-                    />
-                    <select
-                      value={funasrModel}
-                      onChange={(e) => handleFunasrModelChange(e.target.value)}
-                      className="w-full appearance-none bg-background border border-mid-gray/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-logo-primary cursor-pointer"
-                    >
-                      <option value="sensevoice">{t("startMeeting.funasrModels.sensevoice")}</option>
-                      <option value="paraformer">{t("startMeeting.funasrModels.paraformer")}</option>
-                      <option value="paraformer-en">{t("startMeeting.funasrModels.paraformerEn")}</option>
-                      <option value="fun-asr-nano">{t("startMeeting.funasrModels.funAsrNano")}</option>
-                    </select>
-                    {funasrConfigMissing && (
-                      <p className="text-xs text-red-400">
-                        {t(
-                          "startMeeting.funasrRequired",
-                          "Base URL and model are required for FunASR",
-                        )}
-                      </p>
-                    )}
-                    {!funasrConfigMissing && (
-                      <p className="text-xs text-text/50">
-                        {t(
-                          "startMeeting.funasrAutoStart",
-                          "Download/setup FunASR in Models first. Meetdy will start the managed local server when recording uses FunASR.",
-                        )}
-                      </p>
-                    )}
-                    {language === "vi" && funasrModel !== "fun-asr-nano" && (
-                      <p className="text-xs text-amber-600">
-                        {t(
-                          "startMeeting.funasrVietnameseHint",
-                          "For Vietnamese, use fun-asr-nano. SenseVoice may drift into Chinese.",
-                        )}
-                      </p>
-                    )}
-                    {language === "auto" && (
-                      <p className="text-xs text-amber-600">
-                        {t(
-                          "startMeeting.funasrAutoLanguageHint",
-                          "FunASR auto-detect can drift into Chinese. Select Vietnamese for Vietnamese meetings.",
-                        )}
-                      </p>
-                    )}
-                    {funasrSetupStatus && (
-                      <p className="text-xs text-logo-primary">
-                        {funasrSetupStatus}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Save Location */}
-              <div className="flex items-center justify-between gap-4">
-                <label className="text-sm font-medium">
-                  {t("startMeeting.saveLocation")}
-                </label>
-                <div className="flex gap-2 w-64">
-                  <input
-                    readOnly
-                    value={saveLocation}
-                    title={saveLocation}
-                    className="flex-1 min-w-0 bg-background border border-mid-gray/30 rounded-lg px-3 py-2 text-sm focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleChangeSaveLocation}
-                    className="px-3 py-2 border border-mid-gray/30 rounded-lg text-sm hover:bg-mid-gray/10 cursor-pointer shrink-0"
-                  >
-                    {t("startMeeting.change")}
-                  </button>
-                </div>
-              </div>
-
-              {/* Auto Transcribe */}
-              <div className="flex items-center justify-between gap-4 pt-2 border-t border-mid-gray/10">
-                <div>
-                  <div className="text-sm font-medium">
-                    {t("startMeeting.autoTranscribe.title")}
-                  </div>
-                  <div className="text-xs text-text/60">
-                    {t("startMeeting.autoTranscribe.description")}
-                  </div>
-                </div>
-                <Toggle checked={autoTranscribe} onChange={setAutoTranscribe} />
-              </div>
-
-              {/* Auto Summary */}
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-medium">
-                    {t("startMeeting.autoSummary.title")}
-                  </div>
-                  <div className="text-xs text-text/60">
-                    {t("startMeeting.autoSummary.description")}
-                  </div>
-                </div>
-                <Toggle checked={autoSummary} onChange={setAutoSummary} />
-              </div>
-            </div>
 
             {/* Action buttons */}
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+            <div className="mt-6 flex flex-col gap-2">
               <button
                 type="button"
                 disabled={startDisabled}
                 onClick={handleStart}
-                className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white transition-colors ${
+                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white transition-colors ${
                   startDisabled
                     ? "bg-logo-primary/50 cursor-not-allowed"
                     : "bg-logo-primary hover:bg-logo-primary/90"
@@ -779,28 +333,25 @@ export const StartMeeting: React.FC = () => {
               >
                 <Play width={18} height={18} fill="currentColor" />
                 <span>{t("startMeeting.startRecording")}</span>
-                <span className="ml-2 flex items-center gap-1 text-xs bg-white/20 px-2 py-0.5 rounded">
-                  <kbd>{"\u2318"}</kbd>
-                  <kbd>R</kbd>
-                </span>
               </button>
               <button
                 type="button"
-                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold border border-mid-gray/30 hover:bg-mid-gray/10"
+                disabled={isImporting || isLoading}
+                onClick={handleImportAudio}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold border border-mid-gray/30 text-text/80 hover:bg-mid-gray/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                <Calendar width={18} height={18} />
-                <span>{t("startMeeting.scheduleMeeting")}</span>
+                <Upload width={18} height={18} />
+                <span>
+                  {isImporting
+                    ? t("common.loading", "Loading...")
+                    : t("startMeeting.importAudio", "Import Audio File")}
+                </span>
               </button>
             </div>
-            {error && (
-              <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300">
+            {(error || importError) && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
                 <AlertCircle width={16} height={16} className="mt-0.5 shrink-0" />
-                <span className="break-words">{error}</span>
-              </div>
-            )}
-            {isLoading && funasrSetupStatus && (
-              <div className="mt-3 rounded-lg border border-logo-primary/25 bg-logo-primary/10 px-3 py-2 text-sm text-logo-primary">
-                {funasrSetupStatus}
+                <span className="break-words">{importError ?? error}</span>
               </div>
             )}
           </Card>
@@ -811,7 +362,7 @@ export const StartMeeting: React.FC = () => {
           {/* 3. Meeting Info */}
           <Card>
             <SectionHeader
-              index={3}
+              index={2}
               title={t("startMeeting.section.info")}
               suffix={t("startMeeting.optional")}
             />
@@ -850,20 +401,13 @@ export const StartMeeting: React.FC = () => {
                 <label className="block text-sm font-medium mb-1">
                   {t("startMeeting.tags")}
                 </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    placeholder={t("startMeeting.tagsPlaceholder")}
-                    className="w-full bg-background border border-mid-gray/30 rounded-lg px-3 py-2 pr-8 text-sm focus:outline-none focus:border-logo-primary"
-                  />
-                  <ChevronDown
-                    width={16}
-                    height={16}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-text/60"
-                  />
-                </div>
+                <input
+                  type="text"
+                  value={tags}
+                  onChange={(e) => setTags(e.target.value)}
+                  placeholder={t("startMeeting.tagsPlaceholder")}
+                  className="w-full bg-background border border-mid-gray/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-logo-primary"
+                />
               </div>
             </div>
           </Card>
@@ -871,7 +415,7 @@ export const StartMeeting: React.FC = () => {
           {/* 4. What will be generated */}
           <Card>
             <SectionHeader
-              index={4}
+              index={3}
               title={t("startMeeting.section.generated")}
             />
             <ul className="mt-4 flex flex-col gap-3">

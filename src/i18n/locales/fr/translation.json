@@ -236,7 +236,8 @@
     "errors": {
       "loadModels": "Échec du chargement des modèles disponibles",
       "downloadModel": "Échec du téléchargement du modèle : {{error}}"
-    }
+    },
+    "skipDownload": "Ignorer — télécharger plus tard"
   },
   "modelSelector": {
     "welcome": "Bienvenue sur Handy !",
@@ -386,6 +387,10 @@
         "placeholder": "Ajouter un mot",
         "add": "Ajouter",
         "remove": "Supprimer {{word}}"
+      },
+      "diarization": {
+        "label": "Diarisation des locuteurs",
+        "description": "Identifie qui a parlé quand dans les enregistrements de réunions. Nécessite les modèles de diarisation téléchargés."
       }
     },
     "postProcessing": {
@@ -650,5 +655,13 @@
   },
   "overlay": {
     "transcribing": "Transcription..."
+  },
+  "app": {
+    "meetingGuard": {
+      "dictationWillStop": "Dictation will be stopped when you start a meeting.",
+      "stopTitle": "Stop meeting recording?",
+      "stopDescription": "Switching sections will stop the current recording.",
+      "stopAndSwitch": "Stop & Switch"
+    }
   }
 }

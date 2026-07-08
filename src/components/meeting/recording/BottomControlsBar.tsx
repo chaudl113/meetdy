@@ -2,12 +2,11 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import {
+  type LucideIcon,
   Mic,
   Monitor,
-  Volume2,
-  Settings,
   Square,
-  type LucideIcon,
+  Volume2,
 } from "lucide-react";
 import { useMeetingStore } from "../../../stores/meetingStore";
 import { useRecordingConfigStore } from "../../../stores/recordingConfigStore";
@@ -72,13 +71,6 @@ export const BottomControlsBar: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="flex items-center justify-center w-9 h-9 rounded-lg border border-mid-gray/20 text-text/70 hover:bg-mid-gray/10"
-          aria-label={t("recording.bottom.settings")}
-        >
-          <Settings width={18} height={18} />
-        </button>
         <button
           type="button"
           onClick={handleEnd}

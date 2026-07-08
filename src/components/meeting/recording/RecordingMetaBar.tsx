@@ -1,16 +1,15 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { Clock, Languages, Gauge, Cloud, Cpu, Server } from "lucide-react";
+import { Clock, Cloud, Cpu, Languages, Server } from "lucide-react";
 import { formatDuration, useMeetingStore } from "../../../stores/meetingStore";
-import { useRecordingConfigStore } from "../../../stores/recordingConfigStore";
 import { useSettings } from "../../../hooks/useSettings";
 import { LANGUAGES } from "../../../lib/constants/languages";
 import { MeetingTitleEditor } from "../MeetingTitleEditor";
 
 /**
  * RecordingMetaBar — secondary header row with editable title and meta info
- * (duration, language, quality).
+ * (duration, language, STT engine).
  */
 export const RecordingMetaBar: React.FC = () => {
   const { t } = useTranslation();
@@ -20,7 +19,6 @@ export const RecordingMetaBar: React.FC = () => {
       currentSession: s.currentSession,
     })),
   );
-  const { recordingQuality, sttEngine } = useRecordingConfigStore();
   const { getSetting } = useSettings();
 
   const languageValue = getSetting("selected_language") || "auto";
@@ -29,7 +27,7 @@ export const RecordingMetaBar: React.FC = () => {
       ? t("recording.meta.autoLanguage")
       : LANGUAGES.find((l) => l.value === languageValue)?.label ?? languageValue;
 
-  const qualityLabel = t(`recording.quality.${recordingQuality}`);
+  const sttEngine = getSetting("meeting_stt_engine") ?? "whisper";
 
   return (
     <div className="flex items-center justify-between gap-4 px-5 py-3 bg-background border border-mid-gray/20 rounded-xl">
@@ -53,10 +51,6 @@ export const RecordingMetaBar: React.FC = () => {
           <Languages width={14} height={14} />
           <span>{languageLabel}</span>
         </div>
-        <div className="flex items-center gap-1.5 text-sm text-text/70">
-          <Gauge width={14} height={14} />
-          <span>{qualityLabel}</span>
-        </div>
         <div
           className={`flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
             sttEngine === "soniox"
@@ -67,10 +61,10 @@ export const RecordingMetaBar: React.FC = () => {
           }`}
           title={
             sttEngine === "soniox"
-              ? "Soniox cloud STT"
+              ? t("recording.sttEngine.sonioxTitle", "Soniox cloud STT")
               : sttEngine === "funasr"
-                ? "FunASR local batch STT after recording stops"
-                : "Whisper local STT"
+                ? t("recording.sttEngine.funasrTitle", "FunASR local batch STT")
+                : t("recording.sttEngine.localTitle", "Local STT")
           }
         >
           {sttEngine === "soniox" ? (
@@ -92,5 +86,3 @@ export const RecordingMetaBar: React.FC = () => {
     </div>
   );
 };
-
-export default RecordingMetaBar;

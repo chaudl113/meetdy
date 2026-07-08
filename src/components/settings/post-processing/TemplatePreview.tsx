@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PromptTemplate } from "@/constants/promptTemplates";
 import { Input } from "@/components/ui/Input";

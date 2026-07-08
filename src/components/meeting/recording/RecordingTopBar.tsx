@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { Pause, Play, Square, PenLine, AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, Pause, PenLine, Play, Square, X } from "lucide-react";
 import { formatDuration, useMeetingStore } from "../../../stores/meetingStore";
 
 interface RecordingTopBarProps {

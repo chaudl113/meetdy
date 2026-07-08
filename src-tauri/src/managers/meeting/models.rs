@@ -192,32 +192,6 @@ impl MeetingSession {
         }
     }
 
-    /// Creates a new meeting session with audio source and template.
-    pub fn new_with_template(
-        id: String,
-        title: String,
-        created_at: i64,
-        audio_source: AudioSourceType,
-        template_id: Option<String>,
-    ) -> Self {
-        Self {
-            id,
-            title,
-            created_at,
-            duration: None,
-            status: MeetingStatus::Idle,
-            audio_path: None,
-            transcript_path: None,
-            error_message: None,
-            audio_source,
-            summary_path: None,
-            template_id,
-            stt_engine: default_stt_engine(),
-            funasr_base_url: None,
-            funasr_model: None,
-            transcription_language: None,
-        }
-    }
 }
 
 /// Status of an action item.

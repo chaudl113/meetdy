@@ -145,6 +145,9 @@ interface MeetingStore {
     sonioxApiKey?: string,
     funasrBaseUrl?: string,
     funasrModel?: string,
+    title?: string,
+    participants?: string,
+    tags?: string,
   ) => Promise<void>;
   stopMeeting: () => Promise<void>;
   pauseMeeting: () => Promise<void>;
@@ -254,7 +257,7 @@ export const useMeetingStore = create<MeetingStore>()(
     },
 
     // Start a new meeting session
-    startMeeting: async (audioSource?: AudioSourceType, templateId?: string, sttEngine?: string, sonioxApiKey?: string, funasrBaseUrl?: string, funasrModel?: string) => {
+    startMeeting: async (audioSource?: AudioSourceType, templateId?: string, sttEngine?: string, sonioxApiKey?: string, funasrBaseUrl?: string, funasrModel?: string, title?: string, participants?: string, tags?: string) => {
       const {
         setLoading,
         setError,
@@ -267,6 +270,7 @@ export const useMeetingStore = create<MeetingStore>()(
       setError(null);
 
       try {
+        const cfg = useRecordingConfigStore.getState();
         const result = await commands.startMeetingSession(
           audioSource ?? null,
           templateId ?? null,
@@ -274,6 +278,9 @@ export const useMeetingStore = create<MeetingStore>()(
           sonioxApiKey ?? null,
           funasrBaseUrl ?? null,
           funasrModel ?? null,
+          title ?? (cfg.meetingTitle || null),
+          participants ?? (cfg.participants || null),
+          tags ?? (cfg.tags || null),
         );
         if (result.status === "ok") {
           const session = result.data as MeetingSession;
@@ -387,7 +394,7 @@ export const useMeetingStore = create<MeetingStore>()(
       setError(null);
 
       try {
-        const result = await commands.retryTranscription(currentSession.id);
+        const result = await commands.retryTranscription(currentSession.id, null, null);
         if (result.status === "ok") {
           setSessionStatus("processing");
         } else {
@@ -576,18 +583,7 @@ export const useMeetingStore = create<MeetingStore>()(
         if (settingsResult.status === "ok") {
           const s = settingsResult.data;
           const store = useRecordingConfigStore.getState();
-          if (s.meeting_stt_engine) {
-            store.setSttEngine(s.meeting_stt_engine as import("./recordingConfigStore").SttEngine);
-          }
-          if (s.soniox_api_key) {
-            store.setSonioxApiKey(s.soniox_api_key);
-          }
-          if (s.funasr_base_url) {
-            store.setFunasrBaseUrl(s.funasr_base_url);
-          }
-          if (s.funasr_model) {
-            store.setFunasrModel(s.funasr_model);
-          }
+          // STT engine settings now live in global settings only
         }
       } catch {
         // non-fatal: fall back to store defaults
@@ -729,7 +725,7 @@ export const useMeetingStore = create<MeetingStore>()(
             // Auto Transcribe = true and no transcript yet → force regenerate
             if (autoTranscribePref && !session.transcript_path) {
               commands
-                .retryTranscription(session.id)
+                .retryTranscription(session.id, null, null)
                 .catch((err) =>
                   console.warn("Auto transcribe failed:", err),
                 );
@@ -965,16 +961,8 @@ export const useMeetingStore = create<MeetingStore>()(
           if (state.sessionStatus === "recording") {
             state.stopMeeting();
           } else if (state.sessionStatus === "idle") {
-            const { audioSource, sttEngine, sonioxApiKey, funasrBaseUrl, funasrModel } =
-              useRecordingConfigStore.getState();
-            state.startMeeting(
-              audioSource,
-              undefined,
-              sttEngine,
-              sonioxApiKey,
-              funasrBaseUrl,
-              funasrModel,
-            );
+            const { audioSource } = useRecordingConfigStore.getState();
+            state.startMeeting(audioSource);
           }
         });
         if (!isValid()) {

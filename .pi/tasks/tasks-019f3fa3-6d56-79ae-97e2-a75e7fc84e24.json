@@ -1,0 +1,62 @@
+{
+  "nextId": 5,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Wire title/participants/tags to backend CRUD",
+      "description": "Extend start_meeting_session command to accept title, participants, tags. Wire frontend meetingStore and recordingConfigStore.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [
+        "2",
+        "4"
+      ],
+      "blockedBy": [],
+      "createdAt": 1783479107038,
+      "updatedAt": 1783479329716
+    },
+    {
+      "id": "2",
+      "subject": "Simplify StartMeeting.tsx",
+      "description": "Remove recording quality, STT engine, soniox, funasr, save location, schedule button, language selector, autoTranscribe/autoSummary toggles, ⌘R badge. Keep audio source, templates, meeting info, start button.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [
+        "4"
+      ],
+      "blockedBy": [
+        "1"
+      ],
+      "createdAt": 1783479112488,
+      "updatedAt": 1783479387050
+    },
+    {
+      "id": "3",
+      "subject": "Remove dead components and update index.ts",
+      "description": "Delete MeetingControls.tsx, MeetingStatusIndicator.tsx, MeetingDeleteDialog.tsx, SummarySection.tsx, TranslationSection.tsx. Update src/components/meeting/index.ts.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [
+        "4"
+      ],
+      "blockedBy": [],
+      "createdAt": 1783479114749,
+      "updatedAt": 1783479530701
+    },
+    {
+      "id": "4",
+      "subject": "Rebuild Tauri bindings",
+      "description": "Run `cd /Volumes/Dev/Tool/meetdy && bun run tauri build 2>&1 || true` after backend changes.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [
+        "1",
+        "2",
+        "3"
+      ],
+      "createdAt": 1783479119485,
+      "updatedAt": 1783479996142
+    }
+  ]
+}

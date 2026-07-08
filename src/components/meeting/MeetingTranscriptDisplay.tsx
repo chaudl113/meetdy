@@ -1,27 +1,59 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { type SpeakerColor } from "../../hooks/useSpeakerColors";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { Copy, Check, FileText } from "lucide-react";
+import { Check, Copy, FileText } from "lucide-react";
 import { useMeetingStore } from "../../stores/meetingStore";
-import { commands, type Participant } from "@/bindings";
+import { commands, type Participant, type TranscriptSegment } from "@/bindings";
 import { SpeakerSegment } from "./recording/SpeakerSegment";
 import {
-  useSpeakerColors,
   UNKNOWN_SPEAKER_COLOR,
+  useSpeakerColors,
 } from "../../hooks/useSpeakerColors";
 import { TTSButton } from "./TTSButton";
 
-// Inline type until bindings are regenerated
-interface TranscriptSegmentLocal {
-  id: string;
-  meeting_id: string;
-  start_ms: number;
-  end_ms: number;
-  text: string;
-  speaker_id: string | null;
-  sequence: number;
-  created_at: number;
+
+interface VirtualizedSegmentListProps {
+  segments: TranscriptSegment[];
+  speakerColors: Record<string, SpeakerColor>;
+  participantMap: Record<string, string>;
 }
+
+const VirtualizedSegmentList: React.FC<VirtualizedSegmentListProps> = ({
+  segments,
+  speakerColors,
+  participantMap,
+}) => {
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  return (
+    <Virtuoso
+      ref={virtuosoRef}
+      data={segments}
+      style={{ height: "400px" }}
+      initialTopMostItemIndex={segments.length > 0 ? segments.length - 1 : 0}
+      itemContent={(index, seg) => {
+        const prevSpeakerId =
+          index > 0 ? segments[index - 1].speaker_id : undefined;
+        const showLabel = seg.speaker_id !== prevSpeakerId;
+        const color = seg.speaker_id
+          ? (speakerColors[seg.speaker_id] ?? UNKNOWN_SPEAKER_COLOR)
+          : UNKNOWN_SPEAKER_COLOR;
+        return (
+          <SpeakerSegment
+            key={seg.id}
+            text={seg.text}
+            startMs={seg.start_ms}
+            speakerName={seg.speaker_id ? (participantMap[seg.speaker_id] ?? null) : null}
+            color={color}
+            showSpeakerLabel={showLabel}
+          />
+        );
+      }}
+    />
+  );
+};
 
 export const MeetingTranscriptDisplay: React.FC = () => {
   const { t } = useTranslation();
@@ -32,7 +64,7 @@ export const MeetingTranscriptDisplay: React.FC = () => {
     })),
   );
   const [transcript, setTranscript] = useState<string | null>(null);
-  const [segments, setSegments] = useState<TranscriptSegmentLocal[]>([]);
+  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -56,12 +88,7 @@ export const MeetingTranscriptDisplay: React.FC = () => {
         const [transcriptResult, segmentsResult, participantsResult] =
           await Promise.allSettled([
             commands.getMeetingTranscript(currentSession.id),
-            (commands as any).getMeetingTranscriptSegments(
-              currentSession.id,
-            ) as Promise<
-              | { status: "ok"; data: TranscriptSegmentLocal[] }
-              | { status: "error"; error: string }
-            >,
+            commands.getMeetingTranscriptSegments(currentSession.id),
             commands.listMeetingParticipants(currentSession.id),
           ]);
 
@@ -156,28 +183,11 @@ export const MeetingTranscriptDisplay: React.FC = () => {
             {t("common.loading", "Loading...")}
           </div>
         ) : segments.length > 0 ? (
-          <div className="flex flex-col">
-            {segments.map((seg, index) => {
-              const prevSpeakerId =
-                index > 0 ? segments[index - 1].speaker_id : undefined;
-              const showLabel = seg.speaker_id !== prevSpeakerId;
-              const color = seg.speaker_id
-                ? (speakerColors[seg.speaker_id] ?? UNKNOWN_SPEAKER_COLOR)
-                : UNKNOWN_SPEAKER_COLOR;
-              return (
-                <SpeakerSegment
-                  key={seg.id}
-                  text={seg.text}
-                  startMs={seg.start_ms}
-                  speakerName={
-                    seg.speaker_id ? participantMap[seg.speaker_id] : null
-                  }
-                  color={color}
-                  showSpeakerLabel={showLabel}
-                />
-              );
-            })}
-          </div>
+          <VirtualizedSegmentList
+            segments={segments}
+            speakerColors={speakerColors}
+            participantMap={participantMap}
+          />
         ) : transcript ? (
           <p className="text-[15px] text-text whitespace-pre-wrap leading-7">
             {transcript}

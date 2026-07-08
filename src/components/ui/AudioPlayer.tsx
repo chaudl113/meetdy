@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Play, Pause } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 
 export interface AudioPlayerHandle {
   seekTo: (time: number, play?: boolean) => void;

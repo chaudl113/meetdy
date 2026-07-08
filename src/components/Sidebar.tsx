@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useTranslation } from "react-i18next";
 import {
+  Boxes,
   Cog,
   FlaskConical,
   History,
@@ -8,19 +10,18 @@ import {
   Settings,
   Sparkles,
   Video,
-  Boxes,
 } from "lucide-react";
 import MeetdyIcon from "./icons/MeetdyIcon";
 import { useSettings } from "../hooks/useSettings";
 import { useMeetingStore } from "../stores/meetingStore";
 import {
-  GeneralSettings,
-  AdvancedSettings,
-  HistorySettings,
-  DebugSettings,
   AboutSettings,
-  PostProcessingSettings,
+  AdvancedSettings,
+  DebugSettings,
+  GeneralSettings,
+  HistorySettings,
   ModelsSettings,
+  PostProcessingSettings,
 } from "./settings";
 import { MeetingMode } from "./meeting";
 
@@ -107,6 +108,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { t } = useTranslation();
   const { settings } = useSettings();
   const sessions = useMeetingStore((s) => s.sessions);
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   const availableSections = Object.entries(SECTIONS_CONFIG)
     .filter(([_, config]) => config.enabled(settings))
@@ -126,7 +132,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {"Meetdy"}
           </span>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-xs text-text/60">v0.7.0</span>
+            <span className="text-xs text-text/60">{appVersion ? `v${appVersion}` : ""}</span>
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-logo-primary/15 text-logo-primary">
               {"Pro"}
             </span>

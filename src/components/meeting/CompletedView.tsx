@@ -1,12 +1,15 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  CheckCircle2,
   AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  Download,
   Loader2,
   Play,
   Plus,
   RotateCcw,
+  Square,
   X,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
@@ -14,13 +17,19 @@ import { useMeetingStore } from "../../stores/meetingStore";
 import { RecordingMetaBar } from "./recording/RecordingMetaBar";
 import { RecordingInfoCard } from "./recording/RecordingInfoCard";
 import {
-  RecordingTabs,
   type RecordingTab,
+  RecordingTabs,
 } from "./recording/RecordingTabs";
 import { AISummaryPanel } from "./recording/AISummaryPanel";
 import { NotesPanel } from "./recording/NotesPanel";
 import { AddNoteModal } from "./recording/AddNoteModal";
 import { MeetingTranscriptDisplay } from "./MeetingTranscriptDisplay";
+import { MeetingInsightsPanel } from "./MeetingInsightsPanel";
+import { commands, type ModelInfo } from "@/bindings";
+import { LANGUAGES } from "../../lib/constants/languages";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
+
 
 /**
  * CompletedView — post-recording layout shown for processing / completed /
@@ -36,6 +45,18 @@ export const CompletedView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<RecordingTab>("transcript");
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [noteTimestamp, setNoteTimestamp] = useState(0);
+
+  // Regenerate popover state
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenModel, setRegenModel] = useState<string>("");
+  const [regenLanguage, setRegenLanguage] = useState<string>("");
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const regenRef = useRef<HTMLDivElement>(null);
+
+  // Export dropdown state
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   const {
     sessionStatus,
@@ -65,6 +86,35 @@ export const CompletedView: React.FC = () => {
     })),
   );
 
+  // Load available models when regenerate popover is opened
+  useEffect(() => {
+    if (regenOpen && availableModels.length === 0) {
+      commands.getAvailableModels().then((r) => {
+        if (r.status === "ok") {
+          setAvailableModels(
+            r.data.filter(
+              (m) => m.is_downloaded && m.engine_type !== "Diarization",
+            ),
+          );
+        }
+      });
+    }
+  }, [regenOpen, availableModels.length]);
+
+  // Close popovers when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (regenRef.current && !regenRef.current.contains(e.target as Node)) {
+        setRegenOpen(false);
+      }
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const openAddNote = () => {
     setNoteTimestamp(recordingDuration);
     setNoteModalOpen(true);
@@ -88,6 +138,78 @@ export const CompletedView: React.FC = () => {
     clearError();
     setCurrentSession(null);
     setSessionStatus("idle");
+  };
+
+  const handleRegenerate = async () => {
+    if (!currentSession) return;
+    setRegenLoading(true);
+    try {
+      const result = await commands.retryTranscription(
+        currentSession.id,
+        regenModel || null,
+        regenLanguage || null,
+      );
+      if (result.status === "ok") {
+        setSessionStatus("processing");
+        setRegenOpen(false);
+      } else {
+        console.error("Regenerate failed:", result.error);
+      }
+    } catch (err) {
+      console.error("Regenerate error:", err);
+    } finally {
+      setRegenLoading(false);
+    }
+  };
+
+  const buildMarkdown = (transcript: string, summary: string | null) => {
+    const session = currentSession;
+    if (!session) return transcript;
+    const date = new Date(session.created_at * 1000).toLocaleString();
+    const parts: string[] = [];
+    parts.push(`# ${session.title}`);
+    parts.push(`**Date:** ${date}`);
+    parts.push("");
+    if (summary) {
+      parts.push("## Summary");
+      parts.push(summary);
+      parts.push("");
+    }
+    parts.push("## Transcript");
+    parts.push(transcript);
+    return parts.join("\n");
+  };
+
+  const handleExport = async (format: "md" | "txt") => {
+    if (!currentSession) return;
+    setExportOpen(false);
+
+    // Fetch transcript
+    const transcriptResult = await commands.getMeetingTranscript(currentSession.id);
+    const transcript = transcriptResult.status === "ok" ? (transcriptResult.data ?? "") : "";
+
+    let content = "";
+    if (format === "md") {
+      const summaryResult = await commands.getMeetingSummary(currentSession.id);
+      const summary = summaryResult.status === "ok" ? (summaryResult.data ?? null) : null;
+      content = buildMarkdown(transcript, summary);
+    } else {
+      content = transcript;
+    }
+
+    const ext = format === "md" ? "md" : "txt";
+    const filePath = await save({
+      defaultPath: `${currentSession.title}.${ext}`,
+      filters: [
+        {
+          name: format === "md" ? "Markdown" : "Text",
+          extensions: [ext],
+        },
+      ],
+    });
+    if (filePath) {
+      await writeTextFile(filePath, content);
+    }
   };
 
   const errorMessage = error || currentSession?.error_message || null;
@@ -146,24 +268,146 @@ export const CompletedView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {["failed", "completed", "interrupted"].includes(sessionStatus) && currentSession && (
-            <button
-              type="button"
-              onClick={handleRetry}
-              disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RotateCcw
-                width={14}
-                height={14}
-                className={isLoading ? "animate-spin" : ""}
-              />
-              <span className="text-sm font-semibold">
-                {sessionStatus === "failed"
-                  ? t("meeting.error.retry", "Retry")
-                  : t("meeting.actions.regenerateTranscript", "Regenerate Transcript")}
+          {sessionStatus === "processing" && (
+            <>
+              <span className="text-sm text-text/50 flex items-center gap-1.5">
+                <Square width={14} height={14} className="animate-pulse" />
+                {t("meeting.status.processingIndicator", "Processing...")}
               </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  commands.cancelOperation().catch(() => {});
+                  setSessionStatus("interrupted");
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-mid-gray/20 text-text/60 hover:bg-mid-gray/10 text-sm font-semibold"
+              >
+                {t("common.cancel", "Cancel")}
+              </button>
+            </>
+          )}
+          {["failed", "completed", "interrupted"].includes(sessionStatus) && currentSession && (
+            <>
+              {/* Retry (basic, red) for failed */}
+              {sessionStatus === "failed" && (
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  disabled={isLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RotateCcw
+                    width={14}
+                    height={14}
+                    className={isLoading ? "animate-spin" : ""}
+                  />
+                  <span className="text-sm font-semibold">
+                    {t("meeting.error.retry", "Retry")}
+                  </span>
+                </button>
+              )}
+              {/* Regenerate popover */}
+              <div className="relative" ref={regenRef}>
+                <button
+                  type="button"
+                  onClick={() => setRegenOpen((o) => !o)}
+                  disabled={regenLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-mid-gray/20 text-text/80 hover:bg-mid-gray/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {regenLoading ? (
+                    <Loader2 width={14} height={14} className="animate-spin" />
+                  ) : (
+                    <RotateCcw width={14} height={14} />
+                  )}
+                  <span className="text-sm font-semibold">
+                    {t("meeting.regenerate", "Regenerate")}
+                  </span>
+                  <ChevronDown width={12} height={12} />
+                </button>
+                {regenOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-background border border-mid-gray/20 rounded-xl shadow-xl p-4 flex flex-col gap-3">
+                    <p className="text-xs text-text/60">
+                      {t("meeting.regenerateDesc", "Override model and language for this transcription run.")}
+                    </p>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">
+                        {t("meeting.regenerateModel", "Model")}
+                      </label>
+                      <select
+                        value={regenModel}
+                        onChange={(e) => setRegenModel(e.target.value)}
+                        className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
+                      >
+                        <option value="">{t("common.default", "Default")}</option>
+                        {availableModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">
+                        {t("meeting.regenerateLanguage", "Language")}
+                      </label>
+                      <select
+                        value={regenLanguage}
+                        onChange={(e) => setRegenLanguage(e.target.value)}
+                        className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
+                      >
+                        {LANGUAGES.map((l) => (
+                          <option key={l.value} value={l.value}>
+                            {l.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRegenerate}
+                      disabled={regenLoading}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-logo-primary text-white hover:opacity-90 disabled:opacity-50 text-sm font-semibold"
+                    >
+                      {regenLoading && <Loader2 width={14} height={14} className="animate-spin" />}
+                      {t("meeting.regenerate", "Regenerate")}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Export dropdown */}
+              <div className="relative" ref={exportRef}>
+                <button
+                  type="button"
+                  onClick={() => setExportOpen((o) => !o)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-mid-gray/20 text-text/80 hover:bg-mid-gray/10"
+                >
+                  <Download width={14} height={14} />
+                  <span className="text-sm font-semibold">
+                    {t("meeting.export", "Export")}
+                  </span>
+                  <ChevronDown width={12} height={12} />
+                </button>
+                {exportOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-background border border-mid-gray/20 rounded-xl shadow-xl overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => handleExport("md")}
+                      className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
+                    >
+                      {t("meeting.exportMarkdown", "Export as Markdown")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExport("txt")}
+                      className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
+                    >
+                      {t("meeting.exportText", "Export as Text")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
           )}
           <button
             type="button"
@@ -218,10 +462,15 @@ export const CompletedView: React.FC = () => {
           <div className="flex-1 overflow-y-auto">{renderPanel()}</div>
         </div>
 
-        {/* Right column — info card only (no live audio stats / quick notes
-            when not recording). */}
+        {/* Right column — info card + insights when completed */}
         <div className="flex flex-col gap-4">
           <RecordingInfoCard />
+          {sessionStatus === "completed" && currentSession?.id && (
+            <MeetingInsightsPanel
+              sessionId={currentSession.id}
+              hasTranscript={!!currentSession.transcript_path}
+            />
+          )}
         </div>
       </div>
 

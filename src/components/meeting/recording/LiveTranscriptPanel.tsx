@@ -1,13 +1,14 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { FileText } from "lucide-react";
 import { useMeetingStore } from "../../../stores/meetingStore";
-import { useRecordingConfigStore } from "../../../stores/recordingConfigStore";
+import { useSettings } from "../../../hooks/useSettings";
 import type { Participant } from "@/bindings";
 import { SpeakerSelector } from "./SpeakerSelector";
 import { SpeakerSegment } from "./SpeakerSegment";
-import { useSpeakerColors, UNKNOWN_SPEAKER_COLOR } from "../../../hooks/useSpeakerColors";
+import { UNKNOWN_SPEAKER_COLOR, useSpeakerColors, type SpeakerColor } from "../../../hooks/useSpeakerColors";
 
 const formatOffset = (seconds: number): string => {
   const safe = Math.max(0, Math.floor(seconds));
@@ -18,6 +19,64 @@ const formatOffset = (seconds: number): string => {
 
 // Suppress unused warning — kept for potential future use
 void formatOffset;
+
+interface LiveSegment {
+  text: string;
+  offset: number;
+  speakerId: string | null;
+}
+
+interface LiveVirtuosoListProps {
+  segments: LiveSegment[];
+  speakerColors: Record<string, SpeakerColor>;
+  participantMap: Record<string, string>;
+}
+
+const LiveVirtuosoList: React.FC<LiveVirtuosoListProps> = ({
+  segments,
+  speakerColors,
+  participantMap,
+}) => {
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // Follow output — scroll to bottom when new segments arrive
+  useEffect(() => {
+    if (segments.length > 0) {
+      virtuosoRef.current?.scrollToIndex({
+        index: segments.length - 1,
+        behavior: "smooth",
+      });
+    }
+  }, [segments.length]);
+
+  return (
+    <Virtuoso
+      ref={virtuosoRef}
+      data={segments}
+      style={{ height: "300px" }}
+      followOutput="smooth"
+      itemContent={(index, segment) => {
+        const speakerId = segment.speakerId ?? null;
+        const prevSpeakerId =
+          index > 0 ? (segments[index - 1].speakerId ?? null) : undefined;
+        const showLabel = speakerId !== prevSpeakerId;
+        const color = speakerId
+          ? (speakerColors[speakerId] ?? UNKNOWN_SPEAKER_COLOR)
+          : UNKNOWN_SPEAKER_COLOR;
+        return (
+          <SpeakerSegment
+            key={`${index}-${segment.text.slice(0, 24)}`}
+            text={segment.text}
+            startMs={segment.offset * 1000}
+            speakerName={speakerId ? (participantMap[speakerId] ?? null) : null}
+            color={color}
+            showSpeakerLabel={showLabel}
+          />
+        );
+      }}
+    />
+  );
+};
 
 interface LiveTranscriptPanelProps {
   sessionId: string;
@@ -43,11 +102,26 @@ export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
         liveTranscriptSegments: s.liveTranscriptSegments,
       })),
     );
-  const sttEngine = useRecordingConfigStore((s) => s.sttEngine);
-  const isFunasr = sttEngine === "funasr";
+  const { getSetting } = useSettings();
+  const isFunasr = (getSetting("meeting_stt_engine") ?? "whisper") === "funasr";
+  const diarizationEnabled = getSetting("diarization_enabled") ?? false;
 
   const speakerColors = useSpeakerColors(participants);
   const participantMap = Object.fromEntries(participants.map((p) => [p.id, p.name]));
+
+  // Speaker hint: show a brief toast-like hint when active speaker changes
+  const [speakerHint, setSpeakerHint] = useState<string | null>(null);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!diarizationEnabled || !activeSpeakerId) return;
+    const name = participantMap[activeSpeakerId];
+    if (!name) return;
+
+    setSpeakerHint(name);
+    if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = setTimeout(() => setSpeakerHint(null), 3000);
+  }, [activeSpeakerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const speakerBar = (
     <SpeakerSelector
@@ -68,27 +142,18 @@ export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
       <div className="flex flex-col gap-3">
         {speakerBar}
 
-        <div className="flex flex-col">
-          {segments.map((segment, index) => {
-            const speakerId = segment.speakerId ?? null;
-            const prevSpeakerId =
-              index > 0 ? (segments[index - 1].speakerId ?? null) : undefined;
-            const showLabel = speakerId !== prevSpeakerId;
-            const color = speakerId
-              ? (speakerColors[speakerId] ?? UNKNOWN_SPEAKER_COLOR)
-              : UNKNOWN_SPEAKER_COLOR;
-            return (
-              <SpeakerSegment
-                key={`${index}-${segment.text.slice(0, 24)}`}
-                text={segment.text}
-                startMs={segment.offset * 1000}
-                speakerName={speakerId ? (participantMap[speakerId] ?? null) : null}
-                color={color}
-                showSpeakerLabel={showLabel}
-              />
-            );
-          })}
-        </div>
+        {speakerHint && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-logo-primary/10 text-logo-primary text-sm animate-pulse">
+            <span>🎤</span>
+            <span>{t("recording.speaker.label")}: <strong>{speakerHint}</strong></span>
+          </div>
+        )}
+
+        <LiveVirtuosoList
+          segments={segments}
+          speakerColors={speakerColors}
+          participantMap={participantMap}
+        />
 
         {sessionStatus === "recording" && (
           <div className="flex items-center gap-2 text-sm text-text/50">

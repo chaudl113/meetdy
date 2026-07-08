@@ -305,7 +305,13 @@ impl TranscriptionManager {
 
         // Create appropriate engine based on model type
         let loaded_engine = match model_info.engine_type {
-            EngineType::Whisper => {
+            EngineType::Diarization => {
+                return Err(anyhow::anyhow!(
+                    "Model '{}' is a diarization model and cannot be used for transcription",
+                    model_id
+                ));
+            }
+            EngineType::TranscribeCpp => {
                 let mut engine = WhisperEngine::new();
                 engine.load_model(&model_path).map_err(|e| {
                     let error_msg = format!("Failed to load whisper model {}: {}", model_id, e);
@@ -388,8 +394,22 @@ impl TranscriptionManager {
         let self_clone = self.clone();
         thread::spawn(move || {
             let settings = get_settings(&self_clone.app_handle);
-            if let Err(e) = self_clone.load_model(&settings.selected_model) {
-                error!("Failed to load model: {}", e);
+            // If selected_model is empty, fall back to first downloaded non-diarization model
+            let model_id = if settings.selected_model.is_empty() {
+                self_clone.model_manager
+                    .get_available_models()
+                    .into_iter()
+                    .find(|m| m.is_downloaded
+                        && !matches!(m.engine_type, crate::managers::model::EngineType::Diarization))
+                    .map(|m| m.id)
+                    .unwrap_or_default()
+            } else {
+                settings.selected_model.clone()
+            };
+            if model_id.is_empty() {
+                error!("No model selected and no downloaded models found");
+            } else if let Err(e) = self_clone.load_model(&model_id) {
+                error!("Failed to load model '{}': {}", model_id, e);
             }
             let mut is_loading = self_clone
                 .is_loading
@@ -427,6 +447,160 @@ impl TranscriptionManager {
         let result = self.transcribe_locked(audio);
         self.is_busy.store(false, Ordering::Release);
         result
+    }
+
+    /// Transcribe audio, optionally overriding the model and/or language for this single run.
+    ///
+    /// When `model_id` is provided the current model is unloaded, the requested model is loaded,
+    /// transcription runs, and then the engine is unloaded so the normal selected model reloads
+    /// lazily on the next call.
+    ///
+    /// When `language` is provided it is used instead of the value in settings.
+    pub fn transcribe_with_override(
+        &self,
+        audio: Vec<f32>,
+        model_id: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<String> {
+        while self
+            .is_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        let result = if let Some(mid) = model_id {
+            // Unload whatever is currently loaded and load the override model.
+            let _ = self.unload_model();
+            match self.load_model(mid) {
+                Ok(()) => {
+                    let r = self.transcribe_locked_with_language(audio, language);
+                    // Unload the override so the regular model reloads next time.
+                    let _ = self.unload_model();
+                    r
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            self.transcribe_locked_with_language(audio, language)
+        };
+
+        self.is_busy.store(false, Ordering::Release);
+        result
+    }
+
+    /// Internal transcription with an optional language override.
+    fn transcribe_locked_with_language(
+        &self,
+        audio: Vec<f32>,
+        language_override: Option<&str>,
+    ) -> Result<String> {
+        self.last_activity.store(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
+            Ordering::Relaxed,
+        );
+
+        if audio.is_empty() {
+            return Ok(String::new());
+        }
+
+        // Ensure model is loaded.
+        if self
+            .engine
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_none()
+        {
+            self.initiate_model_load();
+        }
+
+        {
+            let mut is_loading = self.is_loading.lock().unwrap_or_else(|p| p.into_inner());
+            while *is_loading {
+                is_loading = self.loading_condvar.wait(is_loading).unwrap();
+            }
+            let engine_guard = self.engine.lock().unwrap_or_else(|p| p.into_inner());
+            if engine_guard.is_none() {
+                let s = get_settings(&self.app_handle);
+                return Err(anyhow::anyhow!(
+                    "Model is not loaded for transcription. \
+                     selected_model='{}'. \
+                     Please select and download a transcription model in Settings → Models.",
+                    s.selected_model
+                ));
+            }
+        }
+
+        let settings = get_settings(&self.app_handle);
+
+        let result = {
+            let mut engine_guard = self.engine.lock().unwrap_or_else(|p| p.into_inner());
+            let engine = engine_guard.as_mut().ok_or_else(|| {
+                anyhow::anyhow!("Model failed to load. Please check your model settings.")
+            })?;
+
+            match engine {
+                LoadedEngine::Whisper(whisper_engine) => {
+                    let whisper_language = if let Some(lang) = language_override {
+                        if lang == "auto" {
+                            app_language_as_transcription_hint(&settings.app_language)
+                        } else {
+                            Some(normalize_whisper_language(lang))
+                        }
+                    } else if settings.selected_language == "auto" {
+                        app_language_as_transcription_hint(&settings.app_language)
+                    } else {
+                        Some(normalize_whisper_language(&settings.selected_language))
+                    };
+
+                    let is_vietnamese = whisper_language.as_deref() == Some("vi");
+                    let initial_prompt = if is_vietnamese {
+                        Some(
+                            "Đây là cuộc hội thoại tiếng Việt. Chép lại nguyên văn tiếng Việt, không dịch sang tiếng Anh."
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    };
+
+                    let params = WhisperInferenceParams {
+                        language: whisper_language,
+                        translate: settings.translate_to_english && !is_vietnamese,
+                        initial_prompt,
+                        ..Default::default()
+                    };
+
+                    whisper_engine
+                        .transcribe_samples(audio, Some(params))
+                        .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))?
+                }
+                LoadedEngine::Parakeet(parakeet_engine) => {
+                    let params = ParakeetInferenceParams {
+                        timestamp_granularity: TimestampGranularity::Segment,
+                        ..Default::default()
+                    };
+                    parakeet_engine
+                        .transcribe_samples(audio, Some(params))
+                        .map_err(|e| anyhow::anyhow!("Parakeet transcription failed: {}", e))?
+                }
+            }
+        };
+
+        let corrected_result = if !settings.custom_words.is_empty() {
+            apply_custom_words(
+                &result.text,
+                &settings.custom_words,
+                settings.word_correction_threshold,
+            )
+        } else {
+            result.text
+        };
+
+        Ok(strip_noise_transcript(&corrected_result))
     }
 
     /// Transcribe a chunk using the dedicated lightweight live engine.
@@ -604,7 +778,13 @@ impl TranscriptionManager {
 
             let engine_guard = self.engine.lock().unwrap_or_else(|p| p.into_inner());
             if engine_guard.is_none() {
-                return Err(anyhow::anyhow!("Model is not loaded for transcription."));
+                let settings = get_settings(&self.app_handle);
+                return Err(anyhow::anyhow!(
+                    "Model is not loaded for transcription. \
+                     selected_model='{}'. \
+                     Please select and download a transcription model in Settings → Models.",
+                    settings.selected_model
+                ));
             }
         }
 
@@ -616,7 +796,7 @@ impl TranscriptionManager {
             let mut engine_guard = self.engine.lock().unwrap_or_else(|p| p.into_inner());
             let engine = engine_guard.as_mut().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Model failed to load after auto-load attempt. Please check your model settings."
+                    "Model failed to load. Please check your model settings."
                 )
             })?;
 

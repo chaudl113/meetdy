@@ -67,6 +67,8 @@
       "description": "Generate AI summary when transcription is ready."
     },
     "startRecording": "Start Recording",
+    "importAudio": "Import Audio File",
+    "importAudioDesc": "Audio Files",
     "scheduleMeeting": "Schedule Meeting",
     "optional": "(Optional)",
     "meetingTitle": "Meeting Title",
@@ -208,6 +210,11 @@
       "cancel": "Cancel",
       "save": "Save Note",
       "close": "Close"
+    },
+    "sttEngine": {
+      "sonioxTitle": "Soniox cloud STT",
+      "funasrTitle": "FunASR local batch STT",
+      "localTitle": "Local STT"
     }
   },
   "models": {
@@ -258,6 +265,21 @@
     "errors": {
       "loadModels": "Failed to load available models",
       "downloadModel": "Failed to download model: {{error}}"
+    },
+    "skipDownload": "Skip — download later",
+    "skipNote": "You can download models later in Settings",
+    "permissions": {
+      "title": "Permissions",
+      "subtitle": "Meetdy needs the following permissions to work properly",
+      "mic": "Microphone",
+      "micDescription": "Required to capture your voice during meetings",
+      "screenRecording": "Screen Recording",
+      "screenRecordingDescription": "Required to capture system audio (e.g. from Zoom, YouTube)",
+      "granted": "Granted",
+      "notGranted": "Not Granted",
+      "grantAccess": "Grant Access",
+      "continue": "Continue",
+      "skip": "Skip for now"
     }
   },
   "modelSelector": {
@@ -267,6 +289,7 @@
     "downloadModels": "Download Models",
     "chooseModel": "Choose a Model",
     "active": "Active",
+    "recommended": "Recommended",
     "download": "Download",
     "downloadSize": "Download size",
     "noModelsAvailable": "No models available",
@@ -408,6 +431,11 @@
         "placeholder": "Add a word",
         "add": "Add",
         "remove": "Remove {{word}}"
+      },
+      "diarization": {
+        "label": "Speaker Diarization",
+        "description": "Identify who spoke when in meeting recordings. Requires both diarization models to be downloaded.",
+        "noModelWarning": "Install a speaker diarization model first"
       }
     },
     "postProcessing": {
@@ -695,9 +723,13 @@
     "copied": "Copied",
     "dismiss": "Dismiss",
     "prompt": "Prompt",
-    "characters": "characters"
+    "characters": "characters",
+    "unknown": "Unknown"
   },
   "meeting": {
+    "status": {
+      "processingIndicator": "Processing..."
+    },
     "title": "Meeting Mode",
     "template": {
       "selectTemplate": "Select a template",
@@ -730,11 +762,24 @@
       "generating": "Generating summary...",
       "noSummary": "No summary yet. Generate an AI summary of this meeting.",
       "noTranscript": "Transcript required to generate summary.",
-      "generateError": "Failed to generate summary"
+      "generateError": "Failed to generate summary",
+      "editSummary": "Edit summary",
+      "saveSummary": "Save",
+      "cancelEdit": "Cancel",
+      "summaryUpdateSuccess": "Summary saved",
+      "summaryUpdateError": "Failed to save summary"
     },
     "detail": {
       "audio": "Audio Recording"
-    }
+    },
+    "regenerate": "Regenerate",
+    "regenerateDesc": "Override model and language for this transcription run.",
+    "regenerateModel": "Model",
+    "regenerateLanguage": "Language",
+    "export": "Export",
+    "exportMarkdown": "Export as Markdown",
+    "exportText": "Export as Text",
+    "exportSuccess": "Exported successfully"
   },
   "accessibility": {
     "permissionsRequired": "Accessibility Permissions Required",
@@ -752,10 +797,23 @@
   "overlay": {
     "transcribing": "Transcribing..."
   },
+  "tts": {
+    "readTranscript": "Read transcript",
+    "stop": "Stop",
+    "read": "Read"
+  },
   "errorBoundary": {
     "icon": "⚠️",
     "title": "Something went wrong",
     "description": "The application encountered an unexpected error. You can try reloading.",
     "tryAgain": "Try Again"
+  },
+  "app": {
+    "meetingGuard": {
+      "dictationWillStop": "Dictation will be stopped when you start a meeting.",
+      "stopTitle": "Stop meeting recording?",
+      "stopDescription": "Switching sections will stop the current recording.",
+      "stopAndSwitch": "Stop & Switch"
+    }
   }
 }

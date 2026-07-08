@@ -12,7 +12,6 @@ mod llm_client;
 mod managers;
 mod ollama;
 mod overlay;
-mod panic_hook;
 mod settings;
 mod shortcut;
 mod signal_handle;
@@ -26,6 +25,7 @@ use tauri_specta::{collect_commands, Builder};
 
 use env_filter::Builder as EnvFilterBuilder;
 use managers::audio::AudioRecordingManager;
+use managers::diarization::SpeakerDiarizationManager;
 use managers::history::HistoryManager;
 use managers::meeting::MeetingSessionManager;
 use managers::model::ModelManager;
@@ -155,6 +155,10 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), String> {
         MeetingSessionManager::new(app_handle, transcription_manager.clone())
             .map_err(|e| format!("Failed to initialize meeting manager: {}", e))?,
     );
+    let diarization_manager = Arc::new(
+        SpeakerDiarizationManager::new(app_handle)
+            .map_err(|e| format!("Failed to initialize diarization manager: {}", e))?,
+    );
 
     // Add managers to Tauri's managed state
     app_handle.manage(recording_manager.clone());
@@ -162,6 +166,7 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), String> {
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
     app_handle.manage(meeting_manager.clone());
+    app_handle.manage(diarization_manager.clone());
     app_handle.manage(crate::commands::soniox::SonioxState::default());
 
     // Check for interrupted meeting sessions from previous runs
@@ -285,8 +290,6 @@ fn patch_typescript_bindings(path: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    panic_hook::set_panic_hook();
-
     // Parse console logging directives from RUST_LOG, falling back to info-level logging
     // when the variable is unset
     let console_filter = build_console_filter();
@@ -308,6 +311,7 @@ pub fn run() {
         shortcut::change_paste_method_setting,
         shortcut::change_clipboard_handling_setting,
         shortcut::change_post_process_enabled_setting,
+        shortcut::change_diarization_enabled_setting,
         shortcut::change_post_process_base_url_setting,
         shortcut::change_post_process_api_key_setting,
         shortcut::change_post_process_model_setting,
@@ -322,6 +326,8 @@ pub fn run() {
         shortcut::resume_binding,
         shortcut::change_mute_while_recording_setting,
         shortcut::change_append_trailing_space_setting,
+        shortcut::change_soniox_api_key_setting,
+        shortcut::change_funasr_base_url_setting,
         shortcut::change_app_language_setting,
         shortcut::change_update_checks_setting,
         trigger_update_check,
@@ -380,6 +386,7 @@ pub fn run() {
         commands::meeting::get_current_meeting,
         commands::meeting::update_meeting_title,
         commands::meeting::retry_transcription,
+        commands::meeting::import_meeting_audio,
         commands::meeting::get_meeting_transcript,
         commands::meeting::list_meeting_sessions,
         commands::meeting::get_meetings_directory,
@@ -387,6 +394,7 @@ pub fn run() {
         commands::meeting::clear_all_meeting_sessions,
         commands::meeting::generate_meeting_summary,
         commands::meeting::get_meeting_summary,
+        commands::meeting::update_meeting_summary,
         commands::meeting::extract_meeting_insights,
         commands::meeting::add_meeting_note,
         commands::meeting::list_meeting_notes,
@@ -413,6 +421,8 @@ pub fn run() {
         commands::templates::delete_meeting_template,
         commands::translate::translate_text,
         commands::tts::edge_tts_speak,
+        commands::permissions::check_screen_recording_permission,
+        commands::permissions::request_screen_recording_permission_cmd,
         commands::chatgpt_auth::open_chatgpt_login,
         commands::chatgpt_auth::complete_chatgpt_login,
         commands::soniox::soniox_start,
@@ -426,13 +436,15 @@ pub fn run() {
     ]);
 
     #[cfg(debug_assertions)] // <- Only export on non-release builds
-    specta_builder
-        .export(
-            Typescript::default().bigint(BigIntExportBehavior::Number),
-            "../src/bindings.ts",
-        )
-        .expect("Failed to export typescript bindings");
-    patch_typescript_bindings("../src/bindings.ts");
+    {
+        specta_builder
+            .export(
+                Typescript::default().bigint(BigIntExportBehavior::Number),
+                "../src/bindings.ts",
+            )
+            .expect("Failed to export typescript bindings");
+        patch_typescript_bindings("../src/bindings.ts");
+    }
 
     let mut builder = tauri::Builder::default().plugin(
         LogBuilder::new()

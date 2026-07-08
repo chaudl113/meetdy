@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { StickyNote, Plus, Trash2 } from "lucide-react";
+import { Plus, StickyNote, Trash2 } from "lucide-react";
 import { formatDuration, useMeetingStore } from "../../../stores/meetingStore";
 
 interface NotesPanelProps {

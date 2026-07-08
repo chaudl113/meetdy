@@ -133,6 +133,14 @@ async changePostProcessEnabledSetting(enabled: boolean) : Promise<Result<null, s
     else return { status: "error", error: e  as any };
 }
 },
+async changeDiarizationEnabledSetting(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_diarization_enabled_setting", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async changePostProcessBaseUrlSetting(providerId: string, baseUrl: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_post_process_base_url_setting", { providerId, baseUrl }) };
@@ -247,6 +255,22 @@ async changeMuteWhileRecordingSetting(enabled: boolean) : Promise<Result<null, s
 async changeAppendTrailingSpaceSetting(enabled: boolean) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_append_trailing_space_setting", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async changeSonioxApiKeySetting(key: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_soniox_api_key_setting", { key }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async changeFunasrBaseUrlSetting(url: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_funasr_base_url_setting", { url }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -646,9 +670,9 @@ async updateRecordingRetentionPeriod(period: string) : Promise<Result<null, stri
  * * `Ok(MeetingSession)` - The newly created and active session
  * * `Err(String)` - If state guard fails, template not found, or recording initialization fails
  */
-async startMeetingSession(audioSource: AudioSourceType | null, templateId: string | null, sttEngine: string | null, sonioxApiKey: string | null, funasrBaseUrl: string | null, funasrModel: string | null) : Promise<Result<MeetingSession, string>> {
+async startMeetingSession(audioSource: AudioSourceType | null, templateId: string | null, sttEngine: string | null, sonioxApiKey: string | null, funasrBaseUrl: string | null, funasrModel: string | null, title: string | null, participants: string | null, tags: string | null) : Promise<Result<MeetingSession, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_meeting_session", { audioSource, templateId, sttEngine, sonioxApiKey, funasrBaseUrl, funasrModel }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_meeting_session", { audioSource, templateId, sttEngine, sonioxApiKey, funasrBaseUrl, funasrModel, title, participants, tags }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -745,23 +769,35 @@ async updateMeetingTitle(sessionId: string, title: string) : Promise<Result<null
 }
 },
 /**
- * Retries transcription for a failed meeting session.
- * 
- * This command:
- * 1. Validates the session exists and is in Failed status
- * 2. Updates status to Processing
- * 3. Spawns background transcription task
+ * Retries transcription for a failed meeting session, with optional model/language overrides.
  * 
  * # Arguments
  * * `session_id` - The unique ID of the session to retry
+ * * `model_id` - Optional model override for this transcription run
+ * * `language` - Optional language override for this transcription run
  * 
  * # Returns
  * * `Ok(())` - If retry was initiated successfully
- * * `Err(String)` - If session not found, not in Failed status, or retry fails
+ * * `Err(String)` - If session not found, not in a retryable status, or retry fails
  */
-async retryTranscription(sessionId: string) : Promise<Result<null, string>> {
+async retryTranscription(sessionId: string, modelId: string | null, language: string | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("retry_transcription", { sessionId }) };
+    return { status: "ok", data: await TAURI_INVOKE("retry_transcription", { sessionId, modelId, language }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Imports an external audio file as a new meeting session and starts transcription.
+ * 
+ * Supported formats: .wav, .mp3, .m4a, .flac, .ogg
+ * Non-WAV files are copied as-is with a warning; WAV files are copied directly.
+ * The audio must be (or become) 16kHz mono 16-bit PCM for transcription.
+ */
+async importMeetingAudio(filePath: string, title: string | null) : Promise<Result<MeetingSession, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("import_meeting_audio", { filePath, title }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -893,6 +929,20 @@ async generateMeetingSummary(sessionId: string, outputLanguage: string | null) :
 async getMeetingSummary(sessionId: string) : Promise<Result<string | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_meeting_summary", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Saves an edited summary for a meeting session.
+ * 
+ * Writes the new summary text to `summary.md` in the session directory and
+ * updates the `summary_path` column in the database.
+ */
+async updateMeetingSummary(sessionId: string, summary: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_summary", { sessionId, summary }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1144,6 +1194,12 @@ async edgeTtsSpeak(text: string, voice: string, rate: number) : Promise<Result<s
     else return { status: "error", error: e  as any };
 }
 },
+async checkScreenRecordingPermission() : Promise<boolean> {
+    return await TAURI_INVOKE("check_screen_recording_permission");
+},
+async requestScreenRecordingPermissionCmd() : Promise<boolean> {
+    return await TAURI_INVOKE("request_screen_recording_permission_cmd");
+},
 /**
  * Opens (or focuses) the ChatGPT login webview window. The user signs in
  * inside that window; once a session is established the injected script
@@ -1273,7 +1329,11 @@ export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding
 /**
  * "whisper" | "soniox" | "funasr". Defaults to "whisper".
  */
-meeting_stt_engine?: string; funasr_base_url?: string; funasr_model?: string }
+meeting_stt_engine?: string; funasr_base_url?: string; funasr_model?: string; 
+/**
+ * Enable speaker diarization for meeting transcripts (requires diarization models).
+ */
+diarization_enabled?: boolean }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 /**
  * Audio source configuration for meeting recording
@@ -1294,7 +1354,7 @@ export type AudioSourceType =
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
-export type EngineType = "Whisper" | "Parakeet"
+export type EngineType = "TranscribeCpp" | "Parakeet" | "Diarization"
 export type FunasrRuntimeStatus = { installed: boolean; server_running: boolean; download_percentage: number | null; base_url: string; model: string; runtime_dir: string; log_path: string; message: string }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null }
 /**
@@ -1303,6 +1363,11 @@ export type HistoryEntry = { id: number; file_name: string; timestamp: number; s
 export type KeyPoint = { id: string; session_id: string; category: string | null; content: string; sort_order: number; created_at: number }
 export type LLMPrompt = { id: string; name: string; prompt: string }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
+/**
+ * Bundle of AI-extracted structured data for a meeting.
+ * Used as the return type of `extract_meeting_insights`.
+ */
+export type MeetingInsights = { key_points: KeyPoint[]; action_items: ActionItem[]; participants: Participant[]; tags: Tag[] }
 /**
  * A short, timestamped note attached to a meeting session.
  * 

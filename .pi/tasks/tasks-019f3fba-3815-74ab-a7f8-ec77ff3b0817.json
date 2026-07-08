@@ -1,0 +1,71 @@
+{
+  "nextId": 7,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "7.1 Backend: Add import_meeting_audio command",
+      "description": "Add new Rust command in src-tauri/src/commands/meeting.rs: import_meeting_audio(file_path, title). Validate file, create session, copy audio, spawn transcription thread. Register in lib.rs.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480900455,
+      "updatedAt": 1783481732339
+    },
+    {
+      "id": "2",
+      "subject": "7.2 Backend: Extend retry_transcription with model_id/language overrides",
+      "description": "Modify retry_transcription in meeting.rs to accept optional model_id and language params. When model_id provided, temporarily load that model. Pass language override to process_transcription.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480904690,
+      "updatedAt": 1783481735383
+    },
+    {
+      "id": "3",
+      "subject": "7.1 Frontend: Add Import Audio button in StartMeeting.tsx",
+      "description": "Add Import Audio button next to Start Recording in StartMeeting.tsx. Use Tauri file dialog with audio filters. Call commands.importMeetingAudio. Navigate to session.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480908979,
+      "updatedAt": 1783481830352
+    },
+    {
+      "id": "4",
+      "subject": "7.2 Frontend: Add Regenerate button with model/language selectors",
+      "description": "Add Regenerate popover in CompletedView.tsx and MeetingDetailView.tsx. Model selector (installed non-diarization models) + language selector. Calls extended retryTranscription.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480915834,
+      "updatedAt": 1783482076572
+    },
+    {
+      "id": "5",
+      "subject": "7.3 Frontend: Add Export transcript/summary button",
+      "description": "Add Export dropdown in MeetingDetailView.tsx and CompletedView.tsx. Options: Export as Markdown (.md) and Export as Text (.txt). Use Tauri save dialog and fs plugin to write files.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480922130,
+      "updatedAt": 1783482080378
+    },
+    {
+      "id": "6",
+      "subject": "Add i18n keys and rebuild specta bindings",
+      "description": "Add all new i18n keys to en.json. Rebuild specta bindings by running cargo build or the specta export. Update bindings.ts for new commands.",
+      "status": "completed",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783480926482,
+      "updatedAt": 1783482231844
+    }
+  ]
+}

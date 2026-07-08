@@ -1,22 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Virtuoso } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
 import {
-  X,
-  Clock,
-  Calendar,
-  FileText,
-  Copy,
-  Check,
-  RotateCcw,
   AlertCircle,
-  Trash2,
-  Loader2,
+  Calendar,
+  Check,
+  ChevronDown,
+  Clock,
+  Copy,
+  Download,
+  FileText,
   Languages,
+  Loader2,
+  RotateCcw,
   Search,
+  Trash2,
+  X,
 } from "lucide-react";
 import { TTSButton } from "./TTSButton";
 import { useShallow } from "zustand/react/shallow";
-import { commands, type MeetingSession, type Participant, type TranscriptSegment } from "@/bindings";
+import { commands, type MeetingSession, type ModelInfo, type Participant, type TranscriptSegment } from "@/bindings";
 import { formatDuration, useMeetingStore } from "../../stores/meetingStore";
 import { AudioPlayer, type AudioPlayerHandle } from "../ui/AudioPlayer";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -27,9 +30,13 @@ import { useSettings } from "../../hooks/useSettings";
 import { isAiConfigured } from "../../lib/utils/aiConfig";
 import { SpeakerSegment } from "./recording/SpeakerSegment";
 import {
-  useSpeakerColors,
   UNKNOWN_SPEAKER_COLOR,
+  useSpeakerColors,
 } from "../../hooks/useSpeakerColors";
+import { LANGUAGES } from "../../lib/constants/languages";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
+
 
 interface MeetingDetailViewProps {
   session: MeetingSession;
@@ -68,10 +75,9 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
-  const { fetchSessions, retryTranscription } = useMeetingStore(
+  const { fetchSessions } = useMeetingStore(
     useShallow((s) => ({
       fetchSessions: s.fetchSessions,
-      retryTranscription: s.retryTranscription,
     })),
   );
   const { settings } = useSettings();
@@ -87,6 +93,18 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   const [currentSession, setCurrentSession] = useState(session);
   const [audioTime, setAudioTime] = useState(0);
   const [transcriptSearch, setTranscriptSearch] = useState("");
+
+  // Regenerate popover
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenModel, setRegenModel] = useState<string>("");
+  const [regenLanguage, setRegenLanguage] = useState<string>("");
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const regenRef = useRef<HTMLDivElement>(null);
+
+  // Export dropdown
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [transcriptParticipants, setTranscriptParticipants] = useState<Participant[]>([]);
@@ -137,9 +155,40 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   const [translateError, setTranslateError] = useState<string | null>(null);
   const [translatedCopied, setTranslatedCopied] = useState(false);
 
+
+  // Load available models when regen popover opens
+  useEffect(() => {
+    if (regenOpen && availableModels.length === 0) {
+      commands.getAvailableModels().then((r) => {
+        if (r.status === "ok") {
+          setAvailableModels(
+            r.data.filter(
+              (m) => m.is_downloaded && m.engine_type !== "Diarization",
+            ),
+          );
+        }
+      });
+    }
+  }, [regenOpen, availableModels.length]);
+
+  // Close popovers on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (regenRef.current && !regenRef.current.contains(e.target as Node)) {
+        setRegenOpen(false);
+      }
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   // Ref for focus trap
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElement = useRef<Element | null>(null);
+
 
   // Handle Escape key to close modal
   const handleKeyDown = useCallback(
@@ -406,7 +455,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
   const handleRetry = async () => {
     setIsRetrying(true);
     try {
-      const result = await commands.retryTranscription(currentSession.id);
+      const result = await commands.retryTranscription(currentSession.id, null, null);
       if (result.status === "ok") {
         // Update local session status
         setCurrentSession({
@@ -427,6 +476,71 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
       setIsRetrying(false);
     }
   };
+
+  const handleRegenerate = async () => {
+    setRegenLoading(true);
+    try {
+      const result = await commands.retryTranscription(
+        currentSession.id,
+        regenModel || null,
+        regenLanguage || null,
+      );
+      if (result.status === "ok") {
+        setCurrentSession({
+          ...currentSession,
+          status: "processing",
+          error_message: null,
+        });
+        setTranscript(null);
+        setRegenOpen(false);
+        await fetchSessions();
+      } else {
+        console.error("Regenerate failed:", result.error);
+      }
+    } catch (err) {
+      console.error("Regenerate error:", err);
+    } finally {
+      setRegenLoading(false);
+    }
+  };
+
+  const buildMarkdown = (tr: string, sum: string | null) => {
+    const date = new Date(currentSession.created_at * 1000).toLocaleString();
+    const parts: string[] = [];
+    parts.push(`# ${currentSession.title}`);
+    parts.push(`**Date:** ${date}`);
+    parts.push("");
+    if (sum) {
+      parts.push("## Summary");
+      parts.push(sum);
+      parts.push("");
+    }
+    parts.push("## Transcript");
+    parts.push(tr);
+    return parts.join("\n");
+  };
+
+  const handleExport = async (format: "md" | "txt") => {
+    setExportOpen(false);
+    const tr = transcript ?? "";
+    let content = "";
+    if (format === "md") {
+      const summaryResult = await commands.getMeetingSummary(currentSession.id);
+      const sum = summaryResult.status === "ok" ? (summaryResult.data ?? null) : null;
+      content = buildMarkdown(tr, sum);
+    } else {
+      content = tr;
+    }
+    const ext = format === "md" ? "md" : "txt";
+    const filePath = await save({
+      defaultPath: `${currentSession.title}.${ext}`,
+      filters: [{ name: format === "md" ? "Markdown" : "Text", extensions: [ext] }],
+    });
+    if (filePath) {
+      await writeTextFile(filePath, content);
+    }
+  };
+
 
   const statusColors = {
     idle: "text-gray-400",
@@ -461,8 +575,111 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
             {currentSession.title}
           </h2>
           <div className="flex items-center gap-2">
-            {/* Retry button */}
+            {/* Regenerate popover */}
             {canRetry && (
+              <div className="relative" ref={regenRef}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRegenOpen((o) => !o);
+                  }}
+                  disabled={regenLoading}
+                  className="flex items-center gap-1 p-1.5 hover:bg-mid-gray/20 rounded-lg transition-colors text-mid-gray hover:text-white disabled:opacity-50"
+                  aria-label={t("meeting.regenerate", "Regenerate")}
+                >
+                  {regenLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+                {regenOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-[60] w-72 bg-background border border-mid-gray/20 rounded-xl shadow-xl p-4 flex flex-col gap-3">
+                    <p className="text-xs text-text/60">
+                      {t("meeting.regenerateDesc", "Override model and language for this run.")}
+                    </p>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">
+                        {t("meeting.regenerateModel", "Model")}
+                      </label>
+                      <select
+                        value={regenModel}
+                        onChange={(e) => setRegenModel(e.target.value)}
+                        className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
+                      >
+                        <option value="">{t("common.default", "Default")}</option>
+                        {availableModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">
+                        {t("meeting.regenerateLanguage", "Language")}
+                      </label>
+                      <select
+                        value={regenLanguage}
+                        onChange={(e) => setRegenLanguage(e.target.value)}
+                        className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
+                      >
+                        {LANGUAGES.map((l) => (
+                          <option key={l.value} value={l.value}>
+                            {l.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRegenerate}
+                      disabled={regenLoading}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-logo-primary text-white hover:opacity-90 disabled:opacity-50 text-sm font-semibold"
+                    >
+                      {regenLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {t("meeting.regenerate", "Regenerate")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Export dropdown */}
+            <div className="relative" ref={exportRef}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExportOpen((o) => !o);
+                }}
+                className="p-1.5 hover:bg-mid-gray/20 rounded-lg transition-colors text-mid-gray hover:text-white"
+                aria-label={t("meeting.export", "Export")}
+              >
+                <Download className="h-4 w-4" />
+              </button>
+              {exportOpen && (
+                <div className="absolute right-0 top-full mt-1 z-[60] w-48 bg-background border border-mid-gray/20 rounded-xl shadow-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => handleExport("md")}
+                    className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
+                  >
+                    {t("meeting.exportMarkdown", "Export as Markdown")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExport("txt")}
+                    className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
+                  >
+                    {t("meeting.exportText", "Export as Text")}
+                  </button>
+                </div>
+              )}
+            </div>
+            {/* Retry button (for failed sessions) */}
+            {canRetry && currentSession.status === "failed" && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -471,16 +688,10 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                 }}
                 disabled={isRetrying}
                 className="p-1.5 hover:bg-mid-gray/20 rounded-lg transition-colors text-mid-gray hover:text-white disabled:opacity-50"
-                aria-label={t(
-                  "meeting.detail.retryTranscription",
-                  "Re-transcribe",
-                )}
+                aria-label={t("meeting.detail.retryTranscription", "Re-transcribe")}
               >
                 {isRetrying ? (
-                  <Loader2
-                    className="h-5 w-5 animate-spin"
-                    aria-hidden="true"
-                  />
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
                 ) : (
                   <RotateCcw className="h-5 w-5" aria-hidden="true" />
                 )}
@@ -725,43 +936,47 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
                           )}
                         </p>
                       ) : (
-                        visibleTranscriptSegments.map((seg, index) => {
-                          const sourceIndex = transcriptSegments.findIndex(
-                            (segment) => segment.id === seg.id,
-                          );
-                        const prevSpeakerId =
-                          sourceIndex > 0
-                            ? transcriptSegments[sourceIndex - 1].speaker_id
-                            : undefined;
-                        const showLabel = seg.speaker_id !== prevSpeakerId;
-                        const color = seg.speaker_id
-                          ? (segSpeakerColors[seg.speaker_id] ??
-                            UNKNOWN_SPEAKER_COLOR)
-                          : UNKNOWN_SPEAKER_COLOR;
-                        return (
-                          <div
-                            key={seg.id}
-                            ref={(node) => {
-                              segmentRefs.current[seg.id] = node;
-                            }}
-                          >
-                            <SpeakerSegment
-                              text={seg.text}
-                              startMs={seg.start_ms}
-                              speakerName={
-                                seg.speaker_id
-                                  ? segParticipantMap[seg.speaker_id]
-                                  : null
-                              }
-                              color={color}
-                              showSpeakerLabel={showLabel}
-                              active={activeSegmentId === seg.id}
-                              disabled={!canSeekSegment(seg)}
-                              onClick={() => handleSegmentSeek(seg)}
-                            />
-                          </div>
-                        );
-                        })
+                        <Virtuoso
+                          data={visibleTranscriptSegments}
+                          style={{ height: "400px" }}
+                          itemContent={(index, seg) => {
+                            const sourceIndex = transcriptSegments.findIndex(
+                              (segment) => segment.id === seg.id,
+                            );
+                            const prevSpeakerId =
+                              sourceIndex > 0
+                                ? transcriptSegments[sourceIndex - 1].speaker_id
+                                : undefined;
+                            const showLabel = seg.speaker_id !== prevSpeakerId;
+                            const color = seg.speaker_id
+                              ? (segSpeakerColors[seg.speaker_id] ??
+                                UNKNOWN_SPEAKER_COLOR)
+                              : UNKNOWN_SPEAKER_COLOR;
+                            return (
+                              <div
+                                key={seg.id}
+                                ref={(node) => {
+                                  segmentRefs.current[seg.id] = node;
+                                }}
+                              >
+                                <SpeakerSegment
+                                  text={seg.text}
+                                  startMs={seg.start_ms}
+                                  speakerName={
+                                    seg.speaker_id
+                                      ? segParticipantMap[seg.speaker_id]
+                                      : null
+                                  }
+                                  color={color}
+                                  showSpeakerLabel={showLabel}
+                                  active={activeSegmentId === seg.id}
+                                  disabled={!canSeekSegment(seg)}
+                                  onClick={() => handleSegmentSeek(seg)}
+                                />
+                              </div>
+                            );
+                          }}
+                        />
                       )}
                     </div>
                   ) : plainTranscriptMatches ? (

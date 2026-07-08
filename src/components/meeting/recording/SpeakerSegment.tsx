@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import type { SpeakerColor } from "../../../hooks/useSpeakerColors";
 import { UNKNOWN_SPEAKER_COLOR } from "../../../hooks/useSpeakerColors";
 
@@ -30,6 +31,7 @@ export const SpeakerSegment: React.FC<SpeakerSegmentProps> = ({
   disabled = false,
   onClick,
 }) => {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -43,7 +45,7 @@ export const SpeakerSegment: React.FC<SpeakerSegmentProps> = ({
         <div className="flex items-center gap-1.5 mb-0.5">
           <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${color.dot}`} />
           <span className={`text-[12px] font-semibold ${color.text}`}>
-            {speakerName ?? "Unknown"}
+            {speakerName ?? t("common.unknown", "Unknown")}
           </span>
           <span className="text-[11px] font-mono text-text/30 ml-1">
             {formatMs(startMs)}

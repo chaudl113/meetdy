@@ -171,6 +171,9 @@ pub async fn start_meeting_session(
     soniox_api_key: Option<String>,
     funasr_base_url: Option<String>,
     funasr_model: Option<String>,
+    title: Option<String>,
+    participants: Option<String>,
+    tags: Option<String>,
 ) -> Result<MeetingSession, String> {
     info!(
         "start_meeting_session command called with template_id: {:?}, audio_source: {:?}, stt_engine: {:?}",
@@ -332,6 +335,34 @@ pub async fn start_meeting_session(
         );
     }
 
+    // Apply explicit title (overrides template title)
+    if let Some(ref t) = title {
+        if !t.trim().is_empty() {
+            manager
+                .update_session_title(&session.id, t)
+                .map_err(|e| format!("Failed to update session title: {}", e))?;
+            session.title = t.clone();
+        }
+    }
+
+    // Add participants
+    if let Some(ref p) = participants {
+        for name in p.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            manager
+                .add_participant(&session.id, name.to_string(), None)
+                .map_err(|e| format!("Failed to add participant: {}", e))?;
+        }
+    }
+
+    // Add tags
+    if let Some(ref t) = tags {
+        for label in t.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            manager
+                .add_tag(&session.id, label.to_string(), None)
+                .map_err(|e| format!("Failed to add tag: {}", e))?;
+        }
+    }
+
     Ok(session)
 }
 
@@ -463,25 +494,27 @@ pub fn update_meeting_title(
         .map_err(|e| format!("Failed to update meeting title: {}", e))
 }
 
-/// Retries transcription for a failed meeting session.
-///
-/// This command:
-/// 1. Validates the session exists and is in Failed status
-/// 2. Updates status to Processing
-/// 3. Spawns background transcription task
+/// Retries transcription for a failed meeting session, with optional model/language overrides.
 ///
 /// # Arguments
 /// * `session_id` - The unique ID of the session to retry
+/// * `model_id` - Optional model override for this transcription run
+/// * `language` - Optional language override for this transcription run
 ///
 /// # Returns
 /// * `Ok(())` - If retry was initiated successfully
-/// * `Err(String)` - If session not found, not in Failed status, or retry fails
+/// * `Err(String)` - If session not found, not in a retryable status, or retry fails
 #[tauri::command]
 #[specta::specta]
-pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), String> {
+pub fn retry_transcription(
+    app: AppHandle,
+    session_id: String,
+    model_id: Option<String>,
+    language: Option<String>,
+) -> Result<(), String> {
     info!(
-        "retry_transcription command called for session: {}",
-        session_id
+        "retry_transcription command called for session: {} model={:?} language={:?}",
+        session_id, model_id, language
     );
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
@@ -520,7 +553,18 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
     let app_clone = app.clone();
 
     std::thread::spawn(move || {
-        match manager_clone.process_transcription(&session_id_clone, &audio_path_clone) {
+        let transcription_result = if model_id.is_some() || language.is_some() {
+            manager_clone.process_transcription_with_override(
+                &session_id_clone,
+                &audio_path_clone,
+                model_id.as_deref(),
+                language.as_deref(),
+            )
+        } else {
+            manager_clone.process_transcription(&session_id_clone, &audio_path_clone)
+        };
+
+        match transcription_result {
             Ok(transcript) => {
                 // Save transcript and update status to Completed
                 if let Err(e) = manager_clone.save_transcript(&session_id_clone, &transcript) {
@@ -575,6 +619,142 @@ pub fn retry_transcription(app: AppHandle, session_id: String) -> Result<(), Str
     info!("Retry transcription initiated for session: {}", session_id);
 
     Ok(())
+}
+
+/// Imports an external audio file as a new meeting session and starts transcription.
+///
+/// Supported formats: .wav, .mp3, .m4a, .flac, .ogg
+/// Non-WAV files are copied as-is with a warning; WAV files are copied directly.
+/// The audio must be (or become) 16kHz mono 16-bit PCM for transcription.
+#[tauri::command]
+#[specta::specta]
+pub fn import_meeting_audio(
+    app: AppHandle,
+    file_path: String,
+    title: Option<String>,
+) -> Result<crate::managers::meeting::MeetingSession, String> {
+    info!("import_meeting_audio called: path={} title={:?}", file_path, title);
+
+    // Validate file exists
+    let src_path = std::path::Path::new(&file_path);
+    if !src_path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+
+    // Validate extension
+    let ext = src_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    let supported = ["wav", "mp3", "m4a", "flac", "ogg"];
+    if !supported.contains(&ext.as_str()) {
+        return Err(format!(
+            "Unsupported audio format '.{}'. Supported: {}",
+            ext,
+            supported.join(", ")
+        ));
+    }
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+
+    // Create a new session
+    let session = manager
+        .create_session_with_audio_source(AudioSourceType::MicrophoneOnly)
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+
+    // Apply custom title if provided
+    if let Some(ref t) = title {
+        if !t.trim().is_empty() {
+            manager
+                .update_session_title(&session.id, t)
+                .map_err(|e| format!("Failed to set title: {}", e))?;
+        }
+    }
+
+    // Set status to Processing
+    manager
+        .update_session_status(&session.id, MeetingStatus::Processing)
+        .map_err(|e| format!("Failed to update status: {}", e))?;
+
+    // Copy audio into session directory as audio.wav
+    let meetings_dir = manager.get_meetings_dir();
+    let dest_dir = meetings_dir.join(&session.id);
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| format!("Failed to create session dir: {}", e))?;
+    let dest_path = dest_dir.join("audio.wav");
+    let audio_filename = format!("{}/audio.wav", session.id);
+
+    if ext == "wav" {
+        std::fs::copy(&file_path, &dest_path)
+            .map_err(|e| format!("Failed to copy audio file: {}", e))?;
+    } else {
+        warn!(
+            "import_meeting_audio: non-WAV format '{}' — copying as-is. \
+             Transcription may fail if the file is not 16kHz mono 16-bit PCM.",
+            ext
+        );
+        std::fs::copy(&file_path, &dest_path)
+            .map_err(|e| format!("Failed to copy audio file: {}", e))?;
+    }
+
+    // Persist audio_path in the database
+    manager
+        .set_audio_path_for_session(&session.id, &audio_filename)
+        .map_err(|e| format!("Failed to set audio path: {}", e))?;
+
+    // Retrieve updated session
+    let updated_session = manager
+        .get_session(&session.id)
+        .map_err(|e| format!("Failed to get session: {}", e))?
+        .ok_or_else(|| "Session disappeared after creation".to_string())?;
+
+    // Emit event so UI can navigate
+    let _ = app.emit("meeting_processing", &updated_session);
+
+    // Spawn background transcription
+    let manager_clone = Arc::clone(&manager);
+    let session_id_clone = session.id.clone();
+    let audio_path_clone = audio_filename.clone();
+    let app_clone = app.clone();
+
+    std::thread::spawn(move || {
+        match manager_clone.process_transcription(&session_id_clone, &audio_path_clone) {
+            Ok(transcript) => {
+                if let Err(e) = manager_clone.save_transcript(&session_id_clone, &transcript) {
+                    let error_msg = format!("Failed to save transcript: {}", e);
+                    let _ = manager_clone.update_session_status_with_error(
+                        &session_id_clone,
+                        MeetingStatus::Failed,
+                        &error_msg,
+                    );
+                    manager_clone.set_session_error(&session_id_clone, &error_msg);
+                    if let Some(s) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                        let _ = app_clone.emit("meeting_failed", &s);
+                    }
+                } else if let Some(s) =
+                    manager_clone.get_session(&session_id_clone).ok().flatten()
+                {
+                    let _ = app_clone.emit("meeting_completed", &s);
+                }
+            }
+            Err(e) => {
+                let error_msg = format!("Transcription failed: {}", e);
+                let _ = manager_clone.update_session_status_with_error(
+                    &session_id_clone,
+                    MeetingStatus::Failed,
+                    &error_msg,
+                );
+                manager_clone.set_session_error(&session_id_clone, &error_msg);
+                if let Some(s) = manager_clone.get_session(&session_id_clone).ok().flatten() {
+                    let _ = app_clone.emit("meeting_failed", &s);
+                }
+            }
+        }
+    });
+
+    info!("import_meeting_audio: transcription started for session {}", session.id);
+    Ok(updated_session)
 }
 
 /// Gets the transcript text content for a completed meeting session.
@@ -848,11 +1028,25 @@ pub async fn generate_meeting_summary(
         build_default_summary_prompt(&transcript)
     };
 
-    if let Some(language) = output_language.as_ref().filter(|v| !v.trim().is_empty()) {
-        summary_prompt.push_str(&format!(
-            "\n\nImportant: Write the summary in this language/locale: {}.",
-            language
-        ));
+    match output_language.as_deref() {
+        Some(lang) if lang.trim() == "auto" => {
+            let detected = detect_transcript_language(&transcript);
+            let lang_name = match detected {
+                "vi" => "Vietnamese",
+                "ja" => "Japanese",
+                "ko" => "Korean",
+                "zh" => "Chinese",
+                _ => "English",
+            };
+            summary_prompt.push_str(&format!("\n\nPlease write the summary in {}.", lang_name));
+        }
+        Some(lang) if !lang.trim().is_empty() => {
+            summary_prompt.push_str(&format!(
+                "\n\nImportant: Write the summary in this language/locale: {}.",
+                lang
+            ));
+        }
+        _ => {}
     }
 
     debug!(
@@ -1178,7 +1372,23 @@ pub async fn extract_meeting_insights(
         ));
     }
 
-    let prompt = build_extract_insights_prompt(&transcript, output_language.as_deref());
+    let resolved_insights_language: Option<String> =
+        if output_language.as_deref() == Some("auto") {
+            let detected = detect_transcript_language(&transcript);
+            Some(
+                match detected {
+                    "vi" => "Vietnamese",
+                    "ja" => "Japanese",
+                    "ko" => "Korean",
+                    "zh" => "Chinese",
+                    _ => "English",
+                }
+                .to_string(),
+            )
+        } else {
+            output_language.clone()
+        };
+    let prompt = build_extract_insights_prompt(&transcript, resolved_insights_language.as_deref());
 
     debug!(
         "Extracting insights with provider '{}' (model: {})",
@@ -1567,6 +1777,110 @@ pub fn set_active_speaker(
         None => meeting_manager.clear_active_speaker(),
     }
     Ok(())
+}
+
+/// Saves an edited summary for a meeting session.
+///
+/// Writes the new summary text to `summary.md` in the session directory and
+/// updates the `summary_path` column in the database.
+#[tauri::command]
+#[specta::specta]
+pub fn update_meeting_summary(
+    app: AppHandle,
+    session_id: String,
+    summary: String,
+) -> Result<(), String> {
+    info!(
+        "update_meeting_summary command called for session: {}",
+        session_id
+    );
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+
+    let summary_path = manager
+        .get_meetings_dir()
+        .join(&session_id)
+        .join("summary.md");
+
+    std::fs::write(&summary_path, &summary)
+        .map_err(|e| format!("Failed to save summary: {}", e))?;
+
+    manager
+        .update_session_summary_path(&session_id, "summary.md")
+        .map_err(|e| format!("Failed to update summary path: {}", e))?;
+
+    let _ = app.emit(
+        "meeting_summary_updated",
+        serde_json::json!({ "session_id": session_id, "summary": summary }),
+    );
+
+    Ok(())
+}
+
+/// Detect the dominant language of a transcript using character-set heuristics.
+fn detect_transcript_language(text: &str) -> &'static str {
+    let total_chars = text.chars().count();
+    if total_chars == 0 {
+        return "en";
+    }
+
+    let vi_chars = text
+        .chars()
+        .filter(|c| {
+            matches!(
+                c,
+                '\u{00E0}' | '\u{00E1}' | '\u{1EA3}' | '\u{00E3}' | '\u{1EA1}'
+                    | '\u{0103}' | '\u{1EB1}' | '\u{1EAF}' | '\u{1EB3}' | '\u{1EB5}' | '\u{1EB7}'
+                    | '\u{00E2}' | '\u{1EA7}' | '\u{1EA5}' | '\u{1EA9}' | '\u{1EAB}' | '\u{1EAD}'
+                    | '\u{00E8}' | '\u{00E9}' | '\u{1EBB}' | '\u{1EBD}' | '\u{1EB9}'
+                    | '\u{00EA}' | '\u{1EC1}' | '\u{1EBF}' | '\u{1EC3}' | '\u{1EC5}' | '\u{1EC7}'
+                    | '\u{00EC}' | '\u{00ED}' | '\u{1EC9}' | '\u{0129}' | '\u{1ECB}'
+                    | '\u{00F2}' | '\u{00F3}' | '\u{1ECF}' | '\u{00F5}' | '\u{1ECD}'
+                    | '\u{00F4}' | '\u{1ED3}' | '\u{1ED1}' | '\u{1ED5}' | '\u{1ED7}' | '\u{1ED9}'
+                    | '\u{01A1}' | '\u{1EDD}' | '\u{1EDB}' | '\u{1EDF}' | '\u{1EE1}' | '\u{1EE3}'
+                    | '\u{00F9}' | '\u{00FA}' | '\u{1EE7}' | '\u{0169}' | '\u{1EE5}'
+                    | '\u{01B0}' | '\u{1EEB}' | '\u{1EE9}' | '\u{1EED}' | '\u{1EEF}' | '\u{1EF1}'
+                    | '\u{1EF3}' | '\u{00FD}' | '\u{1EF7}' | '\u{1EF9}' | '\u{1EF5}'
+                    | '\u{0111}'
+            )
+        })
+        .count();
+
+    let cjk_chars = text
+        .chars()
+        .filter(|c| {
+            matches!(
+                *c as u32,
+                0x4E00..=0x9FFF   // CJK Unified
+                | 0x3040..=0x309F // Hiragana
+                | 0x30A0..=0x30FF // Katakana
+                | 0xAC00..=0xD7AF // Hangul
+            )
+        })
+        .count();
+
+    if vi_chars as f64 / total_chars as f64 > 0.02 {
+        return "vi";
+    }
+    if cjk_chars as f64 / total_chars as f64 > 0.05 {
+        let hiragana = text
+            .chars()
+            .filter(|c| matches!(*c as u32, 0x3040..=0x309F))
+            .count();
+        if hiragana > 0 {
+            return "ja";
+        }
+        let hangul = text
+            .chars()
+            .filter(|c| matches!(*c as u32, 0xAC00..=0xD7AF))
+            .count();
+        if hangul > 0 {
+            return "ko";
+        }
+        return "zh";
+    }
+
+    "en"
 }
 
 /// Returns all transcript segments for a meeting, ordered by sequence.

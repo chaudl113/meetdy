@@ -2,15 +2,15 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import {
+  AlertCircle,
+  ChevronRight,
   Clock,
   FileText,
-  AlertCircle,
   Loader2,
-  ChevronRight,
   Search,
   Trash2,
 } from "lucide-react";
-import { useMeetingStore, formatDuration } from "../../stores/meetingStore";
+import { formatDuration, useMeetingStore } from "../../stores/meetingStore";
 import { MeetingDetailView } from "./MeetingDetailView";
 import { Input } from "../ui/Input";
 import type { MeetingSession } from "@/bindings";

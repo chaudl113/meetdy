@@ -1,16 +1,19 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Sparkles,
-  Copy,
   Check,
-  Loader2,
   ChevronDown,
   ChevronUp,
+  Copy,
+  Loader2,
+  Pencil,
   RefreshCw,
+  Sparkles,
+  X,
 } from "lucide-react";
 import { commands } from "@/bindings";
 import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
 
 interface MeetingSummaryProps {
   sessionId: string;
@@ -37,6 +40,9 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [pullPercent, setPullPercent] = useState<number | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
   const unlistenRef = useRef<Array<() => void>>([]);
 
   // Clean up event listeners on unmount
@@ -125,6 +131,42 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
     }
   };
 
+  const handleEditStart = () => {
+    setEditText(summary ?? "");
+    setIsEditing(true);
+  };
+
+  const handleEditCancel = () => {
+    setIsEditing(false);
+    setEditText("");
+  };
+
+  const handleEditSave = async () => {
+    setIsSaving(true);
+    try {
+      const result = await commands.updateMeetingSummary(sessionId, editText);
+      if (result.status === "ok") {
+        onSummaryGenerated(editText);
+        setIsEditing(false);
+        setEditText("");
+        toast.success(t("meeting.summary.summaryUpdateSuccess", "Summary saved"));
+      } else {
+        toast.error(
+          t("meeting.summary.summaryUpdateError", "Failed to save summary") +
+            ": " +
+            result.error,
+        );
+      }
+    } catch (err) {
+      toast.error(
+        t("meeting.summary.summaryUpdateError", "Failed to save summary") +
+          (err instanceof Error ? ": " + err.message : ""),
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
       {/* Header */}
@@ -146,8 +188,20 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
         </button>
 
         <div className="flex items-center gap-2">
-          {/* Regenerate button (shown when summary exists) */}
-          {hasSummary && !isGenerating && (
+          {/* Edit button (shown when summary exists and not generating/editing) */}
+          {hasSummary && !isGenerating && !isEditing && (
+            <button
+              type="button"
+              onClick={handleEditStart}
+              className="inline-flex items-center gap-1.5 px-2 py-1 text-xs text-mid-gray hover:text-white hover:bg-mid-gray/20 rounded transition-colors"
+              aria-label={t("meeting.summary.editSummary", "Edit summary")}
+            >
+              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
+
+          {/* Regenerate button (shown when summary exists and not editing) */}
+          {hasSummary && !isGenerating && !isEditing && (
             <button
               type="button"
               onClick={handleGenerateSummary}
@@ -159,8 +213,8 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
             </button>
           )}
 
-          {/* Copy button (shown when summary exists) */}
-          {hasSummary && (
+          {/* Copy button (shown when summary exists and not editing) */}
+          {hasSummary && !isEditing && (
             <button
               type="button"
               onClick={handleCopySummary}
@@ -218,6 +272,40 @@ export const MeetingSummary: React.FC<MeetingSummaryProps> = ({
                   </p>
                 </div>
               )}
+            </div>
+          ) : isEditing ? (
+            /* Edit mode */
+            <div className="flex flex-col gap-2">
+              <textarea
+                className="w-full min-h-[200px] bg-dark-gray/50 border border-mid-gray/30 rounded-lg p-3 text-sm text-white resize-y focus:outline-none focus:border-purple-500/50"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                disabled={isSaving}
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleEditCancel}
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-mid-gray hover:text-white hover:bg-mid-gray/20 rounded transition-colors disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t("meeting.summary.cancelEdit", "Cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditSave}
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  {t("meeting.summary.saveSummary", "Save")}
+                </button>
+              </div>
             </div>
           ) : summary ? (
             /* Summary content - render as preformatted text */

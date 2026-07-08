@@ -1,6 +1,22 @@
 import React from "react";
-import { Volume2, VolumeX, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Loader2, Volume2, VolumeX } from "lucide-react";
 import { useEdgeTTS } from "../../hooks/useEdgeTTS";
+import { useSettingsStore } from "../../stores/settingsStore";
+
+const LANG_TO_VOICE: Record<string, string> = {
+  vi: "vi-VN-HoaiMyNeural",
+  en: "en-US-JennyNeural",
+  ja: "ja-JP-NanamiNeural",
+  zh: "zh-CN-XiaoxiaoNeural",
+  ko: "ko-KR-SunHiNeural",
+  de: "de-DE-KatjaNeural",
+  fr: "fr-FR-DeniseNeural",
+  es: "es-ES-ElviraNeural",
+  it: "it-IT-ElsaNeural",
+  pl: "pl-PL-ZofiaNeural",
+  ru: "ru-RU-SvetlanaNeural",
+};
 
 interface TTSButtonProps {
   getText: () => string;
@@ -11,17 +27,20 @@ interface TTSButtonProps {
 
 export const TTSButton: React.FC<TTSButtonProps> = ({
   getText,
-  voice = "vi-VN-HoaiMyNeural",
+  voice,
   className = "",
-  title = "Đọc transcript",
+  title,
 }) => {
+  const { t } = useTranslation();
   const { speak, stop, isPlaying, isLoading } = useEdgeTTS();
+  const appLanguage = useSettingsStore((s) => s.settings?.app_language ?? "en");
+  const resolvedVoice = voice ?? LANG_TO_VOICE[appLanguage] ?? "en-US-JennyNeural";
 
   const handleClick = () => {
     if (isPlaying) {
       stop();
     } else {
-      speak(getText(), voice);
+      speak(getText(), resolvedVoice);
     }
   };
 
@@ -30,7 +49,7 @@ export const TTSButton: React.FC<TTSButtonProps> = ({
       type="button"
       onClick={handleClick}
       disabled={isLoading}
-      title={title}
+      title={title ?? t("tts.readTranscript")}
       className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
         isPlaying
           ? "text-logo-primary bg-logo-primary/10 hover:bg-logo-primary/20"
@@ -44,7 +63,7 @@ export const TTSButton: React.FC<TTSButtonProps> = ({
       ) : (
         <Volume2 size={14} />
       )}
-      {isPlaying ? "Dừng" : "Đọc"}
+      {isPlaying ? t("tts.stop") : t("tts.read")}
     </button>
   );
 };

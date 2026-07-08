@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { Pencil, Check, X } from "lucide-react";
+import { Check, Pencil, X } from "lucide-react";
 import { useMeetingStore } from "../../stores/meetingStore";
 
 /**

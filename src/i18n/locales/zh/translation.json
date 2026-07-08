@@ -235,7 +235,8 @@
     "errors": {
       "loadModels": "无法加载可用模型",
       "downloadModel": "模型下载失败: {{error}}"
-    }
+    },
+    "skipDownload": "跳过 — 稍后下载"
   },
   "modelSelector": {
     "welcome": "欢迎使用 Handy！",
@@ -385,6 +386,10 @@
         "placeholder": "添加词汇",
         "add": "添加",
         "remove": "删除 {{word}}"
+      },
+      "diarization": {
+        "label": "说话人分离",
+        "description": "识别会议录音中谁在何时发言。需要下载说话人分离模型。"
       }
     },
     "postProcessing": {
@@ -601,5 +606,13 @@
   },
   "overlay": {
     "transcribing": "正在转录..."
+  },
+  "app": {
+    "meetingGuard": {
+      "dictationWillStop": "Dictation will be stopped when you start a meeting.",
+      "stopTitle": "Stop meeting recording?",
+      "stopDescription": "Switching sections will stop the current recording.",
+      "stopAndSwitch": "Stop & Switch"
+    }
   }
 }

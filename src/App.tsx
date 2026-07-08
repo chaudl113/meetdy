@@ -1,11 +1,12 @@
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { Toaster, toast } from "sonner";
+import { toast, Toaster } from "sonner";
 import "./App.css";
 import AccessibilityPermissions from "./components/AccessibilityPermissions";
 import Footer from "./components/footer";
 import Onboarding from "./components/onboarding";
-import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
+import { SECTIONS_CONFIG, Sidebar, SidebarSection } from "./components/Sidebar";
 import { useSettings } from "./hooks/useSettings";
 import { commands } from "@/bindings";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -18,6 +19,7 @@ const renderSettingsContent = (section: SidebarSection) => {
 };
 
 function App() {
+  const { t } = useTranslation();
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [currentSection, setCurrentSection] =
     useState<SidebarSection>("general");
@@ -127,7 +129,7 @@ function App() {
         if (dictationActive) {
           // Dictation recording is active - it will be stopped by the backend
           // when user starts a meeting. For now, just notify user.
-          toast.info("Dictation will be stopped when you start a meeting.");
+          toast.info(t("app.meetingGuard.dictationWillStop"));
         }
         setCurrentMode("meeting");
         setCurrentSection(newSection);
@@ -137,10 +139,10 @@ function App() {
       // Case 2: Switching FROM meeting mode while recording
       if (isLeavingMeeting && isMeetingRecording) {
         // Show confirmation toast with action buttons
-        toast("Stop meeting recording?", {
-          description: "Switching sections will stop the current recording.",
+        toast(t("app.meetingGuard.stopTitle"), {
+          description: t("app.meetingGuard.stopDescription"),
           action: {
-            label: "Stop & Switch",
+            label: t("app.meetingGuard.stopAndSwitch"),
             onClick: async () => {
               await stopMeeting();
               setCurrentMode("dictation");
@@ -148,7 +150,7 @@ function App() {
             },
           },
           cancel: {
-            label: "Cancel",
+            label: t("common.cancel"),
             onClick: () => {
               // Do nothing - stay on meeting section
             },

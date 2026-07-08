@@ -94,7 +94,15 @@
       "tip1": "Đóng các ứng dụng không cần thiết để cải thiện chất lượng ghi.",
       "tip2": "Dùng tai nghe để tránh tiếng vọng âm thanh.",
       "tip3": "Đảm bảo bạn có đủ dung lượng lưu trữ."
-    }
+    },
+    "funasrModels": {
+      "funAsrNano": "FunASR Nano",
+      "paraformer": "Paraformer",
+      "paraformerEn": "Paraformer (Tiếng Anh)",
+      "sensevoice": "SenseVoice"
+    },
+    "importAudio": "Nhập file âm thanh",
+    "importAudioDesc": "Chọn file WAV/MP3 để phiên âm"
   },
   "recording": {
     "comingSoon": "Sắp ra mắt",
@@ -197,6 +205,17 @@
       "cancel": "Huỷ",
       "save": "Lưu ghi chú",
       "close": "Đóng"
+    },
+    "speaker": {
+      "label": "Người nói",
+      "add": "Thêm người nói",
+      "active": "Đang nói",
+      "namePlaceholder": "Tên người nói"
+    },
+    "sttEngine": {
+      "sonioxTitle": "Soniox (đám mây)",
+      "funasrTitle": "FunASR (local batch)",
+      "localTitle": "STT local"
     }
   },
   "models": {
@@ -206,7 +225,8 @@
     "availableDescription": "Chọn thêm mô hình để tải về cho việc chuyển giọng nói.",
     "noInstalled": "Chưa có mô hình nào. Tải một mô hình bên dưới để bắt đầu.",
     "noAvailable": "Tất cả mô hình đã được cài đặt.",
-    "activate": "Kích hoạt"
+    "activate": "Kích hoạt",
+    "idLabel": "ID"
   },
   "onboarding": {
     "subtitle": "Để bắt đầu, hãy chọn một mô hình chuyển đổi giọng nói",
@@ -246,7 +266,22 @@
     "errors": {
       "loadModels": "Không thể tải các mô hình có sẵn",
       "downloadModel": "Không thể tải mô hình: {{error}}"
-    }
+    },
+    "skipDownload": "Bỏ qua — tải sau",
+    "permissions": {
+      "title": "Cấp quyền",
+      "subtitle": "Meetdy cần một số quyền để hoạt động",
+      "mic": "Microphone",
+      "micDescription": "Để ghi âm cuộc họp",
+      "screenRecording": "Ghi màn hình",
+      "screenRecordingDescription": "Để ghi âm thanh hệ thống",
+      "granted": "Đã cấp",
+      "notGranted": "Chưa cấp",
+      "grantAccess": "Cấp quyền",
+      "skip": "Bỏ qua",
+      "continue": "Tiếp tục"
+    },
+    "skipNote": "Có thể cấp quyền sau trong Cài đặt"
   },
   "modelSelector": {
     "welcome": "Chào mừng đến với Handy!",
@@ -269,7 +304,8 @@
     "modelError": "Lỗi Mô Hình",
     "modelUnloaded": "Mô Hình Đã Gỡ",
     "noModelDownloadRequired": "Chưa Có Mô Hình - Cần Tải Xuống",
-    "deleteModel": "Xóa {{modelName}}"
+    "deleteModel": "Xóa {{modelName}}",
+    "recommended": "Đề xuất"
   },
   "settings": {
     "general": {
@@ -396,6 +432,11 @@
         "placeholder": "Thêm một từ",
         "add": "Thêm",
         "remove": "Xóa {{word}}"
+      },
+      "diarization": {
+        "label": "Nhận diện người nói",
+        "description": "Xác định ai nói khi nào trong các bản ghi âm cuộc họp. Yêu cầu cả hai mô hình nhận diện người nói phải được tải xuống.",
+        "noModelWarning": "Cần tải models nhận diện người nói trước"
       }
     },
     "postProcessing": {
@@ -454,8 +495,59 @@
         "createPrompt": "Tạo Prompt",
         "cancel": "Hủy",
         "selectToEdit": "Chọn một prompt ở trên để xem và chỉnh sửa chi tiết.",
-        "createFirst": "Nhấn 'Tạo Prompt mới' ở trên để tạo prompt xử lý sau đầu tiên của bạn."
-      }
+        "createFirst": "Nhấn 'Tạo Prompt mới' ở trên để tạo prompt xử lý sau đầu tiên của bạn.",
+        "fromTemplate": "Từ mẫu",
+        "saveAsCustom": "Lưu tùy chỉnh",
+        "editAndSave": "Chỉnh sửa và lưu",
+        "templateList": "Danh sách mẫu",
+        "useTemplate": "Dùng mẫu",
+        "usingTemplate": "Đang dùng mẫu",
+        "outputPlaceholderTip": "Dùng {{output}} để chèn kết quả",
+        "categories": {
+          "meeting": "Cuộc họp",
+          "writing": "Viết lách",
+          "language": "Ngôn ngữ"
+        },
+        "errors": {
+          "emptyName": "Tên không được để trống",
+          "emptyPrompt": "Lệnh không được để trống",
+          "nameTooLong": "Tên quá dài",
+          "promptTooLong": "Lệnh quá dài",
+          "missingPlaceholder": "Thiếu {{output}} trong lệnh",
+          "saveFailed": "Không thể lưu"
+        },
+        "templates": {
+          "meetingSummary": {
+            "name": "Tóm tắt cuộc họp",
+            "description": "Tóm tắt nội dung cuộc họp"
+          },
+          "actionItems": {
+            "name": "Việc cần làm",
+            "description": "Liệt kê các việc cần thực hiện"
+          },
+          "keyPoints": {
+            "name": "Điểm chính",
+            "description": "Rút ra các điểm quan trọng"
+          },
+          "emailDraft": {
+            "name": "Nháp email",
+            "description": "Tạo email từ nội dung"
+          },
+          "grammarClarity": {
+            "name": "Sửa ngữ pháp",
+            "description": "Cải thiện ngữ pháp và rõ ràng"
+          },
+          "technicalNotes": {
+            "name": "Ghi chú kỹ thuật",
+            "description": "Tóm tắt nội dung kỹ thuật"
+          },
+          "translateVi": {
+            "name": "Dịch tiếng Việt",
+            "description": "Dịch sang tiếng Việt"
+          }
+        }
+      },
+      "sessionTokenSaved": "Token phiên đã lưu"
     },
     "history": {
       "title": "Lịch sử",
@@ -466,7 +558,9 @@
       "save": "Lưu bản ghi",
       "unsave": "Xóa khỏi đã lưu",
       "delete": "Xóa mục",
-      "deleteError": "Không thể xóa mục. Vui lòng thử lại."
+      "deleteError": "Không thể xóa mục. Vui lòng thử lại.",
+      "noResults": "Không tìm thấy kết quả",
+      "searchPlaceholder": "Tìm kiếm..."
     },
     "debug": {
       "title": "Gỡ lỗi",
@@ -623,7 +717,16 @@
     "off": "Tắt",
     "yes": "Có",
     "no": "Không",
-    "noOptionsFound": "Không tìm thấy tùy chọn"
+    "noOptionsFound": "Không tìm thấy tùy chọn",
+    "saving": "Đang lưu...",
+    "clear": "Xóa",
+    "copy": "Sao chép",
+    "copied": "Đã sao chép",
+    "dismiss": "Đóng",
+    "prompt": "Lệnh",
+    "characters": "ký tự",
+    "downloading": "Đang tải xuống...",
+    "unknown": "Không rõ"
   },
   "meeting": {
     "title": "Chế độ Cuộc họp",
@@ -642,7 +745,42 @@
         "Target": "Mục tiêu",
         "FileText": "Tài liệu",
         "Calendar": "Lịch"
-      }
+      },
+      "selectTemplate": "Chọn mẫu",
+      "none": "Không có mẫu",
+      "noneDescription": "Ghi âm không theo mẫu cụ thể",
+      "noTemplates": "Chưa có mẫu nào",
+      "loading": "Đang tải mẫu...",
+      "show": "Hiện mẫu",
+      "hide": "Ẩn mẫu"
+    },
+    "detail": {
+      "audio": "Âm thanh"
+    },
+    "summary": {
+      "title": "Tóm tắt",
+      "generate": "Tạo tóm tắt",
+      "regenerate": "Tạo lại",
+      "generating": "Đang tạo...",
+      "noSummary": "Chưa có tóm tắt",
+      "noTranscript": "Chưa có bản ghi để tóm tắt",
+      "generateError": "Không thể tạo tóm tắt",
+      "cancelEdit": "Hủy",
+      "editSummary": "Chỉnh sửa tóm tắt",
+      "saveSummary": "Lưu tóm tắt",
+      "summaryUpdateError": "Không thể lưu tóm tắt",
+      "summaryUpdateSuccess": "Đã lưu tóm tắt"
+    },
+    "export": "Xuất",
+    "exportMarkdown": "Xuất Markdown",
+    "exportText": "Xuất văn bản",
+    "exportSuccess": "Đã xuất thành công",
+    "regenerate": "Tạo lại",
+    "regenerateDesc": "Tạo lại bản ghi với model và ngôn ngữ khác",
+    "regenerateLanguage": "Ngôn ngữ",
+    "regenerateModel": "Model",
+    "status": {
+      "processingIndicator": "Đang xử lý..."
     }
   },
   "accessibility": {
@@ -660,5 +798,24 @@
   },
   "overlay": {
     "transcribing": "Đang chuyển đổi..."
+  },
+  "tts": {
+    "readTranscript": "Đọc transcript",
+    "stop": "Dừng",
+    "read": "Đọc"
+  },
+  "errorBoundary": {
+    "icon": "⚠️",
+    "title": "Đã xảy ra lỗi",
+    "description": "Ứng dụng gặp lỗi không mong muốn. Vui lòng thử lại.",
+    "tryAgain": "Thử lại"
+  },
+  "app": {
+    "meetingGuard": {
+      "dictationWillStop": "Phiên ghi âm đang hoạt động sẽ dừng khi bạn bắt đầu cuộc họp.",
+      "stopTitle": "Dừng ghi âm cuộc họp?",
+      "stopDescription": "Chuyển sang mục khác sẽ dừng ghi âm hiện tại.",
+      "stopAndSwitch": "Dừng & Chuyển"
+    }
   }
 }

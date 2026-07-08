@@ -2,12 +2,7 @@ use log::{debug, warn};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Once;
-use std::time::Instant;
-
-static POST_PROCESS_DEFAULTS_INIT: Once = Once::new();
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
@@ -107,6 +102,9 @@ pub struct MeetingTemplate {
     pub prompt_id: Option<String>,
     #[serde(default)]
     pub summary_prompt_template: Option<String>, // Custom prompt template for AI summaries
+    /// STT engine override for this template: "whisper" | "soniox" | "funasr". Empty = use global setting.
+    #[serde(default)]
+    pub stt_engine: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -320,6 +318,61 @@ pub struct AppSettings {
     pub app_language: String,
     #[serde(default = "default_meeting_templates")]
     pub meeting_templates: Vec<MeetingTemplate>,
+    #[serde(default = "default_auto_save")]
+    pub auto_save: bool,
+    #[serde(default = "default_auto_transcribe")]
+    pub auto_transcribe: bool,
+    #[serde(default = "default_auto_summary")]
+    pub auto_summary: bool,
+    #[serde(default = "default_notify_completed")]
+    pub notify_completed: bool,
+    #[serde(default = "default_notify_failed")]
+    pub notify_failed: bool,
+    #[serde(default = "default_notify_app_updates")]
+    pub notify_app_updates: bool,
+    #[serde(default)]
+    pub soniox_api_key: Option<String>,
+    /// "whisper" | "soniox" | "funasr". Defaults to "whisper".
+    #[serde(default = "default_meeting_stt_engine")]
+    pub meeting_stt_engine: String,
+    #[serde(default = "default_funasr_base_url")]
+    pub funasr_base_url: String,
+    #[serde(default = "default_funasr_model")]
+    pub funasr_model: String,
+    /// Enable speaker diarization for meeting transcripts (requires diarization models).
+    #[serde(default)]
+    pub diarization_enabled: bool,
+}
+
+fn default_auto_save() -> bool {
+    true
+}
+fn default_auto_transcribe() -> bool {
+    false
+}
+fn default_auto_summary() -> bool {
+    true
+}
+fn default_notify_completed() -> bool {
+    true
+}
+fn default_notify_failed() -> bool {
+    true
+}
+fn default_notify_app_updates() -> bool {
+    false
+}
+
+fn default_meeting_stt_engine() -> String {
+    "whisper".to_string()
+}
+
+fn default_funasr_base_url() -> String {
+    "http://localhost:8000".to_string()
+}
+
+fn default_funasr_model() -> String {
+    "fun-asr-nano".to_string()
 }
 
 fn default_model() -> String {
@@ -425,8 +478,10 @@ fn default_meeting_templates() -> Vec<MeetingTemplate> {
 Transcript:
 {}
 
-Provide a clear, concise summary focusing on actionable items and personal development points."#.to_string()
+Provide a clear, concise summary focusing on actionable items and personal development points."#
+                    .to_string(),
             ),
+            stt_engine: None,
             created_at: 0,
             updated_at: 0,
         },
@@ -459,8 +514,10 @@ Provide a clear, concise summary focusing on actionable items and personal devel
 Transcript:
 {}
 
-Keep it brief and action-oriented, focusing on momentum and blockers."#.to_string()
+Keep it brief and action-oriented, focusing on momentum and blockers."#
+                    .to_string(),
             ),
+            stt_engine: None,
             created_at: 0,
             updated_at: 0,
         },
@@ -501,8 +558,10 @@ Keep it brief and action-oriented, focusing on momentum and blockers."#.to_strin
 Transcript:
 {}
 
-Provide an objective, balanced assessment suitable for hiring decisions."#.to_string()
+Provide an objective, balanced assessment suitable for hiring decisions."#
+                    .to_string(),
             ),
+            stt_engine: None,
             created_at: 0,
             updated_at: 0,
         },
@@ -511,6 +570,14 @@ Provide an objective, balanced assessment suitable for hiring decisions."#.to_st
 
 fn default_post_process_provider_id() -> String {
     "openai".to_string()
+}
+
+fn default_post_process_api_keys() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for provider in default_post_process_providers() {
+        map.insert(provider.id, String::new());
+    }
+    map
 }
 
 fn default_post_process_providers() -> Vec<PostProcessProvider> {
@@ -601,14 +668,6 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
     providers
 }
 
-fn default_post_process_api_keys() -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for provider in default_post_process_providers() {
-        map.insert(provider.id, String::new());
-    }
-    map
-}
-
 fn default_model_for_provider(provider_id: &str) -> String {
     if provider_id == APPLE_INTELLIGENCE_PROVIDER_ID {
         return APPLE_INTELLIGENCE_DEFAULT_MODEL_ID.to_string();
@@ -644,14 +703,6 @@ fn default_post_process_prompts() -> Vec<LLMPrompt> {
 }
 
 fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
-    let mut changed = false;
-    POST_PROCESS_DEFAULTS_INIT.call_once(|| {
-        changed = apply_post_process_defaults(settings);
-    });
-    changed
-}
-
-fn apply_post_process_defaults(settings: &mut AppSettings) -> bool {
     let mut changed = false;
     for provider in default_post_process_providers() {
         if settings
@@ -724,6 +775,42 @@ pub fn get_default_settings() -> AppSettings {
         },
     );
 
+    #[cfg(target_os = "macos")]
+    let meta = "command";
+    #[cfg(not(target_os = "macos"))]
+    let meta = "ctrl";
+
+    bindings.insert(
+        "start_stop_recording".to_string(),
+        ShortcutBinding {
+            id: "start_stop_recording".to_string(),
+            name: "Start / Stop Recording".to_string(),
+            description: "Toggle meeting recording.".to_string(),
+            default_binding: format!("{}+r", meta),
+            current_binding: format!("{}+r", meta),
+        },
+    );
+    bindings.insert(
+        "pause_resume".to_string(),
+        ShortcutBinding {
+            id: "pause_resume".to_string(),
+            name: "Pause / Resume".to_string(),
+            description: "Pause or resume the active recording.".to_string(),
+            default_binding: format!("{}+p", meta),
+            current_binding: format!("{}+p", meta),
+        },
+    );
+    bindings.insert(
+        "quick_note".to_string(),
+        ShortcutBinding {
+            id: "quick_note".to_string(),
+            name: "Open Quick Note".to_string(),
+            description: "Open quick note for the current meeting.".to_string(),
+            default_binding: format!("{}+n", meta),
+            current_binding: format!("{}+n", meta),
+        },
+    );
+
     AppSettings {
         bindings,
         push_to_talk: true,
@@ -753,7 +840,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_enabled: default_post_process_enabled(),
         post_process_provider_id: default_post_process_provider_id(),
         post_process_providers: default_post_process_providers(),
-        post_process_api_keys: default_post_process_api_keys(),
+        post_process_api_keys: HashMap::new(),
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
@@ -761,6 +848,17 @@ pub fn get_default_settings() -> AppSettings {
         append_trailing_space: false,
         app_language: default_app_language(),
         meeting_templates: default_meeting_templates(),
+        auto_save: default_auto_save(),
+        auto_transcribe: default_auto_transcribe(),
+        auto_summary: default_auto_summary(),
+        notify_completed: default_notify_completed(),
+        notify_failed: default_notify_failed(),
+        notify_app_updates: default_notify_app_updates(),
+        soniox_api_key: None,
+        meeting_stt_engine: default_meeting_stt_engine(),
+        funasr_base_url: default_funasr_base_url(),
+        funasr_model: default_funasr_model(),
+        diarization_enabled: false,
     }
 }
 
@@ -812,7 +910,11 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
 
                 if updated {
                     debug!("Settings updated with new bindings");
-                    store.set("settings", serde_json::to_value(&settings).unwrap());
+                    if let Ok(val) = serde_json::to_value(&settings) {
+                        store.set("settings", val);
+                    } else {
+                        warn!("Failed to serialize settings after merging bindings");
+                    }
                 }
 
                 settings
@@ -821,96 +923,59 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
                 warn!("Failed to parse settings: {}", e);
                 // Fall back to default settings if parsing fails
                 let default_settings = get_default_settings();
-                store.set("settings", serde_json::to_value(&default_settings).unwrap());
+                if let Ok(val) = serde_json::to_value(&default_settings) {
+                    store.set("settings", val);
+                }
                 default_settings
             }
         }
     } else {
         let default_settings = get_default_settings();
-        store.set("settings", serde_json::to_value(&default_settings).unwrap());
+        if let Ok(val) = serde_json::to_value(&default_settings) {
+            store.set("settings", val);
+        }
         default_settings
     };
 
     if ensure_post_process_defaults(&mut settings) {
-        store.set("settings", serde_json::to_value(&settings).unwrap());
+        if let Ok(val) = serde_json::to_value(&settings) {
+            store.set("settings", val);
+        } else {
+            warn!("Failed to serialize settings after post-process defaults");
+        }
     }
 
     settings
 }
 
-/// Simple TTL-based cache for AppSettings to avoid reading/deserializing JSON
-/// on every get_settings() call.
-struct SettingsCache {
-    settings: AppSettings,
-    timestamp: Instant,
-    ttl: std::time::Duration,
-}
-
-impl SettingsCache {
-    fn new(settings: AppSettings) -> Self {
-        Self {
-            settings,
-            timestamp: Instant::now(),
-            ttl: std::time::Duration::from_secs(1),
-        }
-    }
-
-    fn get(&self) -> Option<&AppSettings> {
-        if self.timestamp.elapsed() < self.ttl {
-            Some(&self.settings)
-        } else {
-            None
-        }
-    }
-
-    fn update(&mut self, settings: AppSettings) {
-        self.settings = settings;
-        self.timestamp = Instant::now();
-    }
-}
-
-thread_local! {
-    static SETTINGS_CACHE: RefCell<Option<SettingsCache>> = const { RefCell::new(None) };
-}
-
 pub fn get_settings(app: &AppHandle) -> AppSettings {
-    // Check thread-local cache first
-    let cached = SETTINGS_CACHE.with(|cache| {
-        cache.borrow().as_ref().and_then(|c| c.get().cloned())
-    });
-
-    if let Some(settings) = cached {
-        return settings;
-    }
-
     let store = app
         .store(SETTINGS_STORE_PATH)
         .expect("Failed to initialize store");
 
+    // Helper to persist settings, logging on failure instead of panicking
+    fn persist(store: &tauri_plugin_store::Store<tauri::Wry>, settings: &AppSettings) {
+        match serde_json::to_value(settings) {
+            Ok(val) => store.set("settings", val),
+            Err(e) => warn!("Failed to serialize settings: {}", e),
+        }
+    }
+
     let mut settings = if let Some(settings_value) = store.get("settings") {
         serde_json::from_value::<AppSettings>(settings_value).unwrap_or_else(|_| {
             let default_settings = get_default_settings();
-            store.set("settings", serde_json::to_value(&default_settings).unwrap());
+            persist(&store, &default_settings);
             default_settings
         })
     } else {
         let default_settings = get_default_settings();
-        store.set("settings", serde_json::to_value(&default_settings).unwrap());
+        persist(&store, &default_settings);
         default_settings
     };
 
     if ensure_post_process_defaults(&mut settings) {
-        store.set("settings", serde_json::to_value(&settings).unwrap());
+        persist(&store, &settings);
     }
-
-    // Update cache
-    SETTINGS_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        match cache.as_mut() {
-            Some(c) => c.update(settings.clone()),
-            None => *cache = Some(SettingsCache::new(settings.clone())),
-        }
-    });
 
     settings
 }
@@ -920,16 +985,10 @@ pub fn write_settings(app: &AppHandle, settings: AppSettings) {
         .store(SETTINGS_STORE_PATH)
         .expect("Failed to initialize store");
 
-    store.set("settings", serde_json::to_value(&settings).unwrap());
-
-    // Invalidate cache on write
-    SETTINGS_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        match cache.as_mut() {
-            Some(c) => c.update(settings),
-            None => *cache = Some(SettingsCache::new(settings)),
-        }
-    });
+    match serde_json::to_value(&settings) {
+        Ok(val) => store.set("settings", val),
+        Err(e) => warn!("Failed to serialize settings in write_settings: {}", e),
+    }
 }
 
 pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {

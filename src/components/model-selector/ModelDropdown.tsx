@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import type { ModelInfo } from "@/bindings";
 import { formatModelSize } from "../../lib/utils/format";
 import {
-  getTranslatedModelName,
   getTranslatedModelDescription,
+  getTranslatedModelName,
 } from "../../lib/utils/modelTranslation";
 import { ProgressBar } from "../shared";
 
@@ -35,9 +35,12 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
   onError,
 }) => {
   const { t } = useTranslation();
-  const availableModels = models.filter((m) => m.is_downloaded);
-  const downloadableModels = models.filter((m) => !m.is_downloaded);
-  const isFirstRun = availableModels.length === 0 && models.length > 0;
+  const sttModels = models.filter((m) => m.engine_type !== "Diarization");
+  const availableModels = sttModels.filter((m) => m.is_downloaded);
+  const recommendedAvailable = availableModels.filter((m) => m.is_recommended);
+  const otherAvailable = availableModels.filter((m) => !m.is_recommended);
+  const downloadableModels = sttModels.filter((m) => !m.is_downloaded);
+  const isFirstRun = availableModels.length === 0 && sttModels.length > 0;
 
   const handleDeleteClick = async (e: React.MouseEvent, modelId: string) => {
     e.preventDefault();
@@ -65,6 +68,70 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
     onModelDownload(modelId);
   };
 
+  const renderAvailableModelItem = (model: ModelInfo, showRecommendedBadge = false) => (
+    <div
+      key={model.id}
+      onClick={() => handleModelClick(model.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleModelClick(model.id);
+        }
+      }}
+      tabIndex={0}
+      role="button"
+      className={`w-full px-3 py-2 text-left hover:bg-mid-gray/10 transition-colors cursor-pointer focus:outline-none ${
+        currentModelId === model.id
+          ? "bg-logo-primary/10 text-logo-primary"
+          : ""
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-1.5 text-sm">
+            {getTranslatedModelName(model, t)}
+            {showRecommendedBadge && (
+              <span className="text-xs bg-logo-primary/10 text-logo-primary px-1.5 py-0.5 rounded">
+                {t("modelSelector.recommended", "Recommended")}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-text/40 italic pr-4">
+            {getTranslatedModelDescription(model, t)}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {currentModelId === model.id && (
+            <div className="text-xs text-logo-primary">
+              {t("modelSelector.active")}
+            </div>
+          )}
+          {currentModelId !== model.id && (
+            <button
+              onClick={(e) => handleDeleteClick(e, model.id)}
+              className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded transition-colors"
+              title={t("modelSelector.deleteModel", {
+                modelName: getTranslatedModelName(model, t),
+              })}
+            >
+              <svg
+                className="w-3 h-3"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="absolute bottom-full left-0 mb-2 w-64 bg-background border border-mid-gray/20 rounded-lg shadow-lg py-2 z-50">
       {/* First Run Welcome */}
@@ -79,70 +146,30 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
         </div>
       )}
 
-      {/* Available Models */}
+      {/* Available Models — Recommended section first */}
       {availableModels.length > 0 && (
         <div>
-          <div className="px-3 py-1 text-xs font-medium text-text/80 border-b border-mid-gray/10">
-            {t("modelSelector.availableModels")}
-          </div>
-          {availableModels.map((model) => (
-            <div
-              key={model.id}
-              onClick={() => handleModelClick(model.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleModelClick(model.id);
-                }
-              }}
-              tabIndex={0}
-              role="button"
-              className={`w-full px-3 py-2 text-left hover:bg-mid-gray/10 transition-colors cursor-pointer focus:outline-none ${
-                currentModelId === model.id
-                  ? "bg-logo-primary/10 text-logo-primary"
-                  : ""
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm">
-                    {getTranslatedModelName(model, t)}
-                  </div>
-                  <div className="text-xs text-text/40 italic pr-4">
-                    {getTranslatedModelDescription(model, t)}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {currentModelId === model.id && (
-                    <div className="text-xs text-logo-primary">
-                      {t("modelSelector.active")}
-                    </div>
-                  )}
-                  {currentModelId !== model.id && (
-                    <button
-                      onClick={(e) => handleDeleteClick(e, model.id)}
-                      className="text-red-400 hover:text-red-300 p-1 hover:bg-red-500/10 rounded transition-colors"
-                      title={t("modelSelector.deleteModel", {
-                        modelName: getTranslatedModelName(model, t),
-                      })}
-                    >
-                      <svg
-                        className="w-3 h-3"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+          {recommendedAvailable.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-xs font-medium text-text/80 border-b border-mid-gray/10">
+                {t("modelSelector.recommended", "Recommended")}
               </div>
+              {recommendedAvailable.map((m) => renderAvailableModelItem(m, true))}
+            </>
+          )}
+          {otherAvailable.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-xs font-medium text-text/80 border-b border-mid-gray/10">
+                {t("modelSelector.availableModels")}
+              </div>
+              {otherAvailable.map((m) => renderAvailableModelItem(m, false))}
+            </>
+          )}
+          {recommendedAvailable.length === 0 && (
+            <div className="px-3 py-1 text-xs font-medium text-text/80 border-b border-mid-gray/10">
+              {t("modelSelector.availableModels")}
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -182,11 +209,11 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-sm">
+                    <div className="flex items-center gap-1.5 text-sm">
                       {getTranslatedModelName(model, t)}
-                      {model.id === "parakeet-tdt-0.6b-v3" && isFirstRun && (
-                        <span className="ml-2 text-xs bg-logo-primary/20 text-logo-primary px-1.5 py-0.5 rounded">
-                          {t("onboarding.recommended")}
+                      {model.is_recommended && isFirstRun && (
+                        <span className="text-xs bg-logo-primary/20 text-logo-primary px-1.5 py-0.5 rounded">
+                          {t("modelSelector.recommended", "Recommended")}
                         </span>
                       )}
                     </div>

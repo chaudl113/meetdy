@@ -26,8 +26,6 @@ pub use manager::MeetingSessionManager;
 
 // Re-export internal types needed by other modules (may not all be used yet)
 #[allow(unused_imports)]
-pub(crate) use db::DbPool;
-#[allow(unused_imports)]
 pub(crate) use models::MeetingManagerState;
 #[allow(unused_imports)]
 pub(crate) use wav_writer::WavWriterHandle;

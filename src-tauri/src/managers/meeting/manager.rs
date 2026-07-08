@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use hound::{WavReader, WavSpec, WavWriter};
 use log::{debug, error, info};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -27,9 +27,10 @@ use crate::audio_toolkit::{
 use crate::managers::meeting_logger::{
     log_meeting_event, log_performance_metric, MeetingLogContext, MeetingTimer,
 };
+use crate::managers::diarization::SpeakerDiarizationManager;
 use crate::settings::get_settings;
 
-use super::db::{init_meeting_database, DbPool, SqliteConnectionManager};
+use super::db::{get_connection, init_meeting_database};
 use super::models::{
     ActionItem, ActionItemStatus, AudioSourceType, KeyPoint, MeetingManagerState, MeetingNote,
     MeetingSession, MeetingStatus, Participant, Tag, TranscriptSegment,
@@ -66,8 +67,6 @@ pub struct MeetingSessionManager {
     /// Directory for storing meeting session folders
     /// e.g., `{app_data}/meetings/`
     meetings_dir: PathBuf,
-    /// Connection pool for the SQLite database
-    db_pool: DbPool,
     /// Path to the SQLite database for meeting sessions
     /// e.g., `{app_data}/meetings.db`
     db_path: PathBuf,
@@ -119,14 +118,13 @@ impl MeetingSessionManager {
             info!("Created meetings directory: {:?}", meetings_dir);
         }
 
-        // Initialize the database, run migrations, and create connection pool
-        let db_pool = init_meeting_database(&db_path)?;
+        // Initialize the database and run migrations
+        init_meeting_database(&db_path)?;
 
         let manager = Self {
             state: Arc::new(Mutex::new(MeetingManagerState::default())),
             app_handle: app_handle.clone(),
             meetings_dir,
-            db_pool,
             db_path,
             transcription_manager,
             live_transcripts: Arc::new(Mutex::new(HashMap::new())),
@@ -170,14 +168,6 @@ impl MeetingSessionManager {
         if let Ok(mut speaker) = self.active_speaker.lock() {
             *speaker = None;
         }
-    }
-
-    /// Returns the current active speaker ID, if any.
-    pub fn get_active_speaker_id(&self) -> Option<String> {
-        self.active_speaker
-            .lock()
-            .ok()
-            .and_then(|s| s.as_ref().map(|(id, _)| id.clone()))
     }
 
     /// Gets the current session status atomically.
@@ -311,6 +301,24 @@ impl MeetingSessionManager {
         Ok(())
     }
 
+    /// Stores the audio file path for an imported/external session.
+    pub fn set_audio_path_for_session(
+        &self,
+        session_id: &str,
+        audio_path: &str,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+        let rows_affected = conn.execute(
+            "UPDATE meeting_sessions SET audio_path = ?1 WHERE id = ?2",
+            params![audio_path, session_id],
+        )?;
+        if rows_affected == 0 {
+            return Err(anyhow::anyhow!("Session not found: {}", session_id));
+        }
+        info!("Set audio path for session {}: {}", session_id, audio_path);
+        Ok(())
+    }
+
     /// Retries transcription for a failed or interrupted session.
     ///
     /// This method:
@@ -426,9 +434,9 @@ impl MeetingSessionManager {
         }
     }
 
-    /// Gets a connection from the pool to the meetings database.
-    fn get_connection(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
-        Ok(self.db_pool.get()?)
+    /// Gets a connection to the meetings database.
+    fn get_connection(&self) -> Result<Connection> {
+        get_connection(&self.db_path)
     }
 
     /// Formats a Unix timestamp into a human-readable meeting title.
@@ -781,7 +789,7 @@ impl MeetingSessionManager {
             created_at: chrono::Utc::now().timestamp(),
         };
 
-        super::db::insert_note(&self.db_pool, &note)?;
+        super::db::insert_note(&self.db_path, &note)?;
         info!(
             "Added note {} to session {} at t={}s",
             note.id, session_id, note.timestamp_seconds
@@ -791,12 +799,12 @@ impl MeetingSessionManager {
 
     /// Returns the notes attached to a meeting session, ordered chronologically.
     pub fn list_notes(&self, session_id: &str) -> Result<Vec<MeetingNote>> {
-        super::db::list_notes_by_session(&self.db_pool, session_id)
+        super::db::list_notes_by_session(&self.db_path, session_id)
     }
 
     /// Deletes a note by id. Returns Ok(()) if the note existed, error otherwise.
     pub fn delete_note(&self, note_id: &str) -> Result<()> {
-        let deleted = super::db::delete_note(&self.db_pool, note_id)?;
+        let deleted = super::db::delete_note(&self.db_path, note_id)?;
         if !deleted {
             return Err(anyhow::anyhow!("Note not found: {}", note_id));
         }
@@ -3059,6 +3067,96 @@ impl MeetingSessionManager {
     /// # Returns
     /// * `Ok(String)` - The transcribed text
     /// * `Err` - If file not found, reading fails, or transcription fails (including model not loaded)
+    /// Like `process_transcription` but allows overriding the model and language for one run.
+    pub fn process_transcription_with_override(
+        &self,
+        session_id: &str,
+        audio_path: &str,
+        model_id: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<String> {
+        debug!(
+            "process_transcription_with_override: session={} model={:?} language={:?}",
+            session_id, model_id, language
+        );
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
+
+        let full_audio_path = self.meetings_dir.join(audio_path);
+        if !full_audio_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Audio file not found: {:?}",
+                full_audio_path
+            ));
+        }
+
+        let reader = WavReader::open(&full_audio_path).map_err(|e| {
+            anyhow::anyhow!("Failed to open audio file {:?}: {}", full_audio_path, e)
+        })?;
+        let spec = reader.spec();
+        if spec.bits_per_sample != 16 || spec.sample_rate != 16000 {
+            return Err(anyhow::anyhow!(
+                "Audio format mismatch: expected 16-bit/16000Hz, got {}/{}Hz",
+                spec.bits_per_sample,
+                spec.sample_rate
+            ));
+        }
+        let samples: Vec<f32> = reader
+            .into_samples::<i16>()
+            .filter_map(Result::ok)
+            .map(|s| s as f32 / i16::MAX as f32)
+            .collect();
+        if samples.is_empty() {
+            return Err(anyhow::anyhow!("Audio file contains no samples"));
+        }
+
+        // If this is a funasr session, ignore overrides and fall back to standard path.
+        if session.stt_engine == "funasr" {
+            return self.process_transcription(session_id, audio_path);
+        }
+
+        let transcription_text = self
+            .transcription_manager
+            .transcribe_with_override(samples, model_id, language)
+            .map_err(|e| {
+                anyhow::anyhow!("Transcription failed for {:?}: {}", full_audio_path, e)
+            })?;
+
+        // Run diarization if enabled
+        let settings = get_settings(&self.app_handle);
+        if settings.diarization_enabled && session.stt_engine != "soniox" {
+            if let Some(dm) = self
+                .app_handle
+                .try_state::<std::sync::Arc<SpeakerDiarizationManager>>()
+            {
+                if dm.is_available() {
+                    match dm.process(&full_audio_path) {
+                        Ok(segments) => {
+                            let _ = self.save_diarization_segments(session_id, &segments);
+                            let formatted = self
+                                .format_transcript_with_speakers(&transcription_text, &segments);
+                            let _ = self.app_handle.emit(
+                                "diarization_completed",
+                                serde_json::json!({ "session_id": session_id }),
+                            );
+                            return Ok(formatted);
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[diarization] override run failed for {}: {}",
+                                session_id,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(transcription_text)
+    }
+
     pub fn process_transcription(&self, session_id: &str, audio_path: &str) -> Result<String> {
         debug!("Processing transcription for audio: {}", audio_path);
         let session = self
@@ -3077,7 +3175,7 @@ impl MeetingSessionManager {
         }
 
         // Read WAV file and convert to f32 samples
-        let mut reader = WavReader::open(&full_audio_path).map_err(|e| {
+        let reader = WavReader::open(&full_audio_path).map_err(|e| {
             anyhow::anyhow!("Failed to open audio file {:?}: {}", full_audio_path, e)
         })?;
 
@@ -3091,17 +3189,12 @@ impl MeetingSessionManager {
             ));
         }
 
-        // Stream-read samples, converting from i16 to f32 directly without
-        // intermediate Vec<i16> allocation.
-        let sample_count = reader.duration() as usize;
-        let mut samples: Vec<f32> = Vec::with_capacity(sample_count);
-
-        for sample_result in reader.samples::<i16>() {
-            let sample = sample_result.map_err(|e| {
-                anyhow::anyhow!("Failed to read WAV sample: {}", e)
-            })?;
-            samples.push(sample as f32 / i16::MAX as f32);
-        }
+        // Read samples and convert from i16 to f32
+        let samples: Vec<f32> = reader
+            .into_samples::<i16>()
+            .filter_map(Result::ok)
+            .map(|sample| sample as f32 / i16::MAX as f32)
+            .collect();
 
         debug!(
             "Read {} audio samples from {:?}",
@@ -3190,6 +3283,13 @@ impl MeetingSessionManager {
             return Ok(transcript);
         }
 
+        // Ensure the transcription model is loaded before processing.
+        // The model may have been unloaded by the idle-timeout since recording stopped.
+        if !self.transcription_manager.is_model_loaded() {
+            info!("[process_transcription] model not loaded, initiating load for session {}", session_id);
+            self.transcription_manager.initiate_model_load();
+        }
+
         // Call TranscriptionManager to process audio
         let transcription_text = self
             .transcription_manager
@@ -3203,7 +3303,109 @@ impl MeetingSessionManager {
             transcription_text.len()
         );
 
+        // Run speaker diarization if enabled and models are available.
+        // Skip for engines that provide their own diarization (soniox, funasr).
+        let settings = get_settings(&self.app_handle);
+        if settings.diarization_enabled
+            && session.stt_engine != "soniox"
+            && session.stt_engine != "funasr"
+        {
+            if let Some(dm) = self
+                .app_handle
+                .try_state::<std::sync::Arc<SpeakerDiarizationManager>>()
+            {
+                if dm.is_available() {
+                    match dm.process(&full_audio_path) {
+                        Ok(segments) => {
+                            if let Err(e) = self.save_diarization_segments(session_id, &segments) {
+                                log::warn!(
+                                    "[diarization] failed to save segments for {}: {}",
+                                    session_id,
+                                    e
+                                );
+                            }
+                            let formatted =
+                                self.format_transcript_with_speakers(&transcription_text, &segments);
+                            if let Err(e) = self.app_handle.emit(
+                                "diarization_completed",
+                                serde_json::json!({ "session_id": session_id }),
+                            ) {
+                                log::warn!(
+                                    "[diarization] failed to emit event for {}: {}",
+                                    session_id,
+                                    e
+                                );
+                            }
+                            return Ok(formatted);
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[diarization] processing failed for {}, using raw transcript: {}",
+                                session_id,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(transcription_text)
+    }
+
+    /// Saves diarization segments to the transcript_segments table.
+    fn save_diarization_segments(
+        &self,
+        session_id: &str,
+        segments: &[crate::managers::diarization::DiarizationSegment],
+    ) -> Result<()> {
+        use super::db::insert_transcript_segment;
+        use super::models::TranscriptSegment;
+        let conn = self.get_connection()?;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        for (i, seg) in segments.iter().enumerate() {
+            let ts = TranscriptSegment {
+                id: uuid::Uuid::new_v4().to_string(),
+                meeting_id: session_id.to_string(),
+                start_ms: (seg.start_sec * 1000.0) as i64,
+                end_ms: (seg.end_sec * 1000.0) as i64,
+                text: String::new(),
+                speaker_id: Some(format!("speaker_{}", seg.speaker_id)),
+                sequence: i as i64,
+                created_at: now_ms,
+            };
+            insert_transcript_segment(&conn, &ts)?;
+        }
+        Ok(())
+    }
+
+    /// Formats transcript text with speaker labels from diarization segments.
+    fn format_transcript_with_speakers(
+        &self,
+        transcript: &str,
+        segments: &[crate::managers::diarization::DiarizationSegment],
+    ) -> String {
+        if segments.is_empty() {
+            return transcript.to_string();
+        }
+        // Build a simple header listing speaker time ranges, then the raw transcript.
+        // A more sophisticated implementation would word-align text to segments.
+        let mut header = String::new();
+        let mut last_speaker = usize::MAX;
+        for seg in segments {
+            if seg.speaker_id != last_speaker {
+                header.push_str(&format!(
+                    "[Speaker {} {:.1}s-{:.1}s] ",
+                    seg.speaker_id, seg.start_sec, seg.end_sec
+                ));
+                last_speaker = seg.speaker_id;
+            }
+        }
+        if header.is_empty() {
+            transcript.to_string()
+        } else {
+            format!("{}\n{}", header.trim_end(), transcript)
+        }
     }
 
     /// Handles app shutdown cleanup for meeting sessions.

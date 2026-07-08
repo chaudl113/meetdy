@@ -235,7 +235,8 @@
     "errors": {
       "loadModels": "Не удалось загрузить доступные модели.",
       "downloadModel": "Не удалось загрузить модель: {{error}}."
-    }
+    },
+    "skipDownload": "Пропустить — скачать позже"
   },
   "modelSelector": {
     "welcome": "Добро пожаловать в Handy!",
@@ -385,6 +386,10 @@
         "placeholder": "Добавить слово",
         "add": "Добавлять",
         "remove": "Удалить {{word}}"
+      },
+      "diarization": {
+        "label": "Диаризация говорящих",
+        "description": "Определяет, кто говорил и когда в записях совещаний. Требует загрузки моделей диаризации."
       }
     },
     "postProcessing": {
@@ -601,5 +606,13 @@
   },
   "overlay": {
     "transcribing": "Расшифровка..."
+  },
+  "app": {
+    "meetingGuard": {
+      "dictationWillStop": "Dictation will be stopped when you start a meeting.",
+      "stopTitle": "Stop meeting recording?",
+      "stopDescription": "Switching sections will stop the current recording.",
+      "stopAndSwitch": "Stop & Switch"
+    }
   }
 }

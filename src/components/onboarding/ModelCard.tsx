@@ -4,8 +4,8 @@ import { Download } from "lucide-react";
 import type { ModelInfo } from "@/bindings";
 import { formatModelSize } from "../../lib/utils/format";
 import {
-  getTranslatedModelName,
   getTranslatedModelDescription,
+  getTranslatedModelName,
 } from "../../lib/utils/modelTranslation";
 import Badge from "../ui/Badge";
 
