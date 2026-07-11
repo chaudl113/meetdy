@@ -836,4 +836,64 @@ mod tests {
         // Transcript 8.5–11s: fully in spk2 window.
         assert_eq!(best_speaker_for_segment(8500, 11000, &segs), Some(2));
     }
+
+    // --- import_meeting_audio validation tests --------------------------------
+
+    use crate::commands::meeting::validate_import_audio_path;
+
+    #[test]
+    fn test_import_nonexistent_file_rejected() {
+        let result = validate_import_audio_path("/nonexistent/path/audio.wav");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("File not found"));
+    }
+
+    #[test]
+    fn test_import_unsupported_extension_rejected() {
+        // Create a temp file with an unsupported extension.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audio.avi");
+        std::fs::write(&path, b"fake").unwrap();
+        let result = validate_import_audio_path(path.to_str().unwrap());
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("Unsupported audio format"), "got: {}", msg);
+    }
+
+    #[test]
+    fn test_import_supported_extensions_accepted() {
+        let dir = tempdir().unwrap();
+        for ext in &["wav", "mp3", "m4a", "flac", "ogg"] {
+            let path = dir.path().join(format!("audio.{}", ext));
+            std::fs::write(&path, b"fake audio data").unwrap();
+            let result = validate_import_audio_path(path.to_str().unwrap());
+            assert!(
+                result.is_ok(),
+                "Extension .{} should be accepted, got: {:?}",
+                ext,
+                result
+            );
+            assert_eq!(result.unwrap(), *ext);
+        }
+    }
+
+    #[test]
+    fn test_import_uppercase_extension_accepted() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audio.WAV");
+        std::fs::write(&path, b"fake").unwrap();
+        let result = validate_import_audio_path(path.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "wav");
+    }
+
+    #[test]
+    fn test_import_no_extension_rejected() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audiofile");
+        std::fs::write(&path, b"fake").unwrap();
+        let result = validate_import_audio_path(path.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported audio format"));
+    }
 }

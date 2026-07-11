@@ -12,6 +12,31 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Maximum transcript size in bytes (1MB) to prevent OOM and LLM context overflow
 const MAX_TRANSCRIPT_SIZE: u64 = 1024 * 1024;
 
+/// Supported audio extensions for import.
+const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "mp3", "m4a", "flac", "ogg"];
+
+/// Validates a file path for audio import.
+/// Returns `Ok(lowercase_extension)` or an `Err` with a user-facing message.
+pub(crate) fn validate_import_audio_path(file_path: &str) -> Result<String, String> {
+    let src_path = Path::new(file_path);
+    if !src_path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+    let ext = src_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if !SUPPORTED_AUDIO_EXTS.contains(&ext.as_str()) {
+        return Err(format!(
+            "Unsupported audio format '.{}'. Supported: {}",
+            ext,
+            SUPPORTED_AUDIO_EXTS.join(", ")
+        ));
+    }
+    Ok(ext)
+}
+
 /// Interpolates a title template with current date/time placeholders.
 ///
 /// Supported placeholders:
@@ -635,26 +660,7 @@ pub fn import_meeting_audio(
 ) -> Result<crate::managers::meeting::MeetingSession, String> {
     info!("import_meeting_audio called: path={} title={:?}", file_path, title);
 
-    // Validate file exists
-    let src_path = std::path::Path::new(&file_path);
-    if !src_path.exists() {
-        return Err(format!("File not found: {}", file_path));
-    }
-
-    // Validate extension
-    let ext = src_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_default();
-    let supported = ["wav", "mp3", "m4a", "flac", "ogg"];
-    if !supported.contains(&ext.as_str()) {
-        return Err(format!(
-            "Unsupported audio format '.{}'. Supported: {}",
-            ext,
-            supported.join(", ")
-        ));
-    }
+    let ext = validate_import_audio_path(&file_path)?;
 
     let manager = app.state::<Arc<MeetingSessionManager>>();
 
