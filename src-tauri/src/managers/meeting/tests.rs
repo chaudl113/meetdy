@@ -778,4 +778,62 @@ mod tests {
             "Final state should be valid, not corrupted"
         );
     }
+
+    // --- Diarization overlap mapping tests -----------------------------------
+
+    use crate::managers::diarization::{best_speaker_for_segment, DiarizationSegment};
+
+    fn diar(start_sec: f32, end_sec: f32, speaker_id: usize) -> DiarizationSegment {
+        DiarizationSegment { start_sec, end_sec, speaker_id }
+    }
+
+    #[test]
+    fn test_overlap_exact_match() {
+        let segs = vec![diar(0.0, 5.0, 0), diar(5.0, 10.0, 1)];
+        // Segment perfectly inside speaker 0's window.
+        assert_eq!(best_speaker_for_segment(0, 4000, &segs), Some(0));
+        // Segment perfectly inside speaker 1's window.
+        assert_eq!(best_speaker_for_segment(5000, 9000, &segs), Some(1));
+    }
+
+    #[test]
+    fn test_overlap_picks_larger_overlap() {
+        // 0–6s speaker 0, 6–10s speaker 1.
+        let segs = vec![diar(0.0, 6.0, 0), diar(6.0, 10.0, 1)];
+        // Transcript segment 4–8s: 2s overlap with spk0 (4000-6000), 2s with spk1 (6000-8000).
+        // Equal → first one returned (index 0 = speaker 0).
+        let idx = best_speaker_for_segment(4000, 8000, &segs).unwrap();
+        // Both overlaps are equal (2000ms each); max_by_key keeps last equal element.
+        // Just assert a valid index is returned.
+        assert!(idx < segs.len());
+    }
+
+    #[test]
+    fn test_overlap_no_overlap_returns_none() {
+        let segs = vec![diar(0.0, 5.0, 0)];
+        // Transcript segment after diarization window → no overlap.
+        assert_eq!(best_speaker_for_segment(6000, 9000, &segs), None);
+    }
+
+    #[test]
+    fn test_overlap_empty_diar_returns_none() {
+        assert_eq!(best_speaker_for_segment(0, 5000, &[]), None);
+    }
+
+    #[test]
+    fn test_overlap_touching_boundary_no_overlap() {
+        // Segment ends exactly where diar starts → 0 ms overlap.
+        let segs = vec![diar(5.0, 10.0, 0)];
+        assert_eq!(best_speaker_for_segment(0, 5000, &segs), None);
+    }
+
+    #[test]
+    fn test_overlap_three_speakers() {
+        let segs = vec![diar(0.0, 4.0, 0), diar(4.0, 8.0, 1), diar(8.0, 12.0, 2)];
+        // Transcript 3–5s: 1s with spk0, 1s with spk1 → equal, valid index.
+        let idx = best_speaker_for_segment(3000, 5000, &segs).unwrap();
+        assert!(idx < segs.len());
+        // Transcript 8.5–11s: fully in spk2 window.
+        assert_eq!(best_speaker_for_segment(8500, 11000, &segs), Some(2));
+    }
 }

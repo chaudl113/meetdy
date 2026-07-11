@@ -11,6 +11,27 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
+/// Returns the diarization segment index with the greatest millisecond overlap
+/// with the interval `[ts_start_ms, ts_end_ms)`.
+/// Returns `None` if `diar_segments` is empty or no overlap exists.
+pub fn best_speaker_for_segment(
+    ts_start_ms: i64,
+    ts_end_ms: i64,
+    diar_segments: &[DiarizationSegment],
+) -> Option<usize> {
+    diar_segments
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| {
+            let d_start = (d.start_sec * 1000.0) as i64;
+            let d_end = (d.end_sec * 1000.0) as i64;
+            let overlap = (ts_end_ms.min(d_end) - ts_start_ms.max(d_start)).max(0);
+            if overlap > 0 { Some((i, overlap)) } else { None }
+        })
+        .max_by_key(|&(_, overlap)| overlap)
+        .map(|(i, _)| i)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct DiarizationSegment {
     pub start_sec: f32,

@@ -614,7 +614,6 @@ pub fn list_transcript_segments(
 }
 
 /// Update the speaker_id of a transcript segment.
-#[allow(dead_code)]
 pub fn update_segment_speaker(
     conn: &Connection,
     segment_id: &str,
@@ -628,7 +627,6 @@ pub fn update_segment_speaker(
 }
 
 /// Update the color_index of a participant.
-#[allow(dead_code)]
 pub fn update_participant_color_index(
     conn: &Connection,
     participant_id: &str,

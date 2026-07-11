@@ -3352,59 +3352,150 @@ impl MeetingSessionManager {
         Ok(transcription_text)
     }
 
-    /// Saves diarization segments to the transcript_segments table.
+    /// Assigns speaker IDs to existing transcript segments by overlap mapping,
+    /// and creates participant entries for each detected speaker.
+    ///
+    /// For each transcript segment already in the DB, finds the diarization
+    /// segment with the maximum time overlap and assigns its speaker.
+    /// Falls back to inserting bare time-range segments when no transcript
+    /// segments exist yet (e.g. batch audio with no prior segments).
     fn save_diarization_segments(
         &self,
         session_id: &str,
-        segments: &[crate::managers::diarization::DiarizationSegment],
+        diar_segments: &[crate::managers::diarization::DiarizationSegment],
     ) -> Result<()> {
-        use super::db::insert_transcript_segment;
-        use super::models::TranscriptSegment;
+        use super::db::{
+            insert_participant, insert_transcript_segment, list_transcript_segments,
+            update_participant_color_index, update_segment_speaker,
+        };
+
+        if diar_segments.is_empty() {
+            return Ok(());
+        }
+
         let conn = self.get_connection()?;
         let now_ms = chrono::Utc::now().timestamp_millis();
-        for (i, seg) in segments.iter().enumerate() {
-            let ts = TranscriptSegment {
-                id: uuid::Uuid::new_v4().to_string(),
-                meeting_id: session_id.to_string(),
-                start_ms: (seg.start_sec * 1000.0) as i64,
-                end_ms: (seg.end_sec * 1000.0) as i64,
-                text: String::new(),
-                speaker_id: Some(format!("speaker_{}", seg.speaker_id)),
-                sequence: i as i64,
+
+        // Collect unique speaker IDs and create participant entries.
+        let mut speaker_ids: Vec<usize> = diar_segments.iter().map(|s| s.speaker_id).collect();
+        speaker_ids.sort_unstable();
+        speaker_ids.dedup();
+
+        // Color palette indices cycle through 0-7.
+        for (color_idx, &spk) in speaker_ids.iter().enumerate() {
+            let participant_id = format!("diar_{}_{}", session_id, spk);
+            let p = Participant {
+                id: participant_id.clone(),
+                session_id: session_id.to_string(),
+                name: format!("Speaker {}", spk + 1),
+                role: None,
+                sort_order: spk as i64,
                 created_at: now_ms,
+                color_index: (color_idx % 8) as i64,
             };
-            insert_transcript_segment(&conn, &ts)?;
+            // insert_participant uses db_path; ignore duplicate errors gracefully.
+            let _ = insert_participant(&self.db_path, &p);
+            let _ = update_participant_color_index(&conn, &participant_id, (color_idx % 8) as i64);
         }
+
+        // Try to map onto existing transcript segments first.
+        let transcript_segments = list_transcript_segments(&conn, session_id)?;
+
+        if transcript_segments.is_empty() {
+            // No transcript segments yet — insert bare time-range segments.
+            for (i, seg) in diar_segments.iter().enumerate() {
+                let participant_id = format!("diar_{}_{}", session_id, seg.speaker_id);
+                let ts = TranscriptSegment {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    meeting_id: session_id.to_string(),
+                    start_ms: (seg.start_sec * 1000.0) as i64,
+                    end_ms: (seg.end_sec * 1000.0) as i64,
+                    text: String::new(),
+                    speaker_id: Some(participant_id),
+                    sequence: i as i64,
+                    created_at: now_ms,
+                };
+                insert_transcript_segment(&conn, &ts)?;
+            }
+            return Ok(());
+        }
+
+        // Map each transcript segment to the diarization segment with the
+        // greatest millisecond overlap.
+        for ts in &transcript_segments {
+            if let Some(idx) = crate::managers::diarization::best_speaker_for_segment(
+                ts.start_ms,
+                ts.end_ms,
+                diar_segments,
+            ) {
+                let participant_id =
+                    format!("diar_{}_{}", session_id, diar_segments[idx].speaker_id);
+                update_segment_speaker(&conn, &ts.id, Some(&participant_id))?;
+            }
+        }
+
         Ok(())
     }
 
-    /// Formats transcript text with speaker labels from diarization segments.
+    /// Formats transcript text with speaker labels derived from diarization segments.
+    ///
+    /// Walks the transcript lines and prepends a "[Speaker N]" label whenever
+    /// the speaker changes, using the same overlap heuristic as `save_diarization_segments`.
     fn format_transcript_with_speakers(
         &self,
         transcript: &str,
-        segments: &[crate::managers::diarization::DiarizationSegment],
+        diar_segments: &[crate::managers::diarization::DiarizationSegment],
     ) -> String {
-        if segments.is_empty() {
+        if diar_segments.is_empty() || transcript.is_empty() {
             return transcript.to_string();
         }
-        // Build a simple header listing speaker time ranges, then the raw transcript.
-        // A more sophisticated implementation would word-align text to segments.
-        let mut header = String::new();
+
+        // Split transcript into non-empty lines and assign a speaker to each.
+        let lines: Vec<&str> = transcript.lines().filter(|l| !l.trim().is_empty()).collect();
+        if lines.is_empty() {
+            return transcript.to_string();
+        }
+
+        // Estimate each line's time position by distributing evenly over the
+        // full audio duration reported by the last diarization segment.
+        let total_sec = diar_segments.iter().map(|s| s.end_sec).fold(0.0_f32, f32::max);
+        let line_duration = if total_sec > 0.0 { total_sec / lines.len() as f32 } else { 1.0 };
+
+        let mut output = String::with_capacity(transcript.len() + lines.len() * 16);
         let mut last_speaker = usize::MAX;
-        for seg in segments {
-            if seg.speaker_id != last_speaker {
-                header.push_str(&format!(
-                    "[Speaker {} {:.1}s-{:.1}s] ",
-                    seg.speaker_id, seg.start_sec, seg.end_sec
-                ));
-                last_speaker = seg.speaker_id;
+
+        for (i, line) in lines.iter().enumerate() {
+            let line_mid = (i as f32 + 0.5) * line_duration;
+            // Find diarization segment whose interval contains line_mid.
+            let speaker = diar_segments
+                .iter()
+                .find(|d| d.start_sec <= line_mid && line_mid < d.end_sec)
+                .or_else(|| {
+                    // Fallback: closest segment by midpoint distance.
+                    diar_segments.iter().min_by(|a, b| {
+                        let mid_a = (a.start_sec + a.end_sec) / 2.0;
+                        let mid_b = (b.start_sec + b.end_sec) / 2.0;
+                        (mid_a - line_mid)
+                            .abs()
+                            .partial_cmp(&(mid_b - line_mid).abs())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                })
+                .map(|d| d.speaker_id)
+                .unwrap_or(0);
+
+            if speaker != last_speaker {
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(&format!("[Speaker {}]\n", speaker + 1));
+                last_speaker = speaker;
             }
+            output.push_str(line);
+            output.push('\n');
         }
-        if header.is_empty() {
-            transcript.to_string()
-        } else {
-            format!("{}\n{}", header.trim_end(), transcript)
-        }
+
+        output
     }
 
     /// Handles app shutdown cleanup for meeting sessions.
