@@ -23,7 +23,10 @@ function noiseFloorToLabel(noiseDb: number): "low" | "medium" | "high" {
   return "high";
 }
 
-function clarityToLabel(snrDb: number, peak: number): "low" | "medium" | "high" {
+function clarityToLabel(
+  snrDb: number,
+  peak: number,
+): "low" | "medium" | "high" {
   // Require both a decent SNR and a non-clipping peak to call it "high".
   if (snrDb >= 20 && peak < 0.95) return "high";
   if (snrDb >= 10) return "medium";

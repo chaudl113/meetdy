@@ -19,7 +19,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useShallow } from "zustand/react/shallow";
 import { useMeetingStore } from "../../stores/meetingStore";
 import { useRecordingConfigStore } from "../../stores/recordingConfigStore";
-import { type AudioSourceType, commands, type MeetingSession, type MeetingTemplate } from "@/bindings";
+import {
+  type AudioSourceType,
+  commands,
+  type MeetingSession,
+  type MeetingTemplate,
+} from "@/bindings";
 
 interface SourceOption {
   id: AudioSourceType;
@@ -55,11 +60,11 @@ const SOURCE_OPTIONS: SourceOption[] = [
   },
 ];
 
-const SectionHeader: React.FC<{ index: number; title: string; suffix?: string }> = ({
-  index,
-  title,
-  suffix,
-}) => (
+const SectionHeader: React.FC<{
+  index: number;
+  title: string;
+  suffix?: string;
+}> = ({ index, title, suffix }) => (
   <div className="flex items-baseline gap-1">
     <span className="text-logo-primary font-semibold">
       {index}. {title}
@@ -81,7 +86,15 @@ const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({
 
 export const StartMeeting: React.FC = () => {
   const { t } = useTranslation();
-  const { startMeeting, sessionStatus, isLoading, error, setCurrentSession, setSessionStatus, fetchSessions } = useMeetingStore(
+  const {
+    startMeeting,
+    sessionStatus,
+    isLoading,
+    error,
+    setCurrentSession,
+    setSessionStatus,
+    fetchSessions,
+  } = useMeetingStore(
     useShallow((s) => ({
       startMeeting: s.startMeeting,
       sessionStatus: s.sessionStatus,
@@ -105,7 +118,9 @@ export const StartMeeting: React.FC = () => {
   } = useRecordingConfigStore();
 
   const [templates, setTemplates] = useState<MeetingTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    null,
+  );
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
@@ -201,12 +216,10 @@ export const StartMeeting: React.FC = () => {
   ];
 
   return (
-    <div className="w-full max-w-[1200px]">
+    <div className="w-full">
       {/* Page header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-1">
-          {t("startMeeting.title")}
-        </h1>
+        <h1 className="text-2xl font-bold mb-1">{t("startMeeting.title")}</h1>
         <p className="text-text/60 text-sm">{t("startMeeting.subtitle")}</p>
       </div>
 
@@ -217,7 +230,11 @@ export const StartMeeting: React.FC = () => {
           {templates.length > 0 && (
             <Card>
               <div className="flex items-center gap-2 mb-3">
-                <LayoutTemplate width={16} height={16} className="text-text/60" />
+                <LayoutTemplate
+                  width={16}
+                  height={16}
+                  className="text-text/60"
+                />
                 <span className="text-sm font-semibold">
                   {t("startMeeting.section.templates", "Quick Templates")}
                 </span>
@@ -236,19 +253,29 @@ export const StartMeeting: React.FC = () => {
                     >
                       <button
                         type="button"
-                        onClick={() => handleTemplateSelect(isSelected ? null : tpl)}
+                        onClick={() =>
+                          handleTemplateSelect(isSelected ? null : tpl)
+                        }
                         className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left"
                       >
                         <div className="flex items-center gap-2">
                           {isSelected && (
-                            <Check width={13} height={13} strokeWidth={3} className="text-logo-primary shrink-0" />
+                            <Check
+                              width={13}
+                              height={13}
+                              strokeWidth={3}
+                              className="text-logo-primary shrink-0"
+                            />
                           )}
-                          <span className={`text-sm font-medium ${isSelected ? "text-logo-primary" : ""}`}>
+                          <span
+                            className={`text-sm font-medium ${isSelected ? "text-logo-primary" : ""}`}
+                          >
                             {tpl.name}
                           </span>
                         </div>
                         <ChevronDown
-                          width={14} height={14}
+                          width={14}
+                          height={14}
                           className={`text-text/40 transition-transform ${isSelected ? "rotate-180" : ""}`}
                         />
                       </button>
@@ -350,7 +377,11 @@ export const StartMeeting: React.FC = () => {
             </div>
             {(error || importError) && (
               <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
-                <AlertCircle width={16} height={16} className="mt-0.5 shrink-0" />
+                <AlertCircle
+                  width={16}
+                  height={16}
+                  className="mt-0.5 shrink-0"
+                />
                 <span className="break-words">{importError ?? error}</span>
               </div>
             )}
@@ -445,12 +476,10 @@ export const StartMeeting: React.FC = () => {
           {/* Tips */}
           <Card>
             <div className="flex items-center gap-2 mb-3">
-              <Lightbulb
-                width={18}
-                height={18}
-                className="text-logo-primary"
-              />
-              <span className="font-semibold">{t("startMeeting.tips.title")}</span>
+              <Lightbulb width={18} height={18} className="text-logo-primary" />
+              <span className="font-semibold">
+                {t("startMeeting.tips.title")}
+              </span>
             </div>
             <ul className="flex flex-col gap-2">
               {tips.map((tip, i) => (

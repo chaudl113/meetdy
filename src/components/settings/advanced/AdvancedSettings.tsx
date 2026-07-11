@@ -17,10 +17,12 @@ export const AdvancedSettings: React.FC = () => {
   const { t } = useTranslation();
   const settings = useSettingsStore((s) => s.settings);
   const [sonioxKey, setSonioxKey] = useState(settings?.soniox_api_key ?? "");
-  const [funasrUrl, setFunasrUrl] = useState(settings?.funasr_base_url ?? "http://localhost:8000");
+  const [funasrUrl, setFunasrUrl] = useState(
+    settings?.funasr_base_url ?? "http://localhost:8000",
+  );
 
   return (
-    <div className="max-w-3xl w-full mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <SettingsGroup title={t("settings.advanced.title")}>
         <StartHidden descriptionMode="tooltip" grouped={true} />
         <AutostartToggle descriptionMode="tooltip" grouped={true} />
@@ -33,7 +35,9 @@ export const AdvancedSettings: React.FC = () => {
         <DiarizationToggle descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
 
-      <SettingsGroup title={t("settings.advanced.cloudServices", "Cloud / Local Services")}>
+      <SettingsGroup
+        title={t("settings.advanced.cloudServices", "Cloud / Local Services")}
+      >
         <div className="px-4 py-3 space-y-3">
           <div className="space-y-1">
             <label className="text-sm font-medium text-text/80">
@@ -44,7 +48,10 @@ export const AdvancedSettings: React.FC = () => {
               value={sonioxKey}
               onChange={(e) => setSonioxKey(e.target.value)}
               onBlur={() => commands.changeSonioxApiKeySetting(sonioxKey)}
-              placeholder={t("settings.advanced.sonioxApiKeyPlaceholder", "Enter Soniox API key")}
+              placeholder={t(
+                "settings.advanced.sonioxApiKeyPlaceholder",
+                "Enter Soniox API key",
+              )}
               className="w-full px-3 py-2 text-sm rounded-lg bg-mid-gray/10 border border-mid-gray/20 text-text placeholder-text/30 focus:outline-none focus:border-logo-primary/50"
             />
           </div>

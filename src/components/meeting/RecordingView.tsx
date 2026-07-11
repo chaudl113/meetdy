@@ -2,10 +2,7 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RecordingTopBar } from "./recording/RecordingTopBar";
 import { RecordingMetaBar } from "./recording/RecordingMetaBar";
-import {
-  type RecordingTab,
-  RecordingTabs,
-} from "./recording/RecordingTabs";
+import { type RecordingTab, RecordingTabs } from "./recording/RecordingTabs";
 import { LiveTranscriptPanel } from "./recording/LiveTranscriptPanel";
 import { AISummaryPanel } from "./recording/AISummaryPanel";
 import { NotesPanel } from "./recording/NotesPanel";
@@ -86,7 +83,7 @@ export const RecordingView: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-[1200px] flex flex-col gap-4">
+    <div className="w-full flex flex-col gap-4">
       <RecordingTopBar onAddNote={openAddNote} />
       <RecordingMetaBar />
 

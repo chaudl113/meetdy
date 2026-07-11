@@ -183,6 +183,7 @@ interface MeetingStore {
 
   // Event listener management
   _initId: number;
+  _cancelCurrentInit: (() => void) | null;
   _eventUnlisteners: UnlistenFn[];
   _visibilityHandler: (() => void) | null;
   initializeEventListeners: () => Promise<void>;
@@ -212,6 +213,7 @@ export const useMeetingStore = create<MeetingStore>()(
 
     // Event listener management
     _initId: 0,
+    _cancelCurrentInit: null,
     _eventUnlisteners: [],
     _visibilityHandler: null,
 
@@ -257,7 +259,17 @@ export const useMeetingStore = create<MeetingStore>()(
     },
 
     // Start a new meeting session
-    startMeeting: async (audioSource?: AudioSourceType, templateId?: string, sttEngine?: string, sonioxApiKey?: string, funasrBaseUrl?: string, funasrModel?: string, title?: string, participants?: string, tags?: string) => {
+    startMeeting: async (
+      audioSource?: AudioSourceType,
+      templateId?: string,
+      sttEngine?: string,
+      sonioxApiKey?: string,
+      funasrBaseUrl?: string,
+      funasrModel?: string,
+      title?: string,
+      participants?: string,
+      tags?: string,
+    ) => {
       const {
         setLoading,
         setError,
@@ -385,7 +397,9 @@ export const useMeetingStore = create<MeetingStore>()(
         return;
       }
 
-      if (!["failed", "completed", "interrupted"].includes(currentSession.status)) {
+      if (
+        !["failed", "completed", "interrupted"].includes(currentSession.status)
+      ) {
         setError("Can only regenerate transcript after recording has stopped");
         return;
       }
@@ -394,7 +408,11 @@ export const useMeetingStore = create<MeetingStore>()(
       setError(null);
 
       try {
-        const result = await commands.retryTranscription(currentSession.id, null, null);
+        const result = await commands.retryTranscription(
+          currentSession.id,
+          null,
+          null,
+        );
         if (result.status === "ok") {
           setSessionStatus("processing");
         } else {
@@ -546,7 +564,9 @@ export const useMeetingStore = create<MeetingStore>()(
       try {
         const result = await commands.deleteMeetingNote(noteId);
         if (result.status === "ok") {
-          set((state) => ({ notes: state.notes.filter((n) => n.id !== noteId) }));
+          set((state) => ({
+            notes: state.notes.filter((n) => n.id !== noteId),
+          }));
         } else {
           setError(result.error);
         }
@@ -576,18 +596,20 @@ export const useMeetingStore = create<MeetingStore>()(
 
     // Initialize event listeners for meeting_* events from backend
     initializeEventListeners: async () => {
-      // Hydrate stt settings from persisted AppSettings so that keyboard
-      // shortcuts work correctly even if StartMeeting screen was never opened.
-      try {
-        const settingsResult = await commands.getAppSettings();
-        if (settingsResult.status === "ok") {
-          const s = settingsResult.data;
-          const store = useRecordingConfigStore.getState();
-          // STT engine settings now live in global settings only
-        }
-      } catch {
-        // non-fatal: fall back to store defaults
-      }
+      // Cancel any in-flight init immediately (before any awaits)
+      get()._cancelCurrentInit?.();
+      get().cleanupEventListeners();
+
+      // Local cancelled flag set before first await so StrictMode cleanup can cancel us
+      let cancelled = false;
+      set({
+        _initId: Date.now(),
+        _cancelCurrentInit: () => {
+          cancelled = true;
+        },
+      });
+
+      const isValid = () => !cancelled && get()._initId !== 0;
 
       const {
         setSessionStatus,
@@ -596,20 +618,9 @@ export const useMeetingStore = create<MeetingStore>()(
         _startDurationTimer,
         _stopDurationTimer,
         refreshStatus,
-        cleanupEventListeners,
       } = get();
 
-      // Clean up any existing listeners first
-      cleanupEventListeners();
-
-      // Generate new init ID for abort pattern
-      const initId = Date.now();
-      set({ _initId: initId });
-
       const unlisteners: UnlistenFn[] = [];
-
-      // Helper to check if this init is still valid
-      const isValid = () => get()._initId === initId;
 
       try {
         // Listen for meeting_started event
@@ -726,9 +737,7 @@ export const useMeetingStore = create<MeetingStore>()(
             if (autoTranscribePref && !session.transcript_path) {
               commands
                 .retryTranscription(session.id, null, null)
-                .catch((err) =>
-                  console.warn("Auto transcribe failed:", err),
-                );
+                .catch((err) => console.warn("Auto transcribe failed:", err));
             }
 
             // Auto Summary (uses persisted setting)
@@ -870,7 +879,10 @@ export const useMeetingStore = create<MeetingStore>()(
                       text: cleanedChunk,
                       offset:
                         event.payload.start_ms > 0 || event.payload.end_ms > 0
-                          ? Math.max(0, Math.floor(event.payload.start_ms / 1000))
+                          ? Math.max(
+                              0,
+                              Math.floor(event.payload.start_ms / 1000),
+                            )
                           : state.recordingDuration,
                       startMs: event.payload.start_ms,
                       endMs: event.payload.end_ms,
@@ -921,15 +933,15 @@ export const useMeetingStore = create<MeetingStore>()(
         unlisteners.push(resumedUnlisten);
 
         // Listen for STT engine errors (e.g. Soniox bad key / connection lost)
-        const sttErrorUnlisten = await listen<{ session_id: string; message: string }>(
-          "meeting_stt_error",
-          (event) => {
-            if (!isValid()) return;
-            const currentSession = get().currentSession;
-            if (currentSession?.id !== event.payload.session_id) return;
-            set({ sttError: event.payload.message });
-          },
-        );
+        const sttErrorUnlisten = await listen<{
+          session_id: string;
+          message: string;
+        }>("meeting_stt_error", (event) => {
+          if (!isValid()) return;
+          const currentSession = get().currentSession;
+          if (currentSession?.id !== event.payload.session_id) return;
+          set({ sttError: event.payload.message });
+        });
         if (!isValid()) {
           sttErrorUnlisten();
           return;
@@ -937,17 +949,16 @@ export const useMeetingStore = create<MeetingStore>()(
         unlisteners.push(sttErrorUnlisten);
 
         // Auto-add diarization participants emitted by Soniox path
-        const participantAddedUnlisten = await listen<import("@/bindings").Participant>(
-          "meeting_participant_added",
-          (event) => {
-            if (!isValid()) return;
-            const currentSession = get().currentSession;
-            if (currentSession?.id !== event.payload.session_id) return;
-            set((state) => ({
-              participants: [...state.participants, event.payload],
-            }));
-          },
-        );
+        const participantAddedUnlisten = await listen<
+          import("@/bindings").Participant
+        >("meeting_participant_added", (event) => {
+          if (!isValid()) return;
+          const currentSession = get().currentSession;
+          if (currentSession?.id !== event.payload.session_id) return;
+          set((state) => ({
+            participants: [...state.participants, event.payload],
+          }));
+        });
         if (!isValid()) {
           participantAddedUnlisten();
           return;
@@ -955,29 +966,35 @@ export const useMeetingStore = create<MeetingStore>()(
         unlisteners.push(participantAddedUnlisten);
 
         // Global shortcut events emitted from Rust ACTION_MAP
-        const startStopUnlisten = await listen("shortcut_start_stop_recording", () => {
-          if (!isValid()) return;
-          const state = get();
-          if (state.sessionStatus === "recording") {
-            state.stopMeeting();
-          } else if (state.sessionStatus === "idle") {
-            const { audioSource } = useRecordingConfigStore.getState();
-            state.startMeeting(audioSource);
-          }
-        });
+        const startStopUnlisten = await listen(
+          "shortcut_start_stop_recording",
+          () => {
+            if (!isValid()) return;
+            const state = get();
+            if (state.sessionStatus === "recording") {
+              state.stopMeeting();
+            } else if (state.sessionStatus === "idle") {
+              const { audioSource } = useRecordingConfigStore.getState();
+              state.startMeeting(audioSource);
+            }
+          },
+        );
         if (!isValid()) {
           startStopUnlisten();
           return;
         }
         unlisteners.push(startStopUnlisten);
 
-        const pauseResumeUnlisten = await listen("shortcut_pause_resume", () => {
-          if (!isValid()) return;
-          const state = get();
-          if (state.sessionStatus !== "recording") return;
-          if (state.isPaused) state.resumeMeeting();
-          else state.pauseMeeting();
-        });
+        const pauseResumeUnlisten = await listen(
+          "shortcut_pause_resume",
+          () => {
+            if (!isValid()) return;
+            const state = get();
+            if (state.sessionStatus !== "recording") return;
+            if (state.isPaused) state.resumeMeeting();
+            else state.pauseMeeting();
+          },
+        );
         if (!isValid()) {
           pauseResumeUnlisten();
           return;
@@ -1016,8 +1033,9 @@ export const useMeetingStore = create<MeetingStore>()(
 
     // Cleanup all event listeners
     cleanupEventListeners: () => {
-      // Invalidate all pending inits
-      set({ _initId: 0 });
+      // Cancel any in-flight initializeEventListeners and invalidate committed ids
+      get()._cancelCurrentInit?.();
+      set({ _initId: 0, _cancelCurrentInit: null });
 
       const { _eventUnlisteners, _visibilityHandler } = get();
 

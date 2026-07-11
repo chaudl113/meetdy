@@ -16,10 +16,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useMeetingStore } from "../../stores/meetingStore";
 import { RecordingMetaBar } from "./recording/RecordingMetaBar";
 import { RecordingInfoCard } from "./recording/RecordingInfoCard";
-import {
-  type RecordingTab,
-  RecordingTabs,
-} from "./recording/RecordingTabs";
+import { type RecordingTab, RecordingTabs } from "./recording/RecordingTabs";
 import { AISummaryPanel } from "./recording/AISummaryPanel";
 import { NotesPanel } from "./recording/NotesPanel";
 import { AddNoteModal } from "./recording/AddNoteModal";
@@ -29,7 +26,6 @@ import { commands, type ModelInfo } from "@/bindings";
 import { LANGUAGES } from "../../lib/constants/languages";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
-
 
 /**
  * CompletedView — post-recording layout shown for processing / completed /
@@ -185,13 +181,17 @@ export const CompletedView: React.FC = () => {
     setExportOpen(false);
 
     // Fetch transcript
-    const transcriptResult = await commands.getMeetingTranscript(currentSession.id);
-    const transcript = transcriptResult.status === "ok" ? (transcriptResult.data ?? "") : "";
+    const transcriptResult = await commands.getMeetingTranscript(
+      currentSession.id,
+    );
+    const transcript =
+      transcriptResult.status === "ok" ? (transcriptResult.data ?? "") : "";
 
     let content = "";
     if (format === "md") {
       const summaryResult = await commands.getMeetingSummary(currentSession.id);
-      const summary = summaryResult.status === "ok" ? (summaryResult.data ?? null) : null;
+      const summary =
+        summaryResult.status === "ok" ? (summaryResult.data ?? null) : null;
       content = buildMarkdown(transcript, summary);
     } else {
       content = transcript;
@@ -249,7 +249,7 @@ export const CompletedView: React.FC = () => {
         : AlertCircle;
 
   return (
-    <div className="w-full max-w-[1200px] flex flex-col gap-4">
+    <div className="w-full flex flex-col gap-4">
       {/* Top status / actions bar */}
       <div className="flex items-center justify-between gap-4 px-5 py-3 bg-background border border-mid-gray/20 rounded-xl">
         <div className="flex items-center gap-3">
@@ -286,129 +286,145 @@ export const CompletedView: React.FC = () => {
               </button>
             </>
           )}
-          {["failed", "completed", "interrupted"].includes(sessionStatus) && currentSession && (
-            <>
-              {/* Retry (basic, red) for failed */}
-              {sessionStatus === "failed" && (
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RotateCcw
-                    width={14}
-                    height={14}
-                    className={isLoading ? "animate-spin" : ""}
-                  />
-                  <span className="text-sm font-semibold">
-                    {t("meeting.error.retry", "Retry")}
-                  </span>
-                </button>
-              )}
-              {/* Regenerate popover */}
-              <div className="relative" ref={regenRef}>
-                <button
-                  type="button"
-                  onClick={() => setRegenOpen((o) => !o)}
-                  disabled={regenLoading}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-mid-gray/20 text-text/80 hover:bg-mid-gray/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {regenLoading ? (
-                    <Loader2 width={14} height={14} className="animate-spin" />
-                  ) : (
-                    <RotateCcw width={14} height={14} />
-                  )}
-                  <span className="text-sm font-semibold">
-                    {t("meeting.regenerate", "Regenerate")}
-                  </span>
-                  <ChevronDown width={12} height={12} />
-                </button>
-                {regenOpen && (
-                  <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-background border border-mid-gray/20 rounded-xl shadow-xl p-4 flex flex-col gap-3">
-                    <p className="text-xs text-text/60">
-                      {t("meeting.regenerateDesc", "Override model and language for this transcription run.")}
-                    </p>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">
-                        {t("meeting.regenerateModel", "Model")}
-                      </label>
-                      <select
-                        value={regenModel}
-                        onChange={(e) => setRegenModel(e.target.value)}
-                        className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
-                      >
-                        <option value="">{t("common.default", "Default")}</option>
-                        {availableModels.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">
-                        {t("meeting.regenerateLanguage", "Language")}
-                      </label>
-                      <select
-                        value={regenLanguage}
-                        onChange={(e) => setRegenLanguage(e.target.value)}
-                        className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
-                      >
-                        {LANGUAGES.map((l) => (
-                          <option key={l.value} value={l.value}>
-                            {l.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleRegenerate}
-                      disabled={regenLoading}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-logo-primary text-white hover:opacity-90 disabled:opacity-50 text-sm font-semibold"
-                    >
-                      {regenLoading && <Loader2 width={14} height={14} className="animate-spin" />}
+          {["failed", "completed", "interrupted"].includes(sessionStatus) &&
+            currentSession && (
+              <>
+                {/* Retry (basic, red) for failed */}
+                {sessionStatus === "failed" && (
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    disabled={isLoading}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RotateCcw
+                      width={14}
+                      height={14}
+                      className={isLoading ? "animate-spin" : ""}
+                    />
+                    <span className="text-sm font-semibold">
+                      {t("meeting.error.retry", "Retry")}
+                    </span>
+                  </button>
+                )}
+                {/* Regenerate popover */}
+                <div className="relative" ref={regenRef}>
+                  <button
+                    type="button"
+                    onClick={() => setRegenOpen((o) => !o)}
+                    disabled={regenLoading}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-mid-gray/20 text-text/80 hover:bg-mid-gray/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {regenLoading ? (
+                      <Loader2
+                        width={14}
+                        height={14}
+                        className="animate-spin"
+                      />
+                    ) : (
+                      <RotateCcw width={14} height={14} />
+                    )}
+                    <span className="text-sm font-semibold">
                       {t("meeting.regenerate", "Regenerate")}
-                    </button>
-                  </div>
-                )}
-              </div>
+                    </span>
+                    <ChevronDown width={12} height={12} />
+                  </button>
+                  {regenOpen && (
+                    <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-background border border-mid-gray/20 rounded-xl shadow-xl p-4 flex flex-col gap-3">
+                      <p className="text-xs text-text/60">
+                        {t(
+                          "meeting.regenerateDesc",
+                          "Override model and language for this transcription run.",
+                        )}
+                      </p>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          {t("meeting.regenerateModel", "Model")}
+                        </label>
+                        <select
+                          value={regenModel}
+                          onChange={(e) => setRegenModel(e.target.value)}
+                          className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
+                        >
+                          <option value="">
+                            {t("common.default", "Default")}
+                          </option>
+                          {availableModels.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          {t("meeting.regenerateLanguage", "Language")}
+                        </label>
+                        <select
+                          value={regenLanguage}
+                          onChange={(e) => setRegenLanguage(e.target.value)}
+                          className="w-full bg-background border border-mid-gray/30 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-logo-primary"
+                        >
+                          {LANGUAGES.map((l) => (
+                            <option key={l.value} value={l.value}>
+                              {l.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRegenerate}
+                        disabled={regenLoading}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-logo-primary text-white hover:opacity-90 disabled:opacity-50 text-sm font-semibold"
+                      >
+                        {regenLoading && (
+                          <Loader2
+                            width={14}
+                            height={14}
+                            className="animate-spin"
+                          />
+                        )}
+                        {t("meeting.regenerate", "Regenerate")}
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-              {/* Export dropdown */}
-              <div className="relative" ref={exportRef}>
-                <button
-                  type="button"
-                  onClick={() => setExportOpen((o) => !o)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-mid-gray/20 text-text/80 hover:bg-mid-gray/10"
-                >
-                  <Download width={14} height={14} />
-                  <span className="text-sm font-semibold">
-                    {t("meeting.export", "Export")}
-                  </span>
-                  <ChevronDown width={12} height={12} />
-                </button>
-                {exportOpen && (
-                  <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-background border border-mid-gray/20 rounded-xl shadow-xl overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => handleExport("md")}
-                      className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
-                    >
-                      {t("meeting.exportMarkdown", "Export as Markdown")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleExport("txt")}
-                      className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
-                    >
-                      {t("meeting.exportText", "Export as Text")}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+                {/* Export dropdown */}
+                <div className="relative" ref={exportRef}>
+                  <button
+                    type="button"
+                    onClick={() => setExportOpen((o) => !o)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-mid-gray/20 text-text/80 hover:bg-mid-gray/10"
+                  >
+                    <Download width={14} height={14} />
+                    <span className="text-sm font-semibold">
+                      {t("meeting.export", "Export")}
+                    </span>
+                    <ChevronDown width={12} height={12} />
+                  </button>
+                  {exportOpen && (
+                    <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-background border border-mid-gray/20 rounded-xl shadow-xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => handleExport("md")}
+                        className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
+                      >
+                        {t("meeting.exportMarkdown", "Export as Markdown")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExport("txt")}
+                        className="w-full px-4 py-2.5 text-sm text-left hover:bg-mid-gray/10"
+                      >
+                        {t("meeting.exportText", "Export as Text")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           <button
             type="button"
             onClick={handleNewMeeting}

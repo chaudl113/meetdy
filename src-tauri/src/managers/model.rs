@@ -67,118 +67,122 @@ impl ModelManager {
             fs::create_dir_all(&models_dir)?;
         }
 
-                let lang_all: Vec<String> = vec!["en".into(), "vi".into(), "fr".into(), "de".into(), "es".into(), "zh".into(), "ja".into(), "ko".into()];
+        let lang_all: Vec<String> = vec![
+            "en".into(),
+            "vi".into(),
+            "fr".into(),
+            "de".into(),
+            "es".into(),
+            "zh".into(),
+            "ja".into(),
+            "ko".into(),
+        ];
         let lang_en: Vec<String> = vec!["en".into()];
-        let lang_vi: Vec<String> = vec!["vi".into()];
 
         let mut available_models = HashMap::new();
 
-        // --- GGUF Whisper models via transcribe-cpp ---
-        available_models.insert("small".to_string(), ModelInfo {
-            id: "small".to_string(), name: "Whisper Small (GGUF)".to_string(),
-            description: "Fast and fairly accurate.".to_string(),
-            filename: "whisper-small-Q5_K_M.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/whisper-small-gguf/resolve/main/whisper-small-Q5_K_M.gguf".to_string()),
-            size_mb: 262, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
-            engine_type: EngineType::TranscribeCpp, accuracy_score: 0.60, speed_score: 0.90,
-            supported_languages: lang_all.clone(), is_recommended: false,
-        });
+        // --- Whisper ggml models (whisper.cpp / whisper-rs) ---
+        available_models.insert(
+            "small".to_string(),
+            ModelInfo {
+                id: "small".to_string(),
+                name: "Whisper Small".to_string(),
+                description: "Fast and fairly accurate.".to_string(),
+                filename: "ggml-small.bin".to_string(),
+                url: Some(
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+                        .to_string(),
+                ),
+                size_mb: 466,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: false,
+                engine_type: EngineType::TranscribeCpp,
+                accuracy_score: 0.60,
+                speed_score: 0.90,
+                supported_languages: lang_all.clone(),
+                is_recommended: false,
+            },
+        );
         available_models.insert("medium-q5".to_string(), ModelInfo {
-            id: "medium-q5".to_string(), name: "Whisper Medium Q5 (GGUF)".to_string(),
+            id: "medium-q5".to_string(), name: "Whisper Medium Q5".to_string(),
             description: "Balanced accuracy and speed.".to_string(),
-            filename: "whisper-medium-Q5_K_M.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/whisper-medium-gguf/resolve/main/whisper-medium-Q5_K_M.gguf".to_string()),
+            filename: "ggml-medium-q5_0.bin".to_string(),
+            url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin".to_string()),
             size_mb: 514, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
             engine_type: EngineType::TranscribeCpp, accuracy_score: 0.78, speed_score: 0.65,
             supported_languages: lang_all.clone(), is_recommended: false,
         });
         available_models.insert("turbo-q5".to_string(), ModelInfo {
-            id: "turbo-q5".to_string(), name: "Whisper Turbo Q5 (GGUF)".to_string(),
+            id: "turbo-q5".to_string(), name: "Whisper Turbo Q5".to_string(),
             description: "Best overall. Strong accuracy, good speed.".to_string(),
-            filename: "whisper-large-v3-turbo-Q5_K_M.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/whisper-large-v3-turbo-gguf/resolve/main/whisper-large-v3-turbo-Q5_K_M.gguf".to_string()),
-            size_mb: 591, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
+            filename: "ggml-large-v3-turbo-q5_0.bin".to_string(),
+            url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin".to_string()),
+            size_mb: 547, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
             engine_type: EngineType::TranscribeCpp, accuracy_score: 0.82, speed_score: 0.55,
+            supported_languages: lang_all.clone(), is_recommended: true,
+        });
+        available_models.insert("turbo".to_string(), ModelInfo {
+            id: "turbo".to_string(), name: "Whisper Turbo".to_string(),
+            description: "Full-precision Turbo. Strong accuracy.".to_string(),
+            filename: "ggml-large-v3-turbo.bin".to_string(),
+            url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin".to_string()),
+            size_mb: 1549, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
+            engine_type: EngineType::TranscribeCpp, accuracy_score: 0.83, speed_score: 0.45,
             supported_languages: lang_all.clone(), is_recommended: false,
         });
         available_models.insert("large".to_string(), ModelInfo {
-            id: "large".to_string(), name: "Whisper Large (GGUF)".to_string(),
+            id: "large".to_string(), name: "Whisper Large".to_string(),
             description: "Good accuracy, but slow.".to_string(),
-            filename: "whisper-large-v3-Q5_K_M.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/whisper-large-v3-gguf/resolve/main/whisper-large-v3-Q5_K_M.gguf".to_string()),
-            size_mb: 1100, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
+            filename: "ggml-large-v3-q5_0.bin".to_string(),
+            url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin".to_string()),
+            size_mb: 1031, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
             engine_type: EngineType::TranscribeCpp, accuracy_score: 0.85, speed_score: 0.35,
             supported_languages: lang_all.clone(), is_recommended: false,
         });
 
         // --- Parakeet models (ONNX, English only) ---
-        available_models.insert("parakeet-tdt-0.6b-v2".to_string(), ModelInfo {
-            id: "parakeet-tdt-0.6b-v2".to_string(), name: "Parakeet V2".to_string(),
-            description: "English only. The best model for English speakers.".to_string(),
-            filename: "parakeet-tdt-0.6b-v2-int8".to_string(),
-            url: Some("https://blob.handy.computer/parakeet-v2-int8.tar.gz".to_string()),
-            size_mb: 473, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: true,
-            engine_type: EngineType::Parakeet, accuracy_score: 0.85, speed_score: 0.85,
-            supported_languages: lang_en.clone(), is_recommended: false,
-        });
-        available_models.insert("parakeet-tdt-0.6b-v3".to_string(), ModelInfo {
-            id: "parakeet-tdt-0.6b-v3".to_string(), name: "Parakeet V3".to_string(),
-            description: "Fast and accurate".to_string(),
-            filename: "parakeet-tdt-0.6b-v3-int8".to_string(),
-            url: Some("https://blob.handy.computer/parakeet-v3-int8.tar.gz".to_string()),
-            size_mb: 478, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: true,
-            engine_type: EngineType::Parakeet, accuracy_score: 0.80, speed_score: 0.85,
-            supported_languages: lang_en.clone(), is_recommended: false,
-        });
-
-        // --- Vietnamese-optimized models (transcribe-cpp GGUF) ---
-        available_models.insert("moonshine-base-vi".to_string(), ModelInfo {
-            id: "moonshine-base-vi".to_string(), name: "Moonshine Base (Vietnamese)".to_string(),
-            description: "Best Vietnamese model, 74MB, 9.67% WER.".to_string(),
-            filename: "moonshine-base-vi-Q8_0.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/moonshine-base-vi-gguf/resolve/main/moonshine-base-vi-Q8_0.gguf".to_string()),
-            size_mb: 74, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
-            engine_type: EngineType::TranscribeCpp, accuracy_score: 0.75, speed_score: 0.95,
-            supported_languages: lang_vi.clone(), is_recommended: true,
-        });
-        available_models.insert("moonshine-tiny-vi".to_string(), ModelInfo {
-            id: "moonshine-tiny-vi".to_string(), name: "Moonshine Tiny (Vietnamese)".to_string(),
-            description: "Smallest Vietnamese model, 34MB, ultra-fast.".to_string(),
-            filename: "moonshine-tiny-vi-Q8_0.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/moonshine-tiny-vi-gguf/resolve/main/moonshine-tiny-vi-Q8_0.gguf".to_string()),
-            size_mb: 34, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
-            engine_type: EngineType::TranscribeCpp, accuracy_score: 0.60, speed_score: 0.98,
-            supported_languages: lang_vi.clone(), is_recommended: false,
-        });
-
-        // --- Multilingual GGUF models ---
-        available_models.insert("nemotron-streaming".to_string(), ModelInfo {
-            id: "nemotron-streaming".to_string(), name: "Nemotron 3.5 ASR Streaming".to_string(),
-            description: "Streaming multilingual. Excellent Vietnamese (11.18% WER).".to_string(),
-            filename: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/main/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf".to_string()),
-            size_mb: 716, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
-            engine_type: EngineType::TranscribeCpp, accuracy_score: 0.82, speed_score: 0.70,
-            supported_languages: lang_all.clone(), is_recommended: false,
-        });
-        available_models.insert("qwen3-asr".to_string(), ModelInfo {
-            id: "qwen3-asr".to_string(), name: "Qwen3 ASR 0.6B".to_string(),
-            description: "30 languages including Vietnamese.".to_string(),
-            filename: "Qwen3-ASR-0.6B-Q8_0.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/Qwen3-ASR-0.6B-gguf/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf".to_string()),
-            size_mb: 811, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
-            engine_type: EngineType::TranscribeCpp, accuracy_score: 0.85, speed_score: 0.45,
-            supported_languages: lang_all.clone(), is_recommended: false,
-        });
-        available_models.insert("fun-asr-mlt".to_string(), ModelInfo {
-            id: "fun-asr-mlt".to_string(), name: "Fun-ASR-MLT Nano".to_string(),
-            description: "31 languages, strong Asian focus.".to_string(),
-            filename: "Fun-ASR-MLT-Nano-2512-Q8_0.gguf".to_string(),
-            url: Some("https://huggingface.co/handy-computer/Fun-ASR-MLT-Nano-2512-gguf/resolve/main/Fun-ASR-MLT-Nano-2512-Q8_0.gguf".to_string()),
-            size_mb: 850, is_downloaded: false, is_downloading: false, partial_size: 0, is_directory: false,
-            engine_type: EngineType::TranscribeCpp, accuracy_score: 0.80, speed_score: 0.50,
-            supported_languages: lang_all.clone(), is_recommended: false,
-        });
+        available_models.insert(
+            "parakeet-tdt-0.6b-v2".to_string(),
+            ModelInfo {
+                id: "parakeet-tdt-0.6b-v2".to_string(),
+                name: "Parakeet V2".to_string(),
+                description: "English only. The best model for English speakers.".to_string(),
+                filename: "parakeet-tdt-0.6b-v2-int8".to_string(),
+                url: Some("https://blob.handy.computer/parakeet-v2-int8.tar.gz".to_string()),
+                size_mb: 473,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: true,
+                engine_type: EngineType::Parakeet,
+                accuracy_score: 0.85,
+                speed_score: 0.85,
+                supported_languages: lang_en.clone(),
+                is_recommended: false,
+            },
+        );
+        available_models.insert(
+            "parakeet-tdt-0.6b-v3".to_string(),
+            ModelInfo {
+                id: "parakeet-tdt-0.6b-v3".to_string(),
+                name: "Parakeet V3".to_string(),
+                description: "Fast and accurate".to_string(),
+                filename: "parakeet-tdt-0.6b-v3-int8".to_string(),
+                url: Some("https://blob.handy.computer/parakeet-v3-int8.tar.gz".to_string()),
+                size_mb: 478,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: true,
+                engine_type: EngineType::Parakeet,
+                accuracy_score: 0.80,
+                speed_score: 0.85,
+                supported_languages: lang_en.clone(),
+                is_recommended: false,
+            },
+        );
 
         // --- Diarization models (speaker segmentation + speaker embedding) ---
         available_models.insert("pyannote-segmentation".to_string(), ModelInfo {
@@ -381,6 +385,22 @@ impl ModelManager {
             return Ok(());
         }
 
+        // Atomically check-and-set the downloading flag to prevent concurrent
+        // downloads of the same model appending to one partial file (corruption).
+        {
+            let mut models = self
+                .available_models
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if let Some(model) = models.get_mut(model_id) {
+                if model.is_downloading {
+                    info!("Download already in progress for model {}", model_id);
+                    return Ok(());
+                }
+                model.is_downloading = true;
+            }
+        }
+
         // Check if we have a partial download to resume
         let mut resume_from = if partial_path.exists() {
             let size = partial_path.metadata()?.len();
@@ -390,17 +410,6 @@ impl ModelManager {
             info!("Starting fresh download of model {} from {}", model_id, url);
             0
         };
-
-        // Mark as downloading
-        {
-            let mut models = self
-                .available_models
-                .lock()
-                .unwrap_or_else(|p| p.into_inner());
-            if let Some(model) = models.get_mut(model_id) {
-                model.is_downloading = true;
-            }
-        }
 
         // Create HTTP client with range request for resuming
         let client = reqwest::Client::new();

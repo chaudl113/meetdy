@@ -10,7 +10,10 @@ import {
   getTranslatedModelName,
 } from "../../../lib/utils/modelTranslation";
 import { useModelEvents } from "@/hooks/useModelEvents";
-import { type DownloadProgress, useModelEventStore } from "@/stores/modelEventStore";
+import {
+  type DownloadProgress,
+  useModelEventStore,
+} from "@/stores/modelEventStore";
 
 export const ModelsSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -78,10 +81,18 @@ export const ModelsSettings: React.FC = () => {
     }
   };
 
-  const downloadedModels = models.filter((m) => m.is_downloaded && m.engine_type !== "Diarization");
-  const recommendedDownloaded = downloadedModels.filter((m) => m.is_recommended);
-  const downloadableModels = models.filter((m) => !m.is_downloaded && m.engine_type !== "Diarization");
-  const diarizationModels = models.filter((m) => m.engine_type === "Diarization");
+  const downloadedModels = models.filter(
+    (m) => m.is_downloaded && m.engine_type !== "Diarization",
+  );
+  const recommendedDownloaded = downloadedModels.filter(
+    (m) => m.is_recommended,
+  );
+  const downloadableModels = models.filter(
+    (m) => !m.is_downloaded && m.engine_type !== "Diarization",
+  );
+  const diarizationModels = models.filter(
+    (m) => m.engine_type === "Diarization",
+  );
 
   const getModelCategory = (model: ModelInfo): "vi" | "multi" | "en" => {
     const langs = model.supported_languages;
@@ -213,7 +224,7 @@ export const ModelsSettings: React.FC = () => {
   };
 
   return (
-    <div className="max-w-3xl w-full mx-auto space-y-6">
+    <div className="w-full space-y-6">
       {errorMessage && (
         <div className="px-4 py-3 rounded-md bg-red-500/10 border border-red-500/30 text-sm text-red-400">
           {errorMessage}
@@ -224,46 +235,50 @@ export const ModelsSettings: React.FC = () => {
         title={t("models.installedTitle")}
         description={t("models.installedDescription")}
       >
-        {downloadedModels.length > 0 ? (() => {
-          const nonRecommended = downloadedModels.filter((m) => !m.is_recommended);
-          const groups = groupModels(nonRecommended);
-          return (
-            <>
-              {recommendedDownloaded.length > 0 && (
-                <>
-                  <div className="px-4 pt-3 pb-1 text-xs text-text/40 font-medium">
-                    ⭐ {t("modelSelector.recommended", "Recommended")}
-                  </div>
-                  {recommendedDownloaded.map(renderDownloadedModel)}
-                </>
-              )}
-              {groups.vi.length > 0 && (
-                <>
-                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
-                    🇻🇳 {t("modelSelector.groupVietnamese", "Tiếng Việt")}
-                  </div>
-                  {groups.vi.map(renderDownloadedModel)}
-                </>
-              )}
-              {groups.multi.length > 0 && (
-                <>
-                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
-                    🌐 {t("modelSelector.groupMultilingual", "Đa ngôn ngữ")}
-                  </div>
-                  {groups.multi.map(renderDownloadedModel)}
-                </>
-              )}
-              {groups.en.length > 0 && (
-                <>
-                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
-                    🇬🇧 {t("modelSelector.groupEnglish", "English only")}
-                  </div>
-                  {groups.en.map(renderDownloadedModel)}
-                </>
-              )}
-            </>
-          );
-        })() : (
+        {downloadedModels.length > 0 ? (
+          (() => {
+            const nonRecommended = downloadedModels.filter(
+              (m) => !m.is_recommended,
+            );
+            const groups = groupModels(nonRecommended);
+            return (
+              <>
+                {recommendedDownloaded.length > 0 && (
+                  <>
+                    <div className="px-4 pt-3 pb-1 text-xs text-text/40 font-medium">
+                      ⭐ {t("modelSelector.recommended", "Recommended")}
+                    </div>
+                    {recommendedDownloaded.map(renderDownloadedModel)}
+                  </>
+                )}
+                {groups.vi.length > 0 && (
+                  <>
+                    <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                      🇻🇳 {t("modelSelector.groupVietnamese", "Tiếng Việt")}
+                    </div>
+                    {groups.vi.map(renderDownloadedModel)}
+                  </>
+                )}
+                {groups.multi.length > 0 && (
+                  <>
+                    <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                      🌐 {t("modelSelector.groupMultilingual", "Đa ngôn ngữ")}
+                    </div>
+                    {groups.multi.map(renderDownloadedModel)}
+                  </>
+                )}
+                {groups.en.length > 0 && (
+                  <>
+                    <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                      🇬🇧 {t("modelSelector.groupEnglish", "English only")}
+                    </div>
+                    {groups.en.map(renderDownloadedModel)}
+                  </>
+                )}
+              </>
+            );
+          })()
+        ) : (
           <div className="px-4 py-6 text-sm text-text/60 text-center">
             {t("models.noInstalled")}
           </div>
@@ -274,37 +289,39 @@ export const ModelsSettings: React.FC = () => {
         title={t("models.availableTitle")}
         description={t("models.availableDescription")}
       >
-        {downloadableModels.length > 0 ? (() => {
-          const groups = groupModels(downloadableModels);
-          return (
-            <>
-              {groups.vi.length > 0 && (
-                <>
-                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
-                    🇻🇳 {t("modelSelector.groupVietnamese", "Tiếng Việt")}
-                  </div>
-                  {groups.vi.map(renderDownloadableModel)}
-                </>
-              )}
-              {groups.multi.length > 0 && (
-                <>
-                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
-                    🌐 {t("modelSelector.groupMultilingual", "Đa ngôn ngữ")}
-                  </div>
-                  {groups.multi.map(renderDownloadableModel)}
-                </>
-              )}
-              {groups.en.length > 0 && (
-                <>
-                  <div className="px-4 pt-3 pb-1 text-xs text-text/40">
-                    🇬🇧 {t("modelSelector.groupEnglish", "English only")}
-                  </div>
-                  {groups.en.map(renderDownloadableModel)}
-                </>
-              )}
-            </>
-          );
-        })() : (
+        {downloadableModels.length > 0 ? (
+          (() => {
+            const groups = groupModels(downloadableModels);
+            return (
+              <>
+                {groups.vi.length > 0 && (
+                  <>
+                    <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                      🇻🇳 {t("modelSelector.groupVietnamese", "Tiếng Việt")}
+                    </div>
+                    {groups.vi.map(renderDownloadableModel)}
+                  </>
+                )}
+                {groups.multi.length > 0 && (
+                  <>
+                    <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                      🌐 {t("modelSelector.groupMultilingual", "Đa ngôn ngữ")}
+                    </div>
+                    {groups.multi.map(renderDownloadableModel)}
+                  </>
+                )}
+                {groups.en.length > 0 && (
+                  <>
+                    <div className="px-4 pt-3 pb-1 text-xs text-text/40">
+                      🇬🇧 {t("modelSelector.groupEnglish", "English only")}
+                    </div>
+                    {groups.en.map(renderDownloadableModel)}
+                  </>
+                )}
+              </>
+            );
+          })()
+        ) : (
           <div className="px-4 py-6 text-sm text-text/60 text-center">
             {t("models.noAvailable")}
           </div>
@@ -314,7 +331,10 @@ export const ModelsSettings: React.FC = () => {
       {diarizationModels.length > 0 && (
         <SettingsGroup
           title={t("models.diarizationTitle", "Speaker Diarization")}
-          description={t("models.diarizationDescription", "Models for identifying and separating speakers in transcripts.")}
+          description={t(
+            "models.diarizationDescription",
+            "Models for identifying and separating speakers in transcripts.",
+          )}
         >
           {diarizationModels.map((model) => {
             const progress = downloadProgress[model.id];

@@ -24,10 +24,10 @@ use crate::audio_toolkit::{
     vad::{SmoothedVad, VadFrame},
     AudioSourceConfig, MixedAudioRecorder, SileroVad, VoiceActivityDetector,
 };
+use crate::managers::diarization::SpeakerDiarizationManager;
 use crate::managers::meeting_logger::{
     log_meeting_event, log_performance_metric, MeetingLogContext, MeetingTimer,
 };
-use crate::managers::diarization::SpeakerDiarizationManager;
 use crate::settings::get_settings;
 
 use super::db::{get_connection, init_meeting_database};
@@ -302,11 +302,7 @@ impl MeetingSessionManager {
     }
 
     /// Stores the audio file path for an imported/external session.
-    pub fn set_audio_path_for_session(
-        &self,
-        session_id: &str,
-        audio_path: &str,
-    ) -> Result<()> {
+    pub fn set_audio_path_for_session(&self, session_id: &str, audio_path: &str) -> Result<()> {
         let conn = self.get_connection()?;
         let rows_affected = conn.execute(
             "UPDATE meeting_sessions SET audio_path = ?1 WHERE id = ?2",
@@ -3286,7 +3282,10 @@ impl MeetingSessionManager {
         // Ensure the transcription model is loaded before processing.
         // The model may have been unloaded by the idle-timeout since recording stopped.
         if !self.transcription_manager.is_model_loaded() {
-            info!("[process_transcription] model not loaded, initiating load for session {}", session_id);
+            info!(
+                "[process_transcription] model not loaded, initiating load for session {}",
+                session_id
+            );
             self.transcription_manager.initiate_model_load();
         }
 
@@ -3324,8 +3323,8 @@ impl MeetingSessionManager {
                                     e
                                 );
                             }
-                            let formatted =
-                                self.format_transcript_with_speakers(&transcription_text, &segments);
+                            let formatted = self
+                                .format_transcript_with_speakers(&transcription_text, &segments);
                             if let Err(e) = self.app_handle.emit(
                                 "diarization_completed",
                                 serde_json::json!({ "session_id": session_id }),

@@ -77,7 +77,9 @@ const ChatgptPlusLoginControl: React.FC<ChatgptPlusLoginControlProps> = ({
           {hasToken ? "Re-login with ChatGPT" : "Login with ChatGPT"}
         </Button>
         {hasToken && (
-          <span className="text-xs text-green-400">{t("postProcessing.sessionTokenSaved")}</span>
+          <span className="text-xs text-green-400">
+            {t("postProcessing.sessionTokenSaved")}
+          </span>
         )}
       </div>
       {status && <p className="text-xs text-mid-gray">{status}</p>}
@@ -136,7 +138,9 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
             <>
               <SettingContainer
                 title={t("settings.postProcessing.api.baseUrl.title")}
-                description={t("settings.postProcessing.api.baseUrl.description")}
+                description={t(
+                  "settings.postProcessing.api.baseUrl.description",
+                )}
                 descriptionMode="tooltip"
                 layout="horizontal"
                 grouped={true}
@@ -157,7 +161,9 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
               {state.isCustomProvider ? (
                 <SettingContainer
                   title={t("settings.postProcessing.api.apiKey.title")}
-                  description={t("settings.postProcessing.api.apiKey.description")}
+                  description={t(
+                    "settings.postProcessing.api.apiKey.description",
+                  )}
                   descriptionMode="tooltip"
                   layout="horizontal"
                   grouped={true}
@@ -183,8 +189,10 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                 >
                   <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                     <p className="text-sm text-green-400">
-                      ✨ {t("settings.postProcessing.api.freeProvider.notice", {
-                        defaultValue: "Free — no API key needed. Make sure the service is running locally.",
+                      ✨{" "}
+                      {t("settings.postProcessing.api.freeProvider.notice", {
+                        defaultValue:
+                          "Free — no API key needed. Make sure the service is running locally.",
                       })}
                     </p>
                   </div>
@@ -241,8 +249,9 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
             ? t("settings.postProcessing.api.model.descriptionApple")
             : state.isLocalProvider
               ? t("settings.postProcessing.api.model.descriptionLocal", {
-                defaultValue: "Select a model from your local server, or type a model name. Click refresh to list available models.",
-              })
+                  defaultValue:
+                    "Select a model from your local server, or type a model name. Click refresh to list available models.",
+                })
               : t("settings.postProcessing.api.model.descriptionDefault")
         }
         descriptionMode="tooltip"
@@ -260,13 +269,13 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                 ? t("settings.postProcessing.api.model.placeholderApple")
                 : state.modelOptions.length > 0
                   ? t(
-                    "settings.postProcessing.api.model.placeholderWithOptions",
-                  )
+                      "settings.postProcessing.api.model.placeholderWithOptions",
+                    )
                   : t("settings.postProcessing.api.model.placeholderNoOptions")
             }
             onSelect={state.handleModelSelect}
             onCreate={state.handleModelCreate}
-            onBlur={() => { }}
+            onBlur={() => {}}
             className="flex-1 min-w-[380px]"
           />
           <ResetButton
@@ -655,7 +664,7 @@ export const PostProcessingSettings: React.FC = () => {
   const { t } = useTranslation();
 
   return (
-    <div className="max-w-3xl w-full mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <SettingsGroup title={t("settings.postProcessing.api.title")}>
         <PostProcessingSettingsApi />
       </SettingsGroup>

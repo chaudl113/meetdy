@@ -7,7 +7,7 @@ export const HistorySettings: React.FC = () => {
   const { t } = useTranslation();
 
   return (
-    <div className="max-w-3xl w-full mx-auto space-y-6">
+    <div className="w-full space-y-6">
       {/* Meeting History Section */}
       <div className="space-y-2">
         <div className="px-4 flex items-center gap-2">

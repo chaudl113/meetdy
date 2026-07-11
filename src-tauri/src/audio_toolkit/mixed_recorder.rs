@@ -180,15 +180,14 @@ impl MixedAudioRecorder {
         match &self.config {
             AudioSourceConfig::MicrophoneOnly => {
                 let mut recorder = AudioRecorder::new()?;
+                // Use AudioRecorder's built-in stats path (computed from raw
+                // pre-VAD samples, always fires regardless of recording state).
+                if let Some(stats_fn) = audio_stats_callback.clone() {
+                    recorder = recorder.with_audio_stats_callback(move |s| stats_fn(s));
+                }
                 let cb_outer = sample_callback.clone();
                 let samples = mixed_samples.clone();
-                let stats_acc_cb = stats_acc.clone();
-                let stats_cb = audio_stats_callback.clone();
                 recorder = recorder.with_sample_callback(move |s| {
-                    stats_acc_cb
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .feed(&s, &stats_cb);
                     samples
                         .lock()
                         .unwrap_or_else(|p| p.into_inner())
@@ -240,6 +239,11 @@ impl MixedAudioRecorder {
 
                 // Start mic recorder
                 let mut mic_recorder = AudioRecorder::new()?;
+                // Attach stats to mic recorder so UI gets real-time levels from
+                // raw mic audio (pre-VAD, always fires even when silent).
+                if let Some(stats_fn) = audio_stats_callback.clone() {
+                    mic_recorder = mic_recorder.with_audio_stats_callback(move |s| stats_fn(s));
+                }
                 let mic_tx_clone = mic_tx.clone();
                 mic_recorder = mic_recorder.with_sample_callback(move |s| {
                     let _ = mic_tx_clone.send(s);
@@ -408,19 +412,15 @@ impl MixedAudioRecorder {
         let error_callback = self.error_callback.clone();
         let audio_stats_callback = self.audio_stats_callback.clone();
         let mixed_samples = self.mixed_samples.clone();
-        let stats_acc: Arc<Mutex<StatsAccumulator>> = Arc::new(Mutex::new(StatsAccumulator::new()));
 
         let mut recorder = AudioRecorder::new()?;
+        if let Some(stats_fn) = audio_stats_callback.clone() {
+            recorder = recorder.with_audio_stats_callback(move |s| stats_fn(s));
+        }
         {
             let cb_outer = sample_callback.clone();
             let samples = mixed_samples.clone();
-            let stats_acc_cb = stats_acc.clone();
-            let stats_cb = audio_stats_callback.clone();
             recorder = recorder.with_sample_callback(move |s| {
-                stats_acc_cb
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .feed(&s, &stats_cb);
                 samples
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
