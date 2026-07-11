@@ -43,6 +43,9 @@ jobs:
       - name: Frontend build & typecheck
         run: bun run build
 
+      - name: i18n key completeness
+        run: node scripts/i18n-sync.mjs --check
+
       - name: Clippy
         working-directory: src-tauri
         run: cargo clippy -- -D warnings

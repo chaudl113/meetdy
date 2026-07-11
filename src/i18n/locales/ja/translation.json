@@ -14,7 +14,8 @@
     "postProcessing": "後処理",
     "history": "履歴",
     "debug": "デバッグ",
-    "about": "概要"
+    "about": "概要",
+    "models": "[TODO] Models"
   },
   "startMeeting": {
     "title": "Start Meeting",
@@ -92,7 +93,15 @@
       "tip1": "Close unnecessary applications to improve recording quality.",
       "tip2": "Use headphones to avoid audio echo.",
       "tip3": "Ensure you have enough storage space."
-    }
+    },
+    "funasrModels": {
+      "sensevoice": "[TODO] sensevoice",
+      "paraformer": "[TODO] paraformer",
+      "paraformerEn": "[TODO] paraformer-en",
+      "funAsrNano": "[TODO] fun-asr-nano"
+    },
+    "importAudio": "[TODO] Import Audio File",
+    "importAudioDesc": "[TODO] Audio Files"
   },
   "recording": {
     "comingSoon": "Coming soon",
@@ -195,6 +204,17 @@
       "cancel": "Cancel",
       "save": "Save Note",
       "close": "Close"
+    },
+    "speaker": {
+      "label": "[TODO] Speaker",
+      "add": "[TODO] Add",
+      "namePlaceholder": "[TODO] Name…",
+      "active": "[TODO] Speaking"
+    },
+    "sttEngine": {
+      "sonioxTitle": "[TODO] Soniox cloud STT",
+      "funasrTitle": "[TODO] FunASR local batch STT",
+      "localTitle": "[TODO] Local STT"
     }
   },
   "onboarding": {
@@ -236,7 +256,21 @@
       "loadModels": "利用可能なモデルの読み込みに失敗しました",
       "downloadModel": "モデルのダウンロードに失敗しました: {{error}}"
     },
-    "skipDownload": "スキップ — あとでダウンロード"
+    "skipDownload": "スキップ — あとでダウンロード",
+    "skipNote": "[TODO] You can download models later in Settings",
+    "permissions": {
+      "title": "[TODO] Permissions",
+      "subtitle": "[TODO] Meetdy needs the following permissions to work properly",
+      "mic": "[TODO] Microphone",
+      "micDescription": "[TODO] Required to capture your voice during meetings",
+      "screenRecording": "[TODO] Screen Recording",
+      "screenRecordingDescription": "[TODO] Required to capture system audio (e.g. from Zoom, YouTube)",
+      "granted": "[TODO] Granted",
+      "notGranted": "[TODO] Not Granted",
+      "grantAccess": "[TODO] Grant Access",
+      "continue": "[TODO] Continue",
+      "skip": "[TODO] Skip for now"
+    }
   },
   "modelSelector": {
     "welcome": "Handyへようこそ！",
@@ -259,7 +293,8 @@
     "modelError": "モデルエラー",
     "modelUnloaded": "モデルがアンロードされました",
     "noModelDownloadRequired": "モデルなし - ダウンロードが必要",
-    "deleteModel": "{{modelName}}を削除"
+    "deleteModel": "{{modelName}}を削除",
+    "recommended": "[TODO] Recommended"
   },
   "settings": {
     "general": {
@@ -389,7 +424,8 @@
       },
       "diarization": {
         "label": "話者ダイアリゼーション",
-        "description": "会議の録音で誰がいつ話したかを識別します。ダイアリゼーションモデルのダウンロードが必要です。"
+        "description": "会議の録音で誰がいつ話したかを識別します。ダイアリゼーションモデルのダウンロードが必要です。",
+        "noModelWarning": "[TODO] Install a speaker diarization model first"
       }
     },
     "postProcessing": {
@@ -448,8 +484,59 @@
         "createPrompt": "プロンプトを作成",
         "cancel": "キャンセル",
         "selectToEdit": "上からプロンプトを選択して、詳細を表示・編集します。",
-        "createFirst": "上の「新しいプロンプトを作成」をクリックして、最初の後処理プロンプトを作成してください。"
-      }
+        "createFirst": "上の「新しいプロンプトを作成」をクリックして、最初の後処理プロンプトを作成してください。",
+        "useTemplate": "[TODO] Use Template",
+        "templateList": "[TODO] Template list",
+        "fromTemplate": "[TODO] From template",
+        "saveAsCustom": "[TODO] Save as Custom",
+        "editAndSave": "[TODO] Edit and save as custom prompt",
+        "outputPlaceholderTip": "[TODO] Use ${output} to insert the transcribed text in your prompt.",
+        "usingTemplate": "[TODO] Using template: <strong>{{name}}</strong>",
+        "categories": {
+          "meeting": "[TODO] Meeting",
+          "language": "[TODO] Language",
+          "writing": "[TODO] Writing"
+        },
+        "templates": {
+          "meetingSummary": {
+            "name": "[TODO] Meeting Summary",
+            "description": "[TODO] Generate a concise summary of meeting discussions"
+          },
+          "actionItems": {
+            "name": "[TODO] Extract Action Items",
+            "description": "[TODO] Identify tasks and assignments from the transcript"
+          },
+          "keyPoints": {
+            "name": "[TODO] Key Points",
+            "description": "[TODO] Extract main ideas as a bullet list"
+          },
+          "translateVi": {
+            "name": "[TODO] Translate to Vietnamese",
+            "description": "[TODO] Translate text to Vietnamese with technical term handling"
+          },
+          "grammarClarity": {
+            "name": "[TODO] Grammar & Clarity",
+            "description": "[TODO] Improve grammar, spelling, and readability"
+          },
+          "emailDraft": {
+            "name": "[TODO] Convert to Email",
+            "description": "[TODO] Format as a professional email"
+          },
+          "technicalNotes": {
+            "name": "[TODO] Technical Documentation",
+            "description": "[TODO] Format as structured technical documentation"
+          }
+        },
+        "errors": {
+          "emptyName": "[TODO] Prompt name cannot be empty",
+          "emptyPrompt": "[TODO] Prompt instructions cannot be empty",
+          "missingPlaceholder": "[TODO] Prompt must include ${output} placeholder",
+          "nameTooLong": "[TODO] Prompt name is too long (max 1000 characters)",
+          "promptTooLong": "[TODO] Prompt instructions are too long (max 5000 characters)",
+          "saveFailed": "[TODO] Failed to save custom prompt"
+        }
+      },
+      "sessionTokenSaved": "[TODO] Session token saved"
     },
     "history": {
       "title": "履歴",
@@ -460,7 +547,9 @@
       "save": "文字起こしを保存",
       "unsave": "保存から削除",
       "delete": "エントリーを削除",
-      "deleteError": "エントリーの削除に失敗しました。もう一度お試しください。"
+      "deleteError": "エントリーの削除に失敗しました。もう一度お試しください。",
+      "noResults": "[TODO] No meetings found matching your search",
+      "searchPlaceholder": "[TODO] Search meetings by title, date, or status..."
     },
     "debug": {
       "title": "デバッグ",
@@ -553,6 +642,34 @@
           "details": "Handyは高速でローカルな音声からテキストへの変換にWhisper.cppを使用しています。Georgi Gerganov氏と貢献者の皆様の素晴らしい仕事に感謝します。"
         }
       }
+    },
+    "meeting": {
+      "template": {
+        "title": "[TODO] Meeting Templates",
+        "description": "[TODO] Create templates for different meeting types to quickly start recordings with pre-configured settings.",
+        "name": "[TODO] Name",
+        "nameDescription": "[TODO] A descriptive name for this template",
+        "namePlaceholder": "[TODO] e.g., Team Standup",
+        "icon": "[TODO] Icon",
+        "iconDescription": "[TODO] Choose an emoji icon",
+        "titleTemplate": "[TODO] Title Template",
+        "titleTemplateDescription": "[TODO] Template for meeting title. Use {date} and {time} placeholders.",
+        "titleTemplatePlaceholder": "[TODO] e.g., Standup - {date}",
+        "audioSource": "[TODO] Audio Source",
+        "audioSourceDescription": "[TODO] Default audio source for this template",
+        "prompt": "[TODO] AI Prompt",
+        "promptDescription": "[TODO] Optional AI prompt for post-processing",
+        "summaryPrompt": "[TODO] Summary Prompt",
+        "summaryPromptDescription": "[TODO] Custom AI prompt for generating meeting summaries. Use {} placeholder for transcript.",
+        "summaryPromptPlaceholder": "[TODO] Leave empty to use default prompt, or customize with {} for transcript",
+        "missingPlaceholder": "[TODO] Missing {} placeholder",
+        "noPrompt": "[TODO] None",
+        "default": "[TODO] Default",
+        "create": "[TODO] Create Template",
+        "edit": "[TODO] Edit Template",
+        "createNew": "[TODO] Create Template",
+        "confirmDelete": "[TODO] Are you sure you want to delete this template?"
+      }
     }
   },
   "footer": {
@@ -589,7 +706,15 @@
     "off": "オフ",
     "yes": "はい",
     "no": "いいえ",
-    "noOptionsFound": "オプションが見つかりません"
+    "noOptionsFound": "オプションが見つかりません",
+    "saving": "[TODO] Saving...",
+    "clear": "[TODO] Clear",
+    "copy": "[TODO] Copy",
+    "copied": "[TODO] Copied",
+    "dismiss": "[TODO] Dismiss",
+    "prompt": "[TODO] Prompt",
+    "characters": "[TODO] characters",
+    "unknown": "[TODO] Unknown"
   },
   "accessibility": {
     "permissionsRequired": "アクセシビリティ権限が必要です",
@@ -614,5 +739,81 @@
       "stopDescription": "Switching sections will stop the current recording.",
       "stopAndSwitch": "Stop & Switch"
     }
+  },
+  "models": {
+    "installedTitle": "[TODO] Installed Models",
+    "installedDescription": "[TODO] Models downloaded on this device. Activate one to use it for transcription.",
+    "availableTitle": "[TODO] Available to Download",
+    "availableDescription": "[TODO] Choose additional models to download for transcription.",
+    "noInstalled": "[TODO] No models installed yet. Download one below to get started.",
+    "noAvailable": "[TODO] All available models are already installed.",
+    "activate": "[TODO] Activate",
+    "idLabel": "[TODO] ID:"
+  },
+  "meeting": {
+    "status": {
+      "processingIndicator": "[TODO] Processing..."
+    },
+    "title": "[TODO] Meeting Mode",
+    "template": {
+      "selectTemplate": "[TODO] Select a template",
+      "none": "[TODO] None",
+      "noneDescription": "[TODO] Start without a template",
+      "noTemplates": "[TODO] No templates yet. Create one in Settings.",
+      "loading": "[TODO] Loading templates...",
+      "show": "[TODO] Show templates",
+      "hide": "[TODO] Hide templates",
+      "audioSource": {
+        "microphoneOnly": "[TODO] Microphone",
+        "systemOnly": "[TODO] System Audio",
+        "mixed": "[TODO] Both"
+      },
+      "icons": {
+        "Users": "[TODO] Users",
+        "Coffee": "[TODO] Coffee",
+        "Mic": "[TODO] Microphone",
+        "Phone": "[TODO] Phone",
+        "Briefcase": "[TODO] Briefcase",
+        "Target": "[TODO] Target",
+        "FileText": "[TODO] Document",
+        "Calendar": "[TODO] Calendar"
+      }
+    },
+    "summary": {
+      "title": "[TODO] AI Summary",
+      "generate": "[TODO] Generate Summary",
+      "regenerate": "[TODO] Regenerate",
+      "generating": "[TODO] Generating summary...",
+      "noSummary": "[TODO] No summary yet. Generate an AI summary of this meeting.",
+      "noTranscript": "[TODO] Transcript required to generate summary.",
+      "generateError": "[TODO] Failed to generate summary",
+      "editSummary": "[TODO] Edit summary",
+      "saveSummary": "[TODO] Save",
+      "cancelEdit": "[TODO] Cancel",
+      "summaryUpdateSuccess": "[TODO] Summary saved",
+      "summaryUpdateError": "[TODO] Failed to save summary"
+    },
+    "detail": {
+      "audio": "[TODO] Audio Recording"
+    },
+    "regenerate": "[TODO] Regenerate",
+    "regenerateDesc": "[TODO] Override model and language for this transcription run.",
+    "regenerateModel": "[TODO] Model",
+    "regenerateLanguage": "[TODO] Language",
+    "export": "[TODO] Export",
+    "exportMarkdown": "[TODO] Export as Markdown",
+    "exportText": "[TODO] Export as Text",
+    "exportSuccess": "[TODO] Exported successfully"
+  },
+  "tts": {
+    "readTranscript": "[TODO] Read transcript",
+    "stop": "[TODO] Stop",
+    "read": "[TODO] Read"
+  },
+  "errorBoundary": {
+    "icon": "[TODO] ⚠️",
+    "title": "[TODO] Something went wrong",
+    "description": "[TODO] The application encountered an unexpected error. You can try reloading.",
+    "tryAgain": "[TODO] Try Again"
   }
 }
