@@ -152,6 +152,16 @@ impl MeetingSessionManager {
         &self.db_path
     }
 
+    /// Returns `true` if a recording is currently in progress.
+    pub fn is_recording(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state
+            .current_session
+            .as_ref()
+            .map(|s| s.status == MeetingStatus::Recording)
+            .unwrap_or(false)
+    }
+
     /// Sets the active speaker for the current recording session.
     /// All transcript segments emitted after this call will be attributed to the
     /// given participant until another call changes the active speaker.

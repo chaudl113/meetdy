@@ -232,7 +232,31 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), String> {
                 cancel_current_operation(app);
             }
             "quit" => {
-                app.exit(0);
+                // Show confirm dialog if a recording is in progress.
+                let is_recording = app
+                    .try_state::<Arc<MeetingSessionManager>>()
+                    .map(|m| m.is_recording())
+                    .unwrap_or(false);
+                if is_recording {
+                    let app_clone = app.clone();
+                    let _ = tauri::async_runtime::spawn(async move {
+                        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                        let confirmed = app_clone
+                            .dialog()
+                            .message("A meeting is currently being recorded. Quitting now will interrupt the recording (audio will be saved). Do you want to quit?")
+                            .title("Recording in Progress")
+                            .buttons(MessageDialogButtons::OkCancelCustom(
+                                "Quit & Save".to_string(),
+                                "Cancel".to_string(),
+                            ))
+                            .blocking_show();
+                        if confirmed {
+                            app_clone.exit(0);
+                        }
+                    });
+                } else {
+                    app.exit(0);
+                }
             }
             _ => {}
         })
