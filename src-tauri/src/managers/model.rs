@@ -184,11 +184,28 @@ impl ModelManager {
             },
         );
 
-        // --- Diarization models (speaker segmentation + speaker embedding) ---
+        // --- Diarization models ---
+        // Preferred: Sortformer v2.1 (end-to-end, no clustering, ≤4 speakers)
+        available_models.insert("sortformer-diar-v2.1".to_string(), ModelInfo {
+            id: "sortformer-diar-v2.1".to_string(),
+            name: "Sortformer Diarization v2.1 (Int8)".to_string(),
+            description: "NVIDIA end-to-end speaker diarization (≤4 speakers). No separate embedding or clustering model needed. Best quality for meetings.".to_string(),
+            filename: "sortformer-diar-v2.1-int8.onnx".to_string(),
+            url: Some("https://huggingface.co/christopherthompson81/sortformer_parakeet_onnx/resolve/main/diar_streaming_sortformer_4spk-v2.1_int8.onnx".to_string()),
+            size_mb: 141,
+            is_downloaded: false, is_downloading: false, partial_size: 0,
+            is_directory: false,
+            engine_type: EngineType::Diarization,
+            accuracy_score: 0.0, speed_score: 0.0,
+            supported_languages: vec![],
+            is_recommended: true,
+        });
+
+        // Fallback: Pyannote segmentation + NeMo TitaNet embedding (via sherpa-onnx)
         available_models.insert("pyannote-segmentation".to_string(), ModelInfo {
             id: "pyannote-segmentation".to_string(),
             name: "Pyannote Segmentation (Int8)".to_string(),
-            description: "Speaker segmentation model for diarization (who spoke when).".to_string(),
+            description: "Speaker segmentation model (fallback). Requires a speaker embedding model. Use Sortformer instead for better quality.".to_string(),
             filename: "pyannote-segmentation-int8.onnx".to_string(),
             url: Some("https://huggingface.co/onnx-community/pyannote-segmentation-3.0/resolve/main/onnx/model_int8.onnx".to_string()),
             size_mb: 2,
@@ -200,13 +217,13 @@ impl ModelManager {
             is_recommended: false,
         });
 
-        available_models.insert("3dspeaker-eres2net".to_string(), ModelInfo {
-            id: "3dspeaker-eres2net".to_string(),
-            name: "3D-Speaker ERes2Net".to_string(),
-            description: "Speaker embedding model for diarization (who spoke when).".to_string(),
+        available_models.insert("nemo-titanet-small".to_string(), ModelInfo {
+            id: "nemo-titanet-small".to_string(),
+            name: "NeMo TitaNet Small (Speaker Embedding)".to_string(),
+            description: "Speaker embedding model for the Pyannote fallback pipeline. Faster than 3D-Speaker (RTF 0.11 vs 0.24), multilingual.".to_string(),
             filename: "3dspeaker-eres2net.onnx".to_string(),
-            url: Some("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx".to_string()),
-            size_mb: 38,
+            url: Some("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx".to_string()),
+            size_mb: 16,
             is_downloaded: false, is_downloading: false, partial_size: 0,
             is_directory: false,
             engine_type: EngineType::Diarization,
