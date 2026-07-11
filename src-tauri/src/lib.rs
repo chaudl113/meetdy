@@ -169,9 +169,16 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), String> {
     app_handle.manage(diarization_manager.clone());
     app_handle.manage(crate::commands::soniox::SonioxState::default());
 
-    // Check for interrupted meeting sessions from previous runs
-    if let Err(e) = meeting_manager.check_interrupted_sessions() {
-        log::error!("Failed to check for interrupted meeting sessions: {}", e);
+    // Check for interrupted meeting sessions from previous runs.
+    // Done in a background task so it doesn't block the main thread before the
+    // window is shown.
+    {
+        let mm = meeting_manager.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(e) = mm.check_interrupted_sessions() {
+                log::error!("Failed to check for interrupted meeting sessions: {}", e);
+            }
+        });
     }
 
     // Preload the selected transcription model in the background so the first

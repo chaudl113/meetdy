@@ -21,7 +21,7 @@ interface SpeakerSegmentProps {
   onClick?: () => void;
 }
 
-export const SpeakerSegment: React.FC<SpeakerSegmentProps> = ({
+export const SpeakerSegment: React.FC<SpeakerSegmentProps> = React.memo(function SpeakerSegment({
   text,
   startMs,
   speakerName,
@@ -30,7 +30,7 @@ export const SpeakerSegment: React.FC<SpeakerSegmentProps> = ({
   active = false,
   disabled = false,
   onClick,
-}) => {
+}: SpeakerSegmentProps) {
   const { t } = useTranslation();
   return (
     <button
@@ -57,6 +57,6 @@ export const SpeakerSegment: React.FC<SpeakerSegmentProps> = ({
       </p>
     </button>
   );
-};
+});
 
 export default SpeakerSegment;

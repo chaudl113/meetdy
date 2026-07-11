@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
@@ -32,11 +32,11 @@ interface LiveVirtuosoListProps {
   participantMap: Record<string, string>;
 }
 
-const LiveVirtuosoList: React.FC<LiveVirtuosoListProps> = ({
+const LiveVirtuosoList: React.FC<LiveVirtuosoListProps> = React.memo(function LiveVirtuosoList({
   segments,
   speakerColors,
   participantMap,
-}) => {
+}: LiveVirtuosoListProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // Follow output — scroll to bottom when new segments arrive
@@ -65,7 +65,6 @@ const LiveVirtuosoList: React.FC<LiveVirtuosoListProps> = ({
           : UNKNOWN_SPEAKER_COLOR;
         return (
           <SpeakerSegment
-            key={`${index}-${segment.text.slice(0, 24)}`}
             text={segment.text}
             startMs={segment.offset * 1000}
             speakerName={speakerId ? (participantMap[speakerId] ?? null) : null}
@@ -76,7 +75,7 @@ const LiveVirtuosoList: React.FC<LiveVirtuosoListProps> = ({
       }}
     />
   );
-};
+});
 
 interface LiveTranscriptPanelProps {
   sessionId: string;
@@ -107,7 +106,10 @@ export const LiveTranscriptPanel: React.FC<LiveTranscriptPanelProps> = ({
   const diarizationEnabled = getSetting("diarization_enabled") ?? false;
 
   const speakerColors = useSpeakerColors(participants);
-  const participantMap = Object.fromEntries(participants.map((p) => [p.id, p.name]));
+  const participantMap = useMemo(
+    () => Object.fromEntries(participants.map((p) => [p.id, p.name])),
+    [participants],
+  );
 
   // Speaker hint: show a brief toast-like hint when active speaker changes
   const [speakerHint, setSpeakerHint] = useState<string | null>(null);
