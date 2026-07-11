@@ -752,6 +752,11 @@ export const useMeetingStore = create<MeetingStore>()(
                 )
                 .catch((err) => {
                   console.error("Auto summary failed:", err);
+                  // Surface error to user via sttError state (reuses existing RecordingTopBar UI)
+                  // or via a toast if the store already has sonner access.
+                  set({
+                    error: `Auto-summary failed: ${err instanceof Error ? err.message : String(err)}`,
+                  });
                 });
             }
 

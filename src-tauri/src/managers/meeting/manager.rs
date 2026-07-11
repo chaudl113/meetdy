@@ -1744,6 +1744,13 @@ impl MeetingSessionManager {
                             Ok(text) => text.trim().to_string(),
                             Err(e) => {
                                 log::warn!("[FUNASR_STT] live chunk failed: {}", e);
+                                let _ = app_handle.emit(
+                                    "meeting_stt_error",
+                                    serde_json::json!({
+                                        "session_id": session_id,
+                                        "message": format!("FunASR transcription error: {}", e)
+                                    }),
+                                );
                                 return;
                             }
                         };
