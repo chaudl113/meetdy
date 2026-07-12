@@ -446,7 +446,35 @@ fn binarize_speaker(
 
 // ─── Session loader ──────────────────────────────────────────────────────────
 
+/// Initialise the `ort` API using the ONNX Runtime already linked into the
+/// binary via sherpa-onnx's static `libonnxruntime.a`.
+///
+/// Must be called once before any `Session` is created.
+/// Safe to call multiple times — subsequent calls are no-ops.
+fn init_ort_api() -> Result<()> {
+    use ort::sys as ort_sys;
+    // SAFETY: OrtGetApiBase is provided by sherpa-onnx's statically linked
+    // libonnxruntime.a. The symbol is present in the final binary.
+    let api = unsafe {
+        let base = ort_sys::OrtGetApiBase();
+        if base.is_null() {
+            return Err(anyhow!("OrtGetApiBase returned null"));
+        }
+        let api_ptr = ((*base).GetApi)(ort_sys::ORT_API_VERSION);
+        if api_ptr.is_null() {
+            return Err(anyhow!(
+                "OrtApi v{} not supported by the linked ONNX Runtime",
+                ort_sys::ORT_API_VERSION
+            ));
+        }
+        *api_ptr
+    };
+    ort::set_api(api);
+    Ok(())
+}
+
 pub fn load_session(model_path: &Path) -> Result<Session> {
+    init_ort_api()?;
     let session = Session::builder()?
         .with_intra_threads(2)?
         .commit_from_file(model_path)
