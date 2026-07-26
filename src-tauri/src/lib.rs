@@ -422,6 +422,7 @@ pub fn run() {
         commands::meeting::list_meeting_sessions,
         commands::meeting::get_meetings_directory,
         commands::meeting::delete_meeting_session,
+        commands::meeting::delete_meeting_sessions,
         commands::meeting::clear_all_meeting_sessions,
         commands::meeting::generate_meeting_summary,
         commands::meeting::get_meeting_summary,
@@ -507,13 +508,17 @@ pub fn run() {
         builder = builder.plugin(tauri_nspanel::init());
     }
 
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
     builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_macos_permissions::init())
