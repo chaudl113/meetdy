@@ -754,6 +754,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "会議の録音はまだありません",
+      "clearAll": "すべて削除",
+      "clearAllConfirm": "すべての会議の録音を削除しますか？この操作は取り消せません。",
+      "deleteSelected": "削除（{{count}}）",
+      "deleteSelectedConfirm": "選択した {{count}} 件の会議の録音を削除しますか？この操作は取り消せません。",
+      "nSelected": "{{count}} 件選択中",
+      "selectAll": "すべて選択"
+    },
     "title": "[TODO] Meeting Mode",
     "template": {
       "selectTemplate": "[TODO] Select a template",

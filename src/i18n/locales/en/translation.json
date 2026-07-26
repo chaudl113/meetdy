@@ -730,6 +730,15 @@
     "status": {
       "processingIndicator": "Processing..."
     },
+    "history": {
+      "empty": "No meeting recordings yet",
+      "clearAll": "Clear all",
+      "clearAllConfirm": "Delete all meeting recordings? This cannot be undone.",
+      "deleteSelected": "Delete ({{count}})",
+      "deleteSelectedConfirm": "Delete {{count}} selected meeting recordings? This cannot be undone.",
+      "nSelected": "{{count}} selected",
+      "selectAll": "Select all"
+    },
     "title": "Meeting Mode",
     "template": {
       "selectTemplate": "Select a template",

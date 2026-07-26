@@ -746,6 +746,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "Aucun enregistrement de réunion pour l'instant",
+      "clearAll": "Tout effacer",
+      "clearAllConfirm": "Supprimer tous les enregistrements de réunion ? Cette action est irréversible.",
+      "deleteSelected": "Supprimer ({{count}})",
+      "deleteSelectedConfirm": "Supprimer les {{count}} enregistrements de réunion sélectionnés ? Cette action est irréversible.",
+      "nSelected": "{{count}} sélectionné(s)",
+      "selectAll": "Tout sélectionner"
+    },
     "summary": {
       "title": "[TODO] AI Summary",
       "generate": "[TODO] Generate Summary",

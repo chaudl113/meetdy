@@ -754,6 +754,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "Nessuna registrazione di riunioni ancora",
+      "clearAll": "Cancella tutto",
+      "clearAllConfirm": "Eliminare tutte le registrazioni delle riunioni? L'operazione non può essere annullata.",
+      "deleteSelected": "Elimina ({{count}})",
+      "deleteSelectedConfirm": "Eliminare le {{count}} registrazioni di riunioni selezionate? L'operazione non può essere annullata.",
+      "nSelected": "{{count}} selezionate",
+      "selectAll": "Seleziona tutto"
+    },
     "title": "[TODO] Meeting Mode",
     "template": {
       "selectTemplate": "[TODO] Select a template",

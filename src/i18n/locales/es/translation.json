@@ -745,6 +745,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "Aún no hay grabaciones de reuniones",
+      "clearAll": "Borrar todo",
+      "clearAllConfirm": "¿Eliminar todas las grabaciones de reuniones? Esta acción no se puede deshacer.",
+      "deleteSelected": "Eliminar ({{count}})",
+      "deleteSelectedConfirm": "¿Eliminar las {{count}} grabaciones de reuniones seleccionadas? Esta acción no se puede deshacer.",
+      "nSelected": "{{count}} seleccionadas",
+      "selectAll": "Seleccionar todo"
+    },
     "summary": {
       "title": "[TODO] AI Summary",
       "generate": "[TODO] Generate Summary",

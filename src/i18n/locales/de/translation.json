@@ -754,6 +754,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "Noch keine Besprechungsaufnahmen",
+      "clearAll": "Alle löschen",
+      "clearAllConfirm": "Alle Besprechungsaufnahmen löschen? Dies kann nicht rückgängig gemacht werden.",
+      "deleteSelected": "Löschen ({{count}})",
+      "deleteSelectedConfirm": "{{count}} ausgewählte Besprechungsaufnahmen löschen? Dies kann nicht rückgängig gemacht werden.",
+      "nSelected": "{{count}} ausgewählt",
+      "selectAll": "Alle auswählen"
+    },
     "title": "[TODO] Meeting Mode",
     "template": {
       "selectTemplate": "[TODO] Select a template",

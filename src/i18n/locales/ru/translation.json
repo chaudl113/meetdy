@@ -754,6 +754,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "Записей встреч пока нет",
+      "clearAll": "Очистить всё",
+      "clearAllConfirm": "Удалить все записи встреч? Это действие нельзя отменить.",
+      "deleteSelected": "Удалить ({{count}})",
+      "deleteSelectedConfirm": "Удалить выбранные записи встреч ({{count}})? Это действие нельзя отменить.",
+      "nSelected": "Выбрано: {{count}}",
+      "selectAll": "Выбрать все"
+    },
     "title": "[TODO] Meeting Mode",
     "template": {
       "selectTemplate": "[TODO] Select a template",

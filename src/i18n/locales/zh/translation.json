@@ -754,6 +754,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "暂无会议录音",
+      "clearAll": "清除全部",
+      "clearAllConfirm": "删除所有会议录音？此操作无法撤销。",
+      "deleteSelected": "删除（{{count}}）",
+      "deleteSelectedConfirm": "删除选中的 {{count}} 条会议录音？此操作无法撤销。",
+      "nSelected": "已选择 {{count}} 项",
+      "selectAll": "全选"
+    },
     "title": "[TODO] Meeting Mode",
     "template": {
       "selectTemplate": "[TODO] Select a template",

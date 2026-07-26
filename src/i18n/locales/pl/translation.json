@@ -754,6 +754,15 @@
     "status": {
       "processingIndicator": "[TODO] Processing..."
     },
+    "history": {
+      "empty": "Brak nagrań spotkań",
+      "clearAll": "Wyczyść wszystko",
+      "clearAllConfirm": "Usunąć wszystkie nagrania spotkań? Tej operacji nie można cofnąć.",
+      "deleteSelected": "Usuń ({{count}})",
+      "deleteSelectedConfirm": "Usunąć {{count}} zaznaczonych nagrań spotkań? Tej operacji nie można cofnąć.",
+      "nSelected": "Zaznaczono: {{count}}",
+      "selectAll": "Zaznacz wszystko"
+    },
     "title": "[TODO] Meeting Mode",
     "template": {
       "selectTemplate": "[TODO] Select a template",

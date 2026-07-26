@@ -781,6 +781,15 @@
     "regenerateModel": "Model",
     "status": {
       "processingIndicator": "Đang xử lý..."
+    },
+    "history": {
+      "empty": "Chưa có bản ghi cuộc họp nào",
+      "clearAll": "Xóa tất cả",
+      "clearAllConfirm": "Xóa tất cả bản ghi cuộc họp? Không thể hoàn tác thao tác này.",
+      "deleteSelected": "Xóa ({{count}})",
+      "deleteSelectedConfirm": "Xóa {{count}} bản ghi cuộc họp đã chọn? Không thể hoàn tác thao tác này.",
+      "nSelected": "Đã chọn {{count}}",
+      "selectAll": "Chọn tất cả"
     }
   },
   "accessibility": {
