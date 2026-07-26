@@ -7,6 +7,25 @@ description: Execute beads autonomously within a track. Handles bead-to-bead con
 
 Executes beads within an assigned track, maintaining context via Agent Mail.
 
+## Your Authority (Read First)
+
+You are a **sub-agent** executing a bounded track under an orchestrator. Your authority is limited to your assigned beads and file scope.
+
+**You may:**
+
+- Implement your beads using any tools available
+- Make local implementation decisions within your file scope
+- Report blockers, propose changes, and ask questions via Agent Mail
+
+**You may NOT:**
+
+- Change architecture, interfaces, or project direction
+- Modify files outside your reserved scope
+- Re-scope, split, skip, or add beads
+- Close a bead without passing verification (see Step 3)
+
+If a bead seems wrong, impossible, or would require exceeding your authority: **stop and report to the orchestrator**. Do not improvise beyond scope. Deviating "helpfully" is the most common way sub-agents degrade output quality.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  TRACK LOOP (repeat for each bead in track)                                 │
@@ -14,14 +33,16 @@ Executes beads within an assigned track, maintaining context via Agent Mail.
 │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐                    │
 │  │ START BEAD   │ → │ WORK ON BEAD │ → │ COMPLETE     │ ──┐                │
 │  │              │   │              │   │ BEAD         │   │                │
-│  │ • Read ctx   │   │ • Implement  │   │ • Report     │   │                │
-│  │ • Reserve    │   │ • Use tools  │   │ • Save ctx   │   │                │
-│  │ • Claim      │   │ • Check mail │   │ • Release    │   │                │
+│  │ • Read ctx   │   │ • Implement  │   │ • Verify     │   │                │
+│  │ • Claim      │   │ • Use tools  │   │ • Report     │   │                │
+│  │              │   │ • Check mail │   │ • Save ctx   │   │                │
 │  └──────────────┘   └──────────────┘   └──────────────┘   │                │
 │         ▲                                                  │                │
 │         └──────────────────────────────────────────────────┘                │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Your work is isolated in a dedicated git worktree assigned by the orchestrator. You never share a working tree with other workers — no file reservation needed.
 
 ---
 
@@ -42,7 +63,9 @@ _Name auto-generated if omitted (e.g., BlueLake)_
 
 ### 2. Understand Your Assignment
 
-From orchestrator: **Track number**, **Beads (in order)**, **File scope**, **Epic thread** (`<epic-id>`), **Track thread** (`track:<AgentName>:<epic-id>`)
+From orchestrator: **Track number**, **Beads (in order)**, **File scope**, **Worktree path** (your isolated working tree), **Epic thread** (`<epic-id>`), **Track thread** (`track:<AgentName>:<epic-id>`)
+
+All work happens inside your worktree. Other workers have their own worktrees — you will never see their changes and they will never see yours until the orchestrator merges.
 
 ---
 
@@ -70,22 +93,7 @@ From orchestrator: **Track number**, **Beads (in order)**, **File scope**, **Epi
 | `agent_name`     | `<AgentName>` |
 | `include_bodies` | `true`        |
 
-#### 1.3 Reserve Files
-
-**Tool**: `mcp__mcp_agent_mail__file_reservation_paths`
-
-| Parameter     | Value                      |
-| ------------- | -------------------------- |
-| `project_key` | `<path>`                   |
-| `agent_name`  | `<AgentName>`              |
-| `paths`       | `["<your-file-scope>/**"]` |
-| `ttl_seconds` | `7200`                     |
-| `exclusive`   | `true`                     |
-| `reason`      | `<bead-id>`                |
-
-If conflict → report blocker (see `reference/message-templates.md`)
-
-#### 1.4 Claim Bead
+#### 1.3 Claim Bead
 
 ```bash
 bd update <bead-id> --status in_progress
@@ -184,7 +192,9 @@ See `reference/message-templates.md` for message formats.
 
 ### Step 3: Complete Bead
 
-#### 3.1 Verify & Check
+#### 3.1 Verify (Proof of Work — MANDATORY)
+
+A bead is NOT done because you believe it is done. It is done when verification passes mechanically.
 
 ```bash
 get_diagnostics("<project-path>")
@@ -192,11 +202,25 @@ bun run check-types
 bun run build
 ```
 
-#### 3.2 Close Bead
+If the bead is linked to a harness story with a `verify_command`, run it:
+
+```bash
+./scripts/bin/harness-cli story verify <story-id>
+```
+
+**Hard rule:** if any check fails, you may NOT close the bead. Fix and re-verify, or report a blocker to the orchestrator. Never report COMPLETE on a failing verification.
+
+#### 3.2 Close Bead (with evidence)
 
 ```bash
 bd close <bead-id> --reason "<concise summary>"
 ```
+
+Your COMPLETE message (3.3) must include evidence, not just a claim:
+
+- Verification commands run and their results (pass)
+- Files changed
+- Any deviations from the bead description (should be none — see Your Authority)
 
 #### 3.3 Report to Orchestrator
 
@@ -215,14 +239,9 @@ bd close <bead-id> --reason "<concise summary>"
 
 Self-addressed message to track thread. See `reference/message-templates.md`.
 
-#### 3.5 Release Reservations
+#### 3.5 No Release Needed
 
-**Tool**: `mcp__mcp_agent_mail__release_file_reservations`
-
-| Parameter     | Value         |
-| ------------- | ------------- |
-| `project_key` | `<path>`      |
-| `agent_name`  | `<AgentName>` |
+File release is not needed — your worktree is isolated. When the bead is done, simply save context and continue. (The orchestrator manages worktree lifecycle.)
 
 ---
 
@@ -250,9 +269,9 @@ Track N (<AgentName>) Complete:
 ### Bead Lifecycle Checklist
 
 ```
-START: summarize_thread → fetch_inbox → file_reservation_paths → bd update
+START: summarize_thread → fetch_inbox → bd update
 WORK:  gkg tools → morph edits → get_diagnostics → check inbox
-DONE:  verify → bd close → send_message (orchestrator) → send_message (self) → release
+DONE:  verify (MUST pass) → bd close → send_message (orchestrator, with evidence) → send_message (self)
 NEXT:  loop to START
 ```
 

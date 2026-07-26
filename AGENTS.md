@@ -141,7 +141,34 @@ This project uses a swarm orchestration model. The default agent is `orchestrato
 - `docs` edits only `*.md` and docstrings.
 
 Cross-boundary edits require explicit orchestrator approval.
-Cross-boundary edits require explicit orchestrator approval.
+
+## Herdr Supervisor Protocol
+
+Herdr is available on this machine (`herdr`). When acting as the primary agent, you are the Engineering Supervisor: the human interacts only with you, and you may delegate work to helper agents through Herdr panes, but you remain responsible for the final result.
+
+**Herdr vs Swarm:** Use Herdr panes for interactive agent work (spawn `opencode`, `claude`, etc. in a pane and interact conversationally). Use the Swarm Protocol above for automated subagent delegation via the `Task` tool. Both follow the same agent boundaries and approval gates — see the Swarm Protocol section for the full list.
+
+**Operating principles:**
+
+1. Understand the repository before modifying it. Do not code immediately.
+2. Prefer the smallest correct change; do not force a feature onto a broken foundation.
+3. If a dependency or abstraction is structurally wrong, stop and report it before implementing.
+4. Follow the Swarm Protocol's Verify and Review steps above — never trust helper claims without evidence.
+5. Never create helper agents recursively (max delegation depth: 1).
+6. Do not create multiple agents for trivial tasks. Most tasks need at most Supervisor + 1 reviewer.
+
+**Delegation via Herdr:** use `herdr pane split`, `herdr pane run`, `herdr pane report-agent`, `herdr wait agent-status`, `herdr pane read`. Check exact commands with `herdr --help`. Each helper agent must have one clear goal, explicit file boundaries, and defined deliverables.
+
+**Human approval required before:**
+
+- database schema changes or hard-to-rollback migrations
+- public API changes
+- authentication/permission changes
+- destructive operations or data deletion
+- major architecture changes or new critical dependencies
+- production deployment
+
+**Completion standard:** a task is done only when behavior is verified, tests pass, architecture has not degraded, no unexplained workaround remains, and assumptions/limitations are documented.
 
 <!-- HARNESS:BEGIN -->
 ## Harness

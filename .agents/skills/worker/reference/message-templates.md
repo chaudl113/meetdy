@@ -22,9 +22,20 @@ Templates for Agent Mail messages sent during bead execution.
 
 - <bullet points>
 
+### Proof of Work
+
+- `bun run check-types`: pass
+- `bun run build`: pass
+- `harness-cli story verify <story-id>`: pass (if linked to a story)
+- get_diagnostics: clean
+
 ### Files Modified
 
 - <file list>
+
+### Deviations from Bead Description
+
+- None (expected) — otherwise list and explain
 
 ### Next Bead
 
@@ -34,6 +45,8 @@ Templates for Agent Mail messages sent during bead execution.
 
 - Completed: X/Y beads
 ```
+
+> Do not send this message unless every verification above passed. A COMPLETE without evidence is invalid.
 
 ---
 

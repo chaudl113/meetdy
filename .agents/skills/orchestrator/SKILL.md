@@ -16,12 +16,13 @@ This skill spawns and monitors parallel worker agents that execute beads autonom
 │                              ORCHESTRATOR                                   │
 │                              (This Agent)                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  1. Read execution-plan.md (from planning skill)                            │
-│  2. Initialize Agent Mail                                                   │
-│  3. Spawn worker subagents via Task tool                                    │
-│  4. Monitor progress via Agent Mail                                         │
-│  5. Handle cross-track blockers                                             │
-│  6. Announce completion                                                     │
+│ 1. Read execution-plan.md (from planning skill)                            │
+│ 2. Initialize Agent Mail                                                   │
+│ 3. Create isolated git worktrees per track                                  │
+│ 4. Spawn worker subagents via Task tool (each in its own worktree)         │
+│ 5. Monitor progress via Agent Mail                                         │
+│ 6. Handle cross-track blockers                                             │
+│ 7. Merge/cleanup worktrees, announce completion                            │
 └─────────────────────────────────────────────────────────────────────────────┘
            │
            │ Task tool spawns parallel workers
@@ -30,10 +31,11 @@ This skill spawns and monitors parallel worker agents that execute beads autonom
 │  BlueLake        │  │  GreenCastle     │  │  RedStone        │
 │  Track 1         │  │  Track 2         │  │  Track 3         │
 │  [a → b → c]     │  │  [x → y]         │  │  [m → n → o]     │
+│  /wt/track-1/    │  │  /wt/track-2/    │  │  /wt/track-3/    │
 ├──────────────────┤  ├──────────────────┤  ├──────────────────┤
 │  For each bead:  │  │  For each bead:  │  │  For each bead:  │
-│  • Reserve files │  │  • Reserve files │  │  • Reserve files │
 │  • Do work       │  │  • Do work       │  │  • Do work       │
+│  • Verify        │  │  • Verify        │  │  • Verify        │
 │  • Report mail   │  │  • Report mail   │  │  • Report mail   │
 │  • Next bead     │  │  • Next bead     │  │  • Next bead     │
 └──────────────────┘  └──────────────────┘  └──────────────────┘
@@ -94,7 +96,29 @@ Extract:
 
 ---
 
-## Phase 3: Spawn Worker Subagents
+## Phase 3: Create Isolated Worktrees
+
+Every worker that modifies code gets its own git worktree. Workers never share a working tree — this eliminates file conflicts deterministically, no reservation protocol needed.
+
+### For each track:
+
+```bash
+git worktree add ../wt-<track-id> main
+```
+
+Example for three tracks:
+
+```bash
+git worktree add ../wt-track-1 main   # BlueLake
+git worktree add ../wt-track-2 main   # GreenCastle
+git worktree add ../wt-track-3 main   # RedStone
+```
+
+Each worktree has its own `node_modules/`, build artifacts, and file system — workers cannot collide.
+
+---
+
+## Phase 4: Spawn Worker Subagents
 
 **Spawn all workers in parallel using the Task tool.**
 
@@ -106,6 +130,8 @@ For each track, invoke:
 | ------------- | --------------------------------------------- |
 | `description` | `Worker <AgentName>: Track N - <description>` |
 | `prompt`      | See `reference/worker-template.md`            |
+
+Each worker prompt MUST include the worktree path (`/wt-track-N/`) so the worker operates in its isolated workspace.
 
 ### Example Task prompt for Track 1
 
@@ -119,32 +145,34 @@ You are agent BlueLake working on Track 1 of epic bd-42.
 ## Your Track
 Beads to complete IN ORDER: bd-43, bd-44, bd-45
 File scope: packages/sdk/**
+Worktree path: ../wt-track-1 (isolated — do not touch paths outside)
 
 ## Protocol for EACH bead:
 
 ### Start Bead
 1. mcp__mcp_agent_mail__register_agent with name="BlueLake", task_description="<bead-id>"
 2. mcp__mcp_agent_mail__summarize_thread with thread_id="track:BlueLake:bd-42"
-3. mcp__mcp_agent_mail__file_reservation_paths with paths=["packages/sdk/**"], reason="<bead-id>"
-4. Run: bd update <bead-id> --status in_progress
+3. Run: bd update <bead-id> --status in_progress
 
 ### Work on Bead
 - Use preferred tools from AGENTS.md (gkg for exploration, morph for edits)
 - Check inbox periodically with mcp__mcp_agent_mail__fetch_inbox
 
 ### Complete Bead
-1. Run: bd close <bead-id> --reason "Summary of work"
-2. mcp__mcp_agent_mail__send_message:
+1. Verify: get_diagnostics, bun run check-types, bun run build (+ harness-cli story verify if linked)
+2. If ANY check fails: do NOT close. Fix or report blocker.
+3. Run: bd close <bead-id> --reason "Summary of work"
+4. mcp__mcp_agent_mail__send_message:
    - to: ["GoldFox"]
    - thread_id: "bd-42"
    - subject: "[<bead-id>] COMPLETE"
-   - body_md: "Done: <summary>. Next: <next-bead-id>"
-3. mcp__mcp_agent_mail__send_message (context for next bead):
+   - body_md: Verification results, files changed, deviations (none expected)
+5. mcp__mcp_agent_mail__send_message (context for next bead):
    - to: ["BlueLake"]
    - thread_id: "track:BlueLake:bd-42"
    - subject: "<bead-id> Complete - Context for next"
    - body_md: "## Learnings\n- ...\n## Gotchas\n- ..."
-4. mcp__mcp_agent_mail__release_file_reservations
+   (No file release needed — worktree isolation)
 
 ### Continue to Next Bead
 - Loop back to "Start Bead" with next bead in track
@@ -162,7 +190,7 @@ Return a summary of all work completed.
 
 ---
 
-## Phase 4: Monitor Progress
+## Phase 5: Monitor Progress
 
 While workers execute, monitor via Agent Mail.
 
@@ -195,7 +223,7 @@ bv --robot-triage --graph-root <epic-id> 2>/dev/null | jq '.quick_ref'
 
 ---
 
-## Phase 5: Handle Cross-Track Issues
+## Phase 6: Handle Cross-Track Issues
 
 ### If Worker Reports Blocker
 
@@ -208,22 +236,11 @@ bv --robot-triage --graph-root <epic-id> 2>/dev/null | jq '.quick_ref'
 | `sender_name` | `<OrchestratorName>` |
 | `body_md`     | `Resolution: ...`    |
 
-### If File Conflict
-
-**Tool**: `mcp__mcp_agent_mail__send_message`
-
-| Parameter     | Value                                      |
-| ------------- | ------------------------------------------ |
-| `project_key` | `<path>`                                   |
-| `sender_name` | `<OrchestratorName>`                       |
-| `to`          | `["<HolderAgent>"]`                        |
-| `thread_id`   | `<epic-id>`                                |
-| `subject`     | `File conflict resolution`                 |
-| `body_md`     | `<Worker> needs <files>. Can you release?` |
+_File conflicts cannot happen — each worker has its own worktree._
 
 ---
 
-## Phase 6: Epic Completion
+## Phase 7: Epic Completion & Cleanup
 
 When all workers report track complete:
 
@@ -271,18 +288,29 @@ bv --robot-triage --graph-root <epic-id> 2>/dev/null | jq '.quick_ref.open_count
 bd close <epic-id> --reason "All tracks complete"
 ```
 
+### Cleanup Worktrees
+
+After all tracks complete and verification passes, remove the isolated worktrees:
+
+```bash
+git worktree remove ../wt-track-1
+git worktree remove ../wt-track-2
+git worktree remove ../wt-track-3
+```
+
 ---
 
 ## Quick Reference
 
-| Phase      | Tool / Command                                                               |
-| ---------- | ---------------------------------------------------------------------------- |
-| Read Plan  | `Read` tool → `history/<feature>/execution-plan.md`                          |
-| Initialize | `mcp__mcp_agent_mail__ensure_project`, `mcp__mcp_agent_mail__register_agent` |
-| Spawn      | `Task` tool for each track (parallel)                                        |
-| Monitor    | `mcp__mcp_agent_mail__fetch_inbox`, `mcp__mcp_agent_mail__search_messages`   |
-| Resolve    | `mcp__mcp_agent_mail__reply_message` for blockers                            |
-| Complete   | Verify all done, send summary, `bd close`                                    |
+| Phase         | Tool / Command                                                               |
+| ------------- | ---------------------------------------------------------------------------- |
+| Read Plan     | `Read` tool → `history/<feature>/execution-plan.md`                          |
+| Initialize    | `mcp__mcp_agent_mail__ensure_project`, `mcp__mcp_agent_mail__register_agent` |
+| Worktrees     | `git worktree add ../wt-<track-id> main` (one per track)                     |
+| Spawn         | `Task` tool for each track (parallel, each with worktree path)               |
+| Monitor       | `mcp__mcp_agent_mail__fetch_inbox`, `mcp__mcp_agent_mail__search_messages`   |
+| Resolve       | `mcp__mcp_agent_mail__reply_message` for blockers                            |
+| Complete      | Verify all done, send summary, `bd close`, `git worktree remove`             |
 
 ---
 
