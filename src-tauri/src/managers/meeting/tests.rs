@@ -290,6 +290,25 @@ mod tests {
             Ok(sessions)
         }
 
+        fn delete_sessions(&self, session_ids: &[String]) -> Result<()> {
+            for session_id in session_ids {
+                let session_folder = self.meetings_dir.join(session_id);
+                if session_folder.exists() {
+                    fs::remove_dir_all(&session_folder)?;
+                }
+            }
+            let conn = self.get_connection()?;
+            let tx = conn.unchecked_transaction()?;
+            {
+                let mut stmt = tx.prepare("DELETE FROM meeting_sessions WHERE id = ?1")?;
+                for session_id in session_ids {
+                    stmt.execute(params![session_id])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        }
+
         fn validate_state_transition(
             &self,
             from: &MeetingStatus,
@@ -895,5 +914,168 @@ mod tests {
         let result = validate_import_audio_path(path.to_str().unwrap());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unsupported audio format"));
+    }
+
+    // --- batch delete_sessions tests -----------------------------------------
+
+    #[test]
+    fn test_delete_sessions_removes_multiple() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        let session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
+        let session2 = manager
+            .create_session()
+            .expect("Failed to create session 2");
+        let session3 = manager
+            .create_session()
+            .expect("Failed to create session 3");
+
+        manager
+            .delete_sessions(&[session1.id.clone(), session2.id.clone()])
+            .expect("Failed to delete sessions");
+
+        let remaining = manager.list_sessions().expect("Failed to list sessions");
+        assert_eq!(remaining.len(), 1, "Exactly 1 session should remain");
+        assert_eq!(
+            remaining[0].id, session3.id,
+            "The un-deleted session should remain"
+        );
+
+        assert!(
+            !manager.meetings_dir.join(&session1.id).exists(),
+            "Deleted session 1 folder should not exist"
+        );
+        assert!(
+            !manager.meetings_dir.join(&session2.id).exists(),
+            "Deleted session 2 folder should not exist"
+        );
+        assert!(
+            manager.meetings_dir.join(&session3.id).exists(),
+            "Un-deleted session 3 folder should still exist"
+        );
+    }
+
+    #[test]
+    fn test_delete_sessions_removes_db_rows() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        let session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
+        let session2 = manager
+            .create_session()
+            .expect("Failed to create session 2");
+
+        manager
+            .delete_sessions(&[session1.id.clone(), session2.id.clone()])
+            .expect("Failed to delete sessions");
+
+        assert!(
+            manager
+                .get_session(&session1.id)
+                .expect("Query should succeed")
+                .is_none(),
+            "Session 1 DB row should be gone"
+        );
+        assert!(
+            manager
+                .get_session(&session2.id)
+                .expect("Query should succeed")
+                .is_none(),
+            "Session 2 DB row should be gone"
+        );
+
+        let remaining = manager.list_sessions().expect("Failed to list sessions");
+        assert!(remaining.is_empty(), "No sessions should remain");
+    }
+
+    #[test]
+    fn test_delete_sessions_empty_list_is_noop() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        let _session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
+        let _session2 = manager
+            .create_session()
+            .expect("Failed to create session 2");
+
+        manager
+            .delete_sessions(&[])
+            .expect("Empty delete should not error");
+
+        let remaining = manager.list_sessions().expect("Failed to list sessions");
+        assert_eq!(
+            remaining.len(),
+            2,
+            "Both sessions should still exist after empty delete"
+        );
+    }
+
+    #[test]
+    fn test_delete_sessions_nonexistent_id_is_ok() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        let session = manager.create_session().expect("Failed to create session");
+
+        let result = manager.delete_sessions(&["does-not-exist".to_string()]);
+        assert!(
+            result.is_ok(),
+            "Deleting a non-existent id should return Ok"
+        );
+
+        let remaining = manager.list_sessions().expect("Failed to list sessions");
+        assert_eq!(remaining.len(), 1, "The real session should be untouched");
+        assert_eq!(remaining[0].id, session.id);
+        assert!(
+            manager.meetings_dir.join(&session.id).exists(),
+            "Real session folder should still exist"
+        );
+    }
+
+    #[test]
+    fn test_delete_sessions_partial_mix() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let manager = TestMeetingManager::new(temp_dir.path());
+
+        let session1 = manager
+            .create_session()
+            .expect("Failed to create session 1");
+        let session2 = manager
+            .create_session()
+            .expect("Failed to create session 2");
+        let session3 = manager
+            .create_session()
+            .expect("Failed to create session 3");
+
+        let result = manager.delete_sessions(&[
+            session1.id.clone(),
+            "ghost-id".to_string(),
+            session2.id.clone(),
+        ]);
+        assert!(result.is_ok(), "Partial mix delete should return Ok");
+
+        assert!(
+            !manager.meetings_dir.join(&session1.id).exists(),
+            "Deleted session 1 folder should not exist"
+        );
+        assert!(
+            !manager.meetings_dir.join(&session2.id).exists(),
+            "Deleted session 2 folder should not exist"
+        );
+        assert!(
+            manager.meetings_dir.join(&session3.id).exists(),
+            "Un-deleted session 3 folder should still exist"
+        );
+
+        let remaining = manager.list_sessions().expect("Failed to list sessions");
+        assert_eq!(remaining.len(), 1, "Exactly 1 session should remain");
+        assert_eq!(remaining[0].id, session3.id);
     }
 }
