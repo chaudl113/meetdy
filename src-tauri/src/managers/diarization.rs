@@ -51,6 +51,7 @@ enum DiarizationEngine {
     /// Sortformer v2.1 — preferred when model file is present.
     Sortformer { session: Session },
     /// Pyannote segmentation + 3D-Speaker embedding via sherpa-onnx.
+    #[allow(dead_code)]
     Pyannote {
         segmentation_path: PathBuf,
         embedding_path: PathBuf,

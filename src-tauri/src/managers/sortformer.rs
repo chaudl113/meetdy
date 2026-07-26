@@ -88,7 +88,7 @@ pub fn diarize_audio(samples: &[f32], session: &mut Session) -> Result<Vec<Diari
         }
         let chunk_arr =
             Array3::from_shape_vec([1, MEL_FRAMES_PER_CHUNK, N_MELS], chunk_data)?;
-        let chunk_lengths = ndarray::array![[chunk_mel_len as i64]];
+        let _chunk_lengths = ndarray::array![[chunk_mel_len as i64]];
 
         let spk_len = spkcache.shape()[1] as i64;
         let fifo_len_val = fifo.shape()[1] as i64;
