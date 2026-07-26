@@ -157,6 +157,7 @@ interface MeetingStore {
   refreshStatus: () => Promise<void>;
   fetchSessions: () => Promise<void>;
   clearAllSessions: () => Promise<void>;
+  deleteSessions: (sessionIds: string[]) => Promise<void>;
   clearError: () => void;
 
   loadParticipants: (sessionId: string) => Promise<void>;
@@ -505,6 +506,30 @@ export const useMeetingStore = create<MeetingStore>()(
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : "Failed to clear history";
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    },
+
+    deleteSessions: async (sessionIds: string[]) => {
+      const { setLoading, setError } = get();
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await commands.deleteMeetingSessions(sessionIds);
+        if (result.status === "ok") {
+          set((state) => ({
+            sessions: state.sessions.filter(
+              (s) => !sessionIds.includes(s.id),
+            ),
+          }));
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to delete sessions";
         setError(errorMessage);
       } finally {
         setLoading(false);

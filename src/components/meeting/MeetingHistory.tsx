@@ -73,19 +73,21 @@ const StatusBadge: React.FC<{ status: MeetingSession["status"] }> = ({
 };
 
 /**
- * MeetingHistory - Displays a list of past meeting sessions with click to view details
+ * MeetingHistory - Displays a list of past meeting sessions with checkbox multi-select and batch delete
  */
 export const MeetingHistory: React.FC = () => {
   const { t } = useTranslation();
-  const { sessions, fetchSessions, clearAllSessions, isLoading } = useMeetingStore(
+  const { sessions, fetchSessions, deleteSessions, clearAllSessions, isLoading } = useMeetingStore(
     useShallow((s) => ({
       sessions: s.sessions,
       fetchSessions: s.fetchSessions,
+      deleteSessions: s.deleteSessions,
       clearAllSessions: s.clearAllSessions,
       isLoading: s.isLoading,
     })),
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedSession, setSelectedSession] = useState<MeetingSession | null>(
     null,
   );
@@ -113,6 +115,38 @@ export const MeetingHistory: React.FC = () => {
     if (!confirmed) return;
     setSelectedSession(null);
     await clearAllSessions();
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredSessions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredSessions.map((s) => s.id)));
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const confirmed = window.confirm(
+      t(
+        "meeting.history.deleteSelectedConfirm",
+        "Delete {{count}} selected meeting recordings? This cannot be undone.",
+        { count: selectedIds.size },
+      ),
+    );
+    if (!confirmed) return;
+    const ids = Array.from(selectedIds);
+    setSelectedIds(new Set());
+    await deleteSessions(ids);
   };
 
   const filteredSessions = sessions.filter((session) => {
@@ -161,7 +195,7 @@ export const MeetingHistory: React.FC = () => {
 
   return (
     <>
-      <div className="p-4 border-b border-mid-gray/20">
+      <div className="p-4 border-b border-mid-gray/20 space-y-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-mid-gray" />
@@ -176,16 +210,48 @@ export const MeetingHistory: React.FC = () => {
               className="pl-9 w-full"
             />
           </div>
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={handleBatchDelete}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-500/30 px-3 text-sm font-medium text-red-500 hover:bg-red-500/10"
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("meeting.history.deleteSelected", "Delete ({{count}})", {
+                count: selectedIds.size,
+              })}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleClearAll}
             disabled={isLoading || sessions.length === 0}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-500/30 px-3 text-sm font-medium text-red-500 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-mid-gray/30 px-3 text-sm font-medium text-mid-gray hover:bg-mid-gray/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
             {t("meeting.history.clearAll", "Clear all")}
           </button>
         </div>
+        {filteredSessions.length > 0 && (
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={
+                selectedIds.size === filteredSessions.length &&
+                filteredSessions.length > 0
+              }
+              onChange={toggleSelectAll}
+              className="h-4 w-4 rounded border-mid-gray/60 bg-mid-gray/10 accent-logo-primary"
+            />
+            <span className="text-xs text-mid-gray">
+              {selectedIds.size > 0
+                ? t("meeting.history.nSelected", "{{count}} selected", {
+                    count: selectedIds.size,
+                  })
+                : t("meeting.history.selectAll", "Select all")}
+            </span>
+          </label>
+        )}
       </div>
 
       <div className="divide-y divide-mid-gray/20">
@@ -203,10 +269,27 @@ export const MeetingHistory: React.FC = () => {
           filteredSessions.map((session) => (
             <div
               key={session.id}
-              onClick={() => handleSessionClick(session)}
-              className="flex items-center justify-between px-4 py-3 hover:bg-mid-gray/10 cursor-pointer transition-colors group"
+              className="flex items-center gap-2 px-4 py-3 hover:bg-mid-gray/10 cursor-pointer transition-colors group"
             >
-              <div className="flex-1 min-w-0">
+              <div
+                className="flex items-center justify-center flex-shrink-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSelect(session.id);
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(session.id)}
+                  onChange={() => toggleSelect(session.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-4 w-4 rounded border-mid-gray/60 bg-mid-gray/10 accent-logo-primary"
+                />
+              </div>
+              <div
+                className="flex-1 min-w-0"
+                onClick={() => handleSessionClick(session)}
+              >
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-medium truncate">
                     {session.title}
@@ -229,7 +312,10 @@ export const MeetingHistory: React.FC = () => {
                   </div>
                 )}
               </div>
-              <ChevronRight className="h-4 w-4 text-mid-gray opacity-0 group-hover:opacity-100 transition-opacity" />
+              <ChevronRight
+                className="h-4 w-4 text-mid-gray opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                onClick={() => handleSessionClick(session)}
+              />
             </div>
           ))
         )}

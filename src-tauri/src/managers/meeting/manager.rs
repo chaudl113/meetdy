@@ -708,6 +708,33 @@ impl MeetingSessionManager {
         Ok(())
     }
 
+    /// Deletes multiple meeting sessions by their IDs.
+    pub fn delete_sessions(&self, session_ids: &[String]) -> Result<()> {
+        info!("Deleting {} meeting sessions", session_ids.len());
+
+        for session_id in session_ids {
+            // Delete session folder if it exists
+            let session_folder = self.meetings_dir.join(session_id);
+            if session_folder.exists() {
+                fs::remove_dir_all(&session_folder)?;
+            }
+        }
+
+        // Delete from database in a single transaction
+        let conn = self.get_connection()?;
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare("DELETE FROM meeting_sessions WHERE id = ?1")?;
+            for session_id in session_ids {
+                stmt.execute(params![session_id])?;
+            }
+        }
+        tx.commit()?;
+
+        info!("Deleted {} meeting sessions", session_ids.len());
+        Ok(())
+    }
+
     /// Deletes every meeting session and all managed meeting files.
     pub fn delete_all_sessions(&self) -> Result<()> {
         info!("Deleting all meeting sessions");

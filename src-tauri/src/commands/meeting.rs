@@ -875,6 +875,20 @@ pub fn delete_meeting_session(app: AppHandle, session_id: String) -> Result<(), 
 
 #[tauri::command]
 #[specta::specta]
+pub fn delete_meeting_sessions(app: AppHandle, session_ids: Vec<String>) -> Result<(), String> {
+    info!(
+        "delete_meeting_sessions command called for {} sessions",
+        session_ids.len()
+    );
+
+    let manager = app.state::<Arc<MeetingSessionManager>>();
+    manager
+        .delete_sessions(&session_ids)
+        .map_err(|e| format!("Failed to delete meeting sessions: {}", e))
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn clear_all_meeting_sessions(app: AppHandle) -> Result<(), String> {
     info!("clear_all_meeting_sessions command called");
 

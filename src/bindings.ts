@@ -880,6 +880,14 @@ async deleteMeetingSession(sessionId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async deleteMeetingSessions(sessionIds: string[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_meeting_sessions", { sessionIds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async clearAllMeetingSessions() : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_all_meeting_sessions") };
